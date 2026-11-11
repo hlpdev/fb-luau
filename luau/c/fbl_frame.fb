@@ -15,6 +15,12 @@ Package Const FBL_TYPE_BUFFER: Int32 = 10
 Package Const FBL_TYPE_LIGHTUSERDATA: Int32 = 11
 Package Const FBL_TYPE_OTHER: Int32 = 12
 
+@CLayout Package Struct fbl_vector_t
+    Public Field x: Float32
+    Public Field y: Float32
+    Public Field z: Float32
+End Struct
+
 Package Extern "C" Lib "luau_native"
     Function fbl_frame_open(state: UInt64): Int32
     Function fbl_frame_close(state: UInt64, frame: Int32): Bool
@@ -27,12 +33,15 @@ Package Extern "C" Lib "luau_native"
     Function fbl_frame_push_boolean(state: UInt64, frame: Int32, value: Bool): Int32
     Function fbl_frame_push_number(state: UInt64, frame: Int32, value: Float64): Int32
     Function fbl_frame_push_integer(state: UInt64, frame: Int32, value: Int64): Int32
+    Function fbl_frame_push_vector(state: UInt64, frame: Int32, value: Ptr<fbl_vector_t>): Int32
     Function fbl_frame_push_string(state: UInt64, frame: Int32, bytes: Ptr<UInt8>,
                                    length: Int64): Int32
     Function fbl_frame_push_copy(state: UInt64, frame: Int32, slot: Int32): Int32
     Function fbl_frame_boolean(state: UInt64, frame: Int32, slot: Int32, value: Ptr<Bool>): Bool
     Function fbl_frame_number(state: UInt64, frame: Int32, slot: Int32, value: Ptr<Float64>): Bool
     Function fbl_frame_integer(state: UInt64, frame: Int32, slot: Int32, value: Ptr<Int64>): Bool
+    Function fbl_frame_vector(state: UInt64, frame: Int32, slot: Int32,
+                              value: Ptr<fbl_vector_t>): Bool
     Function fbl_frame_string(state: UInt64, frame: Int32, slot: Int32,
                               length: Ptr<Int64>): Ptr<UInt8>
     Function fbl_frame_get_global(state: UInt64, frame: Int32, name: Ptr<UInt8>,

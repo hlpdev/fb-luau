@@ -3,6 +3,7 @@
 
 // The luau package's whole C API, each area's header.
 
+#include "buffer/fbl_buffer.h"
 #include "call/fbl_call.h"
 #include "callback/fbl_callback.h"
 #include "core/fbl_core.h"

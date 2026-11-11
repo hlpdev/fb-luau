@@ -28,6 +28,14 @@ extern "C" {
 // One of Luau's own that's none of these, like a user-defined class's.
 #define FBL_TYPE_OTHER 12
 
+// A vector, Luau's 3 floats.
+// NOLINTNEXTLINE(modernize-use-using): C has no `using`.
+typedef struct fbl_vector_t {
+    float x;
+    float y;
+    float z;
+} fbl_vector_t;
+
 // Opens a frame on a State, after its others. Its number, or -1.
 FBL_API int32_t fbl_frame_open(uint64_t state);
 
@@ -54,6 +62,7 @@ FBL_API int32_t fbl_frame_push_nil(uint64_t state, int32_t frame);
 FBL_API int32_t fbl_frame_push_boolean(uint64_t state, int32_t frame, bool value);
 FBL_API int32_t fbl_frame_push_number(uint64_t state, int32_t frame, double value);
 FBL_API int32_t fbl_frame_push_integer(uint64_t state, int32_t frame, int64_t value);
+FBL_API int32_t fbl_frame_push_vector(uint64_t state, int32_t frame, const fbl_vector_t* value);
 FBL_API int32_t fbl_frame_push_string(uint64_t state, int32_t frame, const uint8_t* bytes,
                                       int64_t length);
 
@@ -64,6 +73,7 @@ FBL_API int32_t fbl_frame_push_copy(uint64_t state, int32_t frame, int32_t slot)
 FBL_API bool fbl_frame_boolean(uint64_t state, int32_t frame, int32_t slot, bool* value);
 FBL_API bool fbl_frame_number(uint64_t state, int32_t frame, int32_t slot, double* value);
 FBL_API bool fbl_frame_integer(uint64_t state, int32_t frame, int32_t slot, int64_t* value);
+FBL_API bool fbl_frame_vector(uint64_t state, int32_t frame, int32_t slot, fbl_vector_t* value);
 
 // A string slot's bytes, `length` of them, which stay while the slot does; NULL for a slot that
 // isn't a string.

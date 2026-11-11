@@ -1,0 +1,56 @@
+Import std.math
+Import std.test
+Import luau
+
+@Test
+Function AVectorCrossesBothWays() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("up", Vec3(0, 1, 0))
+    Expect(Try lua.Evaluate<String>("return typeof(up)") == "vector")
+    Expect(Try lua.Evaluate<Float64>("return vector.magnitude(up * 3)") == 3.0)
+    Expect(Try lua.Evaluate<Vec3>("return vector.create(1.5, -2, 4)") == Vec3(1.5, -2, 4))
+    Expect(Try lua.Evaluate<Vec3>("return vector.cross(vector.create(1, 0, 0), up)") ==
+           Vec3(0, 0, 1))
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Vec3>(r"return { 1, 2, 3 }"))?.Message ==
+           "expected Vec3, got table")
+    Try lua.SetFunction("lengthOf", Function(v: Vec3) => Sqrt(Dot(v, v)))
+    Expect(Try lua.Evaluate<Float32>("return lengthOf(vector.create(3, 4, 0))") == 5)
+End Function
+
+@Test
+Function ABufferIsReadAndWrittenByBothSides() Throws LuauError
+    Local lua = LuauState()
+    Local data = Try lua.NewBuffer(32)
+    Expect(data.Count == 32)
+    data.WriteInt8(0, -2)
+    data.WriteUInt16(1, 65535)
+    data.WriteInt32(3, -100000)
+    data.WriteFloat64(8, 2.25)
+    data.WriteInt64(16, -9007199254740993)
+    data.WriteFloat32(24, -0.5)
+    Try lua.Set("data", data)
+    Expect(Try lua.Evaluate<Int>("return buffer.readi8(data, 0)") == -2)
+    Expect(Try lua.Evaluate<Int>("return buffer.readu16(data, 1)") == 65535)
+    Expect(Try lua.Evaluate<Int>("return buffer.readi32(data, 3)") == -100000)
+    Expect(Try lua.Evaluate<Float64>("return buffer.readf64(data, 8)") == 2.25)
+    Expect(Try lua.Evaluate<Float64>("return buffer.readf32(data, 24)") == -0.5)
+    Try lua.Run("buffer.writeu32(data, 28, 4000000000) buffer.writei16(data, 4, -3)")
+    Expect(data.ReadUInt32(28) == 4000000000)
+    Expect(data.ReadInt16(4) == -3)
+    Expect(data.ReadInt64(16) == -9007199254740993)
+    Expect(data.ReadInt8(0) == -2 && data.ReadUInt8(0) == 254)
+    Expect(data.ToArray().Count == 32)
+End Function
+
+@Test
+Function ABufferOfBytesAndBackIsTheSame() Throws LuauError
+    Local lua = LuauState()
+    Local bytes: UInt8[] = [1, 2, 3, 250]
+    Local data = Try lua.NewBuffer(bytes)
+    Expect(data.ToArray() == bytes)
+    Expect(data.Read(1, 2) == [2 As UInt8, 3])
+    Expect(data.Read(4, 0).Count == 0)
+    Local made = Try lua.Evaluate<LuauBuffer>("return buffer.fromstring('hey')")
+    Expect(made.ToArray() == [104 As UInt8, 101, 121])
+    Expect((Try lua.NewBuffer(0)).Count == 0)
+End Function

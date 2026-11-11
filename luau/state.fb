@@ -4,6 +4,8 @@
 Import std.collections
 Import std.core
 
+Import "./buffers"
+Import "./c/fbl_buffer"
 Import "./c/fbl_call"
 Import "./c/fbl_callback"
 Import "./c/fbl_core"
@@ -300,6 +302,35 @@ Public Class LuauState
             slots.Truncate(1)
         End For
         Return Try LuauTable.FromLuau(slots, 0)
+    End Method
+
+    /// A new buffer of `size` bytes, all 0.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    ///
+    /// # Panics
+    ///
+    /// For a size below 0 or past 1 GiB, Luau's largest.
+    @PanicsAtCaller
+    Public Method NewBuffer(size: Int64): LuauBuffer Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(fbl_buffer_new(Handle, frame, size))
+        Return Try LuauBuffer.FromLuau(LuauSlots(Self, frame), 0)
+    End Method
+
+    /// A new buffer of `bytes`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method NewBuffer(bytes: UInt8[]): LuauBuffer Throws LuauError
+        Local made = Try NewBuffer(bytes.Count)
+        made.Write(0, bytes)
+        Return made
     End Method
 
     /// Its handle, panicking at the caller once it's closed.

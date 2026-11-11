@@ -225,6 +225,24 @@ int32_t fbl_frame_push_integer(uint64_t state, int32_t frame, int64_t value) try
     return fbl::escaped();
 }
 
+int32_t fbl_frame_push_vector(uint64_t state, int32_t frame, const fbl_vector_t* value) try {
+    const found_t found = find(state, frame);
+    if (!found) {
+        return FBL_MISUSE;
+    }
+    if (value == nullptr) {
+        return fbl::misuse("a vector needs its value");
+    }
+    const int32_t status = room(found);
+    if (status == FBL_OK) {
+        // A vector is a value, as a number is, which needs no memory of the collector's.
+        lua_pushvector(found.frame->thread, value->x, value->y, value->z);
+    }
+    return status;
+} catch (...) {
+    return fbl::escaped();
+}
+
 int32_t fbl_frame_push_string(uint64_t state, int32_t frame, const uint8_t* bytes,
                               int64_t length) try {
     const found_t found = find(state, frame);
@@ -300,6 +318,25 @@ bool fbl_frame_integer(uint64_t state, int32_t frame, int32_t slot, int64_t* val
         return fbl::fail(fbl::formatted("slot {} isn't an integer", slot));
     }
     *value = lua_tointeger64(found.frame->thread, index, nullptr);
+    return true;
+} catch (...) {
+    fbl::escaped();
+    return false;
+}
+
+bool fbl_frame_vector(uint64_t state, int32_t frame, int32_t slot, fbl_vector_t* value) try {
+    const found_t found = find(state, frame);
+    const int index = found ? fbl::slot_index(*found.frame, slot) : 0;
+    if (index == 0 || value == nullptr) {
+        return false;
+    }
+    const float* vector = lua_tovector(found.frame->thread, index);
+    if (vector == nullptr) {
+        return fbl::fail(fbl::formatted("slot {} isn't a vector", slot));
+    }
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): Luau's 3 floats.
+    *value = { .x = vector[0], .y = vector[1], .z = vector[2] };
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return true;
 } catch (...) {
     fbl::escaped();

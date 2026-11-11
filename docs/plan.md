@@ -377,9 +377,10 @@ Local bytes = data.ToArray()
 
 - Luau's vector is 3 Float32s, which is std.math's `Vec3`; the package builds Luau with its
   default vector, which native code needs.
-- A `LuauBuffer` is a handle to a Luau buffer, with its `Count`, bounds-checked reads and writes
-  of each number type, `ToArray()`, `CopyFrom(bytes, at)`, and `CopyTo(Buffer<UInt8>)`. Luau's
-  memory doesn't move, but it's the collector's, so the package gives no Pointer to it.
+- A `LuauBuffer` is a handle to a Luau buffer, with its `Count`, `Read(offset, count)` and
+  `Write(offset, bytes)`, `ReadInt8` to `ReadFloat64` and their `Write`s, little-endian as Luau's
+  buffer library has them, each within its bounds or a panic at the caller, and `ToArray()`.
+  Luau's memory doesn't move, but it's the collector's, so the package gives no Pointer to it.
 
 ### Coroutines and the scheduler
 
@@ -889,8 +890,9 @@ is freed by Close.
 
 ### L5: vectors and buffers
 
-- `Vec3` as Luau's vector, and the `vector` library; `LuauBuffer` and its reads, writes, and
-  copies.
+- `Vec3` as Luau's vector, and the `vector` library; `LuauBuffer` and its reads and writes of
+  bytes and of each number type, little-endian as Luau's buffer library has them, each within its
+  bounds or a panic; `lua.NewBuffer(size)` and `NewBuffer(bytes)`.
 
 Done means: both cross both ways, with bounds checked on every access.
 

@@ -1,0 +1,276 @@
+//! Luau's vectors, which are std.math's Vec3, and its buffers, as handles the program reads and
+//! writes.
+
+Import std.core
+Import std.ffi
+Import std.math
+Import "./c/fbl_buffer"
+Import "./c/fbl_frame"
+Import "./c/fbl_ref"
+Import "./errors"
+Import "./library"
+Import "./shim"
+Import "./state"
+Import "./values"
+
+/// A Vec3, which is Luau's vector, 3 Float32s, as `vector.create(x, y, z)` makes one.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// # Import std.math
+/// Local lua = LuauState()
+/// Try lua.Set("up", Vec3(0, 1, 0))
+/// Expect(Try lua.Evaluate<Vec3>("return up * 2 + vector.create(1, 0, 0)") == Vec3(1, 2, 0))
+/// ```
+Extend Vec3 Implements LuauType
+    /// Gives it to Luau as a vector.
+    Public Static Method ToLuau(slots: LuauSlots, value: Vec3) Throws LuauError
+        Local given = fbl_vector_t(value.x, value.y, value.z)
+        Local status: Int32
+        Unsafe
+            status = fbl_frame_push_vector(slots.Owner.Live(), slots.Frame, AddressOf(given))
+        End Unsafe
+        Try slots.Owner.Check(status)
+    End Method
+
+    /// A vector slot's value.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Vec3 Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_VECTOR Then Throw slots.Wrong("Vec3", index)
+        Local read = fbl_vector_t(0, 0, 0)
+        Unsafe
+            fbl_frame_vector(slots.Owner.Handle, slots.Frame, index, AddressOf(read))
+        End Unsafe
+        Return Vec3(read.x, read.y, read.z)
+    End Method
+End Extend
+
+/// A Luau buffer the program holds: bytes a script reads and writes with the `buffer` library,
+/// which the program reads and writes too, each read and write within its bounds. It keeps its
+/// buffer alive while it's held, and its State weakly, as every handle does.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Local data = Try lua.NewBuffer(8)
+/// data.WriteUInt32(0, 513)
+/// Try lua.Set("data", data)
+/// Expect(Try lua.Evaluate<Int>("return buffer.readu16(data, 0)") == 513)
+/// Try lua.Run("buffer.writef32(data, 4, 1.5)")
+/// Expect(data.ReadFloat32(4) == 1.5)
+/// ```
+Public Class LuauBuffer Implements LuauType
+    // Its State, held weakly.
+    ReadOnly Field owner: Weak<LuauState>
+    /// The State's reference to it.
+    Package ReadOnly Field Ref: Int32
+
+    Package New(owner: LuauState, ref: Int32)
+        Self.owner = owner
+        Ref = ref
+    End New
+
+    Method Destroy()
+        Local held: LuauState? = owner
+        If held != Null && held.IsOpen Then fbl_ref_free(held.Handle, Ref)
+    End Method
+
+    /// Its State, panicking at the caller once it's gone.
+    @PanicsAtCaller
+    Package Property Owner: LuauState
+        Get
+            Local held: LuauState? = owner
+            If held == Null Then Panic("the Luau State is closed")
+            Return held
+        End Get
+    End Property
+
+    /// Gives it to Luau: the buffer itself, which has to be of the State it's given to.
+    @PanicsAtCaller
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauBuffer) Throws LuauError
+        If !RefEquals(value.Owner, slots.Owner) Then Panic("a LuauBuffer of another Luau State")
+        Try slots.PushRef(value.Ref)
+    End Method
+
+    /// A handle of a buffer slot's buffer.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauBuffer Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_BUFFER Then Throw slots.Wrong("LuauBuffer", index)
+        Return LuauBuffer(slots.Owner, Try slots.RefAt(index))
+    End Method
+
+    /// How many bytes it has.
+    @PanicsAtCaller
+    Public Property Count: Int64
+        Get
+            Local state = Owner
+            Local frame = state.Opened()
+            Defer state.Closed(frame)
+            Try? LuauSlots(state, frame).PushRef(Ref)
+            Local length = fbl_buffer_length(state.Handle, frame, 0)
+            If length < 0 Then Panic(LastError())
+            Return length
+        End Get
+    End Property
+
+    /// `count` of its bytes from `offset`, in a new array.
+    ///
+    /// # Panics
+    ///
+    /// For bytes that aren't all within it.
+    @PanicsAtCaller
+    Public Method Read(offset: Int64, count: Int64): UInt8[]
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try? LuauSlots(state, frame).PushRef(Ref)
+        If count < 0 Then Panic("{count} bytes aren't any")
+        Local bytes = Buffer<UInt8>(Max(count, 1))
+        Local read: Bool
+        Unsafe
+            read = fbl_buffer_read(state.Handle, frame, 0, offset, bytes.Pointer(), count)
+        End Unsafe
+        If !read Then Panic(LastError())
+        Return bytes.Slice(0, count).ToArray()
+    End Method
+
+    /// Writes `bytes` into it at `offset`.
+    ///
+    /// # Panics
+    ///
+    /// For bytes that wouldn't all be within it.
+    @PanicsAtCaller
+    Public Method Write(offset: Int64, bytes: UInt8[])
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try? LuauSlots(state, frame).PushRef(Ref)
+        Local kept = bytes
+        Local written: Bool
+        Unsafe
+            written = fbl_buffer_write(state.Handle, frame, 0, offset, PointerOf(ByRef kept),
+                                       kept.Count)
+        End Unsafe
+        If !written Then Panic(LastError())
+    End Method
+
+    /// All of its bytes, in a new array.
+    @PanicsAtCaller
+    Public Method ToArray(): UInt8[] => Read(0, Count)
+
+    /// The little-endian unsigned integer of `size` bytes at `offset`.
+    @PanicsAtCaller
+    Method Unsigned(offset: Int64, size: Int64): UInt64
+        Local bytes = Read(offset, size)
+        Local value: UInt64 = 0
+        For index = 0 Until size
+            value = value | ((bytes[index] As UInt64) << (8 * index))
+        End For
+        Return value
+    End Method
+
+    /// Writes `value`'s low `size` bytes, little-endian, at `offset`.
+    @PanicsAtCaller
+    Method WriteUnsigned(offset: Int64, size: Int64, value: UInt64)
+        Local bytes: UInt8[] = []
+        Local rest = value
+        For index = 0 Until size
+            bytes.Add((rest & 0xFF) As UInt8)
+            rest = rest >> 8
+        End For
+        Write(offset, bytes)
+    End Method
+
+    /// The byte at `offset`, as buffer.readu8 reads it.
+    @PanicsAtCaller
+    Public Method ReadUInt8(offset: Int64): UInt8 => Unsigned(offset, 1) As UInt8
+
+    /// The byte at `offset` as a signed one, as buffer.readi8 reads it.
+    @PanicsAtCaller
+    Public Method ReadInt8(offset: Int64): Int8 => Unsigned(offset, 1) As Int8
+
+    /// The 2 bytes at `offset`, little-endian, as buffer.readu16 reads them.
+    @PanicsAtCaller
+    Public Method ReadUInt16(offset: Int64): UInt16 => Unsigned(offset, 2) As UInt16
+
+    /// The 2 bytes at `offset`, little-endian and signed, as buffer.readi16 reads them.
+    @PanicsAtCaller
+    Public Method ReadInt16(offset: Int64): Int16 => Unsigned(offset, 2) As Int16
+
+    /// The 4 bytes at `offset`, little-endian, as buffer.readu32 reads them.
+    @PanicsAtCaller
+    Public Method ReadUInt32(offset: Int64): UInt32 => Unsigned(offset, 4) As UInt32
+
+    /// The 4 bytes at `offset`, little-endian and signed, as buffer.readi32 reads them.
+    @PanicsAtCaller
+    Public Method ReadInt32(offset: Int64): Int32 => Unsigned(offset, 4) As Int32
+
+    /// The 8 bytes at `offset`, little-endian and signed.
+    @PanicsAtCaller
+    Public Method ReadInt64(offset: Int64): Int64 => Unsigned(offset, 8) As Int64
+
+    /// The 4 bytes at `offset`, a little-endian Float32, as buffer.readf32 reads them.
+    @PanicsAtCaller
+    Public Method ReadFloat32(offset: Int64): Float32 => Float.FromBits(Unsigned(offset,
+                                                                                 4) As UInt32)
+
+    /// The 8 bytes at `offset`, a little-endian Float64, as buffer.readf64 reads them.
+    @PanicsAtCaller
+    Public Method ReadFloat64(offset: Int64): Float64 => Double.FromBits(Unsigned(offset, 8))
+
+    /// Writes a byte at `offset`.
+    @PanicsAtCaller
+    Public Method WriteUInt8(offset: Int64, value: UInt8)
+        WriteUnsigned(offset, 1, value)
+    End Method
+
+    /// Writes a signed byte at `offset`.
+    @PanicsAtCaller
+    Public Method WriteInt8(offset: Int64, value: Int8)
+        WriteUnsigned(offset, 1, value As UInt64)
+    End Method
+
+    /// Writes 2 bytes at `offset`, little-endian.
+    @PanicsAtCaller
+    Public Method WriteUInt16(offset: Int64, value: UInt16)
+        WriteUnsigned(offset, 2, value)
+    End Method
+
+    /// Writes 2 bytes at `offset`, little-endian and signed.
+    @PanicsAtCaller
+    Public Method WriteInt16(offset: Int64, value: Int16)
+        WriteUnsigned(offset, 2, value As UInt64)
+    End Method
+
+    /// Writes 4 bytes at `offset`, little-endian.
+    @PanicsAtCaller
+    Public Method WriteUInt32(offset: Int64, value: UInt32)
+        WriteUnsigned(offset, 4, value)
+    End Method
+
+    /// Writes 4 bytes at `offset`, little-endian and signed.
+    @PanicsAtCaller
+    Public Method WriteInt32(offset: Int64, value: Int32)
+        WriteUnsigned(offset, 4, value As UInt64)
+    End Method
+
+    /// Writes 8 bytes at `offset`, little-endian and signed.
+    @PanicsAtCaller
+    Public Method WriteInt64(offset: Int64, value: Int64)
+        WriteUnsigned(offset, 8, value As UInt64)
+    End Method
+
+    /// Writes a Float32's 4 bytes at `offset`, little-endian.
+    @PanicsAtCaller
+    Public Method WriteFloat32(offset: Int64, value: Float32)
+        WriteUnsigned(offset, 4, value.ToBits())
+    End Method
+
+    /// Writes a Float64's 8 bytes at `offset`, little-endian.
+    @PanicsAtCaller
+    Public Method WriteFloat64(offset: Int64, value: Float64)
+        WriteUnsigned(offset, 8, value.ToBits())
+    End Method
+End Class

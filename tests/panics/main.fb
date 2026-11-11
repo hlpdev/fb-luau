@@ -28,6 +28,11 @@ Function Run(name: String) Throws LuauError
         Case "unregistered"
             Local lua = LuauState()
             Try lua.Set("door", Door())
+        // A read past a buffer's end.
+        Case "buffer-bounds"
+            Local lua = LuauState()
+            Local data = Try lua.NewBuffer(4)
+            data.ReadUInt32(1)
         // A memory limit below 0.
         Case "negative-limit"
             Local options = LuauOptions()
