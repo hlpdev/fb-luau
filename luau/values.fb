@@ -3,11 +3,13 @@
 
 Import std.ffi
 Import std.core
+Import "./c/fbl_call"
 Import "./c/fbl_callback"
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_ref"
 Import "./errors"
+Import "./functions"
 Import "./library"
 Import "./shim"
 Import "./state"
@@ -57,6 +59,22 @@ Public Struct LuauSlots
     @PanicsAtCaller
     Package Method Truncate(count: Int32)
         If !fbl_frame_truncate(Owner.Live(), Frame, count) Then Panic(LastError())
+    End Method
+
+    /// Takes slot `index` out, the slots after it each one lower.
+    @PanicsAtCaller
+    Package Method Remove(index: Int32)
+        If !fbl_frame_remove(Owner.Live(), Frame, index) Then Panic(LastError())
+    End Method
+
+    /// Calls `function` with the frame's values as its arguments, and leaves its results in their
+    /// place: FBL_OK.
+    @PanicsAtCaller
+    Package Method CalledWith(function: LuauFunction): Int32 Throws LuauError
+        Try LuauFunction.ToLuau(Self, function)
+        If !fbl_frame_insert(Owner.Live(), Frame, 0) Then Panic(LastError())
+        Try Owner.Check(fbl_call_function(Owner.Handle, Frame, 0, -1))
+        Return FBL_OK
     End Method
 
     /// Adds the value of a reference the State has to the frame.

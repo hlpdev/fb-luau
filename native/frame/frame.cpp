@@ -105,6 +105,32 @@ bool fbl_frame_truncate(uint64_t state, int32_t frame, int32_t count) try {
     return false;
 }
 
+bool fbl_frame_insert(uint64_t state, int32_t frame, int32_t slot) try {
+    const found_t found = find(state, frame);
+    const int index = found ? fbl::slot_index(*found.frame, slot) : 0;
+    if (index == 0) {
+        return false;
+    }
+    lua_insert(found.frame->thread, index);
+    return true;
+} catch (...) {
+    fbl::escaped();
+    return false;
+}
+
+bool fbl_frame_remove(uint64_t state, int32_t frame, int32_t slot) try {
+    const found_t found = find(state, frame);
+    const int index = found ? fbl::slot_index(*found.frame, slot) : 0;
+    if (index == 0) {
+        return false;
+    }
+    lua_remove(found.frame->thread, index);
+    return true;
+} catch (...) {
+    fbl::escaped();
+    return false;
+}
+
 int32_t fbl_frame_type(uint64_t state, int32_t frame, int32_t slot) try {
     const found_t found = find(state, frame);
     const int index = found ? fbl::slot_index(*found.frame, slot) : 0;

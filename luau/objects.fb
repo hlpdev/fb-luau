@@ -1,0 +1,346 @@
+//! The program's objects in Luau: a Class that implements LuauObject crosses as a userdata of
+//! the object itself, whose members a script reaches as its type's registration exposes them.
+
+Import std.collections
+Import std.core
+Import "./c/fbl_udata"
+Import "./errors"
+Import "./functions"
+Import "./state"
+Import "./values"
+
+/// Marks a Method that gives a value as one a script can call on its object, as
+/// `object:Name(...)` or `object.Name(object, ...)`, by its own name or `Name`. A member that isn't
+/// marked is one no script can reach.
+Public Attribute LuauExpose(Name: String = "")
+
+/// Marks a Method that gives nothing as one a script can call, as [LuauExpose] marks one that gives
+/// a value. The two are apart because FutureBlitz's reflection can't yet tell a Method that gives
+/// nothing from one that gives a value in one loop.
+Public Attribute LuauAction(Name: String = "")
+
+/// Marks a Method that takes nothing and gives a value as what a script reads as a field of its
+/// object, `object.Name`, by the Method's name or `Name`.
+Public Attribute LuauGet(Name: String = "")
+
+/// Marks a Method that takes one value as what a script's `object.Name = value` calls, by the
+/// Method's name or `Name`.
+Public Attribute LuauSet(Name: String = "")
+
+/// A metamethod a registered type can have, for [LuauTypeBuilder.AddOperator].
+Public Enum LuauOperator
+    /// `a + b`, __add.
+    ADD
+    /// `a - b`, __sub.
+    SUB
+    /// `a * b`, __mul.
+    MUL
+    /// `a / b`, __div.
+    DIV
+    /// `a // b`, __idiv.
+    IDIV
+    /// `a % b`, __mod.
+    MOD
+    /// `a ^ b`, __pow.
+    POW
+    /// `-a`, __unm.
+    UNM
+    /// `a .. b`, __concat.
+    CONCAT
+    /// `#a`, __len.
+    LEN
+    /// `a == b`, __eq, which Luau calls only for two userdata.
+    EQ
+    /// `a < b`, __lt.
+    LT
+    /// `a <= b`, __le.
+    LE
+    /// `a(...)`, __call.
+    CALL
+    /// tostring(a), __tostring.
+    TOSTRING
+End Enum
+
+/// A Class whose objects cross as themselves, as userdata that hold them: what a script holds is
+/// the object, not a copy, and the object lives while either the program or Luau has it. Its
+/// type is registered first, with `LuauState.Register`, which says what a script reaches of it.
+/// An object reads back as the type it crossed as.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Class Door Implements LuauObject
+///     Field open: Bool = False
+///     Field secret: Int = 42
+///
+///     @LuauAction Method Open()
+///         open = True
+///     End Method
+///
+///     @LuauGet("IsOpen") Method Opened(): Bool => open
+/// End Class
+///
+/// Local lua = LuauState()
+/// Try lua.Register<Door>()
+/// Local door = Door()
+/// Try lua.Set("door", door)
+/// Try lua.Run("door:Open()")
+/// Expect(door.open)
+/// Expect(Try lua.Evaluate<Bool>("return door.IsOpen"))
+/// Expect(ExpectThrows<LuauError>(lua.Run("return door.secret")) != Null)
+/// ```
+Public Interface LuauObject Extends LuauType, Hashable
+    /// Gives it to Luau as its userdata, the one Luau has for it, if it has it.
+    Static Method ToLuau(slots: LuauSlots, value: Self) Throws LuauError
+        Try slots.Owner.PushObject(slots, value)
+    End Method
+
+    /// The object a userdata slot holds, as this type.
+    Static Method FromLuau(slots: LuauSlots, index: Int32): Self Throws LuauError
+        Return Try slots.Owner.ObjectAt<Self>(slots, index)
+    End Method
+End Interface
+
+/// What a State keeps of an object Luau has, whatever its type.
+Package Interface LuauKept
+End Interface
+
+/// An object of type T, as its State keeps it, which reads back as a T: an Interface can't say
+/// that what implements it is a Class, as an object needs to be kept as one, so it's kept in this.
+Package Class LuauBox<T> Implements LuauKept
+    /// The object.
+    Package ReadOnly Field Value: T
+
+    Package New(value: T)
+        Value = value
+    End New
+End Class
+
+/// A type registered in a State, which says what a script reaches of its objects: what
+/// reflection exposes, the Methods marked [LuauExpose], [LuauGet], and [LuauSet], and what this
+/// adds by hand.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Class Money Implements LuauObject
+///     Field Cents: Int
+///     New(cents: Int)
+///         Cents = cents
+///     End New
+/// End Class
+///
+/// Local lua = LuauState()
+/// Local money = Try lua.Register<Money>()
+/// Try money.AddOperator(LuauOperator.ADD,
+///                       Try lua.Wrap(Function(a: Money, b: Money) => Money(a.Cents + b.Cents)))
+/// Try money.AddGetter("cents", Try lua.Wrap(Function(m: Money) => m.Cents))
+/// Try lua.Set("a", Money(150))
+/// Try lua.Set("b", Money(250))
+/// Expect(Try lua.Evaluate<Int>("return (a + b).cents") == 400)
+/// ```
+Public Class LuauTypeBuilder<T: LuauObject>
+    // Its State, held weakly, as a handle holds it.
+    ReadOnly Field owner: Weak<LuauState>
+    /// Its number in its State.
+    Package ReadOnly Field Number: Int32
+    /// Its name, as typeof() gives it.
+    Package ReadOnly Field Name: String
+    /// What a script reads, calls, and sets, by name.
+    Package Field Getters: Map<String, Func(LuauSlots): Int32>
+    Package Field Setters: Map<String, Func(LuauSlots): Int32>
+    Package Field Methods: Map<String, Func(LuauSlots): Int32>
+    /// Each Method as a Luau function, for `object.Name(object, ...)`, and what's added by hand.
+    Package Field Functions: Map<String, LuauFunction>
+    Package Field AddedGetters: Map<String, LuauFunction>
+    Package Field AddedSetters: Map<String, LuauFunction>
+    /// The number of each object Luau has, which its userdata holds.
+    Package Field Ids: Map<T, Int64>
+    /// The metamethods reflection gives it before its metatable is made, which then has them.
+    Package Field Pending: (LuauOperator, LuauFunction)[] = []
+
+    Package New(owner: LuauState, number: Int32, name: String)
+        Self.owner = owner
+        Number = number
+        Name = name
+        Getters = {}
+        Setters = {}
+        Methods = {}
+        Functions = {}
+        AddedGetters = {}
+        AddedSetters = {}
+        Ids = {}
+    End New
+
+    /// Its State, panicking at the caller once it's gone.
+    @PanicsAtCaller
+    Package Property Owner: LuauState
+        Get
+            Local held: LuauState? = owner
+            If held == Null Then Panic("the Luau State is closed")
+            Return held
+        End Get
+    End Property
+
+    /// Adds a Method a script calls as `object:name(...)`: `function`, given the object first.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method AddMethod(name: String,
+                            function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        Functions[name] = function
+        Return Self
+    End Method
+
+    /// Adds a field a script reads as `object.name`: what `function` gives, given the object.
+    @PanicsAtCaller
+    Public Method AddGetter(name: String,
+                            function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        AddedGetters[name] = function
+        Return Self
+    End Method
+
+    /// Adds a field a script sets as `object.name = value`: `function` is given the object and
+    /// the value.
+    @PanicsAtCaller
+    Public Method AddSetter(name: String,
+                            function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        AddedSetters[name] = function
+        Return Self
+    End Method
+
+    /// Gives its objects a metamethod: `function` is what Luau calls for `operator`, with the
+    /// operands as Luau gives them.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method AddOperator(operator: LuauOperator,
+                              function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try LuauFunction.ToLuau(LuauSlots(state, frame), function)
+        Try state.Check(fbl_udata_type_set(state.Handle, frame, Number, MetamethodOf(operator), 0))
+        Return Self
+    End Method
+
+    /// Lets go of object `id`, which Luau has collected, unless it has a newer one.
+    Package Method Released(id: Int64)
+        Local state: LuauState? = owner
+        If state == Null Then Return
+        Local kept = state.Objects.Get(id)
+        If kept == Null Then Return
+        Local box = kept As? LuauBox<T>
+        If box != Null && Ids.Get(box.Value) == id Then Ids.Remove(box.Value)
+    End Method
+
+    /// What a script's `object.key` reads: a field, a Method, or an error saying there's none.
+    Package Method Indexed(slots: LuauSlots): Int32
+        Try
+            Local key = Try slots.Argument<String>(1, "__index")
+            Local getter = Getters.Get(key)
+            If getter != Null
+                slots.Truncate(1)
+                Return getter(slots)
+            End If
+            Local added = AddedGetters.Get(key) ?? Functions.Get(key)
+            If added != Null
+                If AddedGetters.Contains(key)
+                    slots.Truncate(1)
+                    Return Try slots.CalledWith(added)
+                End If
+                Return Try slots.Result(added)
+            End If
+            Throw LuauError(LuauErrorKind.RUNTIME, "{Name} has no member named '{key}'")
+        Catch error
+            Return slots.Raise(error)
+        End Try
+    End Method
+
+    /// What a script's `object.key = value` sets: a field, or an error saying it can't.
+    Package Method NewIndexed(slots: LuauSlots): Int32
+        Try
+            Local key = Try slots.Argument<String>(1, "__newindex")
+            Local setter = Setters.Get(key)
+            If setter != Null
+                slots.Remove(1)
+                Return setter(slots)
+            End If
+            Local added = AddedSetters.Get(key)
+            If added != Null
+                slots.Remove(1)
+                Try slots.CalledWith(added)
+                Return slots.NoResult()
+            End If
+            If Getters.Contains(key) || AddedGetters.Contains(key)
+                Throw LuauError(LuauErrorKind.RUNTIME, "{Name}'s {key} is read-only")
+            End If
+            Throw LuauError(LuauErrorKind.RUNTIME, "{Name} has no member named '{key}' to set")
+        Catch error
+            Return slots.Raise(error)
+        End Try
+    End Method
+
+    /// What a script's `object:name(...)` calls: a Method, or an error saying there's none.
+    Package Method NameCalled(slots: LuauSlots): Int32
+        Try
+            Local name = Try slots.Argument<String>(0, "__namecall")
+            slots.Remove(0)
+            Local method = Methods.Get(name)
+            If method != Null Then Return method(slots)
+            Local added = Functions.Get(name)
+            If added != Null Then Return Try slots.CalledWith(added)
+            Throw LuauError(LuauErrorKind.RUNTIME, "{Name} has no method named '{name}'")
+        Catch error
+            Return slots.Raise(error)
+        End Try
+    End Method
+End Class
+
+/// The metatable field an operator is.
+Function MetamethodOf(operator: LuauOperator): String
+    Select operator
+        Case LuauOperator.ADD
+            Return "__add"
+        Case LuauOperator.SUB
+            Return "__sub"
+        Case LuauOperator.MUL
+            Return "__mul"
+        Case LuauOperator.DIV
+            Return "__div"
+        Case LuauOperator.IDIV
+            Return "__idiv"
+        Case LuauOperator.MOD
+            Return "__mod"
+        Case LuauOperator.POW
+            Return "__pow"
+        Case LuauOperator.UNM
+            Return "__unm"
+        Case LuauOperator.CONCAT
+            Return "__concat"
+        Case LuauOperator.LEN
+            Return "__len"
+        Case LuauOperator.EQ
+            Return "__eq"
+        Case LuauOperator.LT
+            Return "__lt"
+        Case LuauOperator.LE
+            Return "__le"
+        Case LuauOperator.CALL
+            Return "__call"
+        Default
+            Return "__tostring"
+    End Select
+End Function
+
+/// A member's name in Luau: an attribute's, when it gives one, or the Method's own.
+Package Function MemberName(given: String?, own: String): String
+    If given == Null || given == "" Then Return own
+    Return given
+End Function

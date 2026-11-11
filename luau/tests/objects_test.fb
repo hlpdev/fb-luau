@@ -1,0 +1,176 @@
+Import std.core
+Import std.io
+Import std.test
+Import std.text
+Import luau
+
+Class Player Implements LuauObject
+    Field health: Int = 100
+    Field secret: Int = 7
+    Field Name: String = "ada"
+    Field Bag: LuauTable? = Null
+
+    @LuauAction Method Heal(amount: Int)
+        health = Min(health + amount, 150)
+    End Method
+
+    @LuauExpose("hurt") Method Damage(amount: Int, from: String): Int
+        health -= amount
+        Return health
+    End Method
+
+    @LuauAction Method Fail() Throws IOError
+        Throw IOError(IOErrorKind.OTHER, "no saves")
+    End Method
+
+    @LuauGet Method Health(): Int => health
+
+    @LuauGet("name") Method NameOf(): String => Name
+
+    @LuauSet("name") Method Rename(name: String)
+        Name = name
+    End Method
+
+    Method Hidden(): Int => secret
+
+    Method ToString(): String => "Player {Name}"
+End Class
+
+Class Door Implements LuauObject
+    @LuauExpose Method Open(): Bool => True
+End Class
+
+@Test
+Function AnObjectsExposedMembersWorkFromAScript() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Local player = Player()
+    Try lua.Set("player", player)
+    Try lua.Run("player:Heal(10)")
+    Expect(player.health == 110)
+    Expect(Try lua.Evaluate<Int>("return player:hurt(30, 'rat')") == 80)
+    Expect(Try lua.Evaluate<Int>("return player.Health") == 80)
+    Expect(Try lua.Evaluate<String>("return player.name") == "ada")
+    Try lua.Run("player.name = 'bob'")
+    Expect(player.Name == "bob")
+    // A Method by dot, given the object.
+    Try lua.Run("player.Heal(player, 5)")
+    Expect(player.health == 85)
+    Expect(Try lua.Evaluate<String>("return tostring(player)") == "Player bob")
+    Expect(Try lua.Evaluate<String>("return typeof(player)") == "Player")
+End Function
+
+@Test
+Function WhatIsntMarkedCantBeReached() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Try lua.Set("player", Player())
+    Local message = Try lua.Evaluate<String>(
+        r"local ok, err = pcall(function() return player.secret end) return err")
+    Expect(message.Contains("Player has no member named 'secret'"), message)
+    Expect(ExpectThrows<LuauError>(lua.Run("player:Hidden()")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Run("player.Health = 5")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Run("player.x = 5")) != Null)
+    Expect(Try lua.Evaluate<String>("return getmetatable(player)") == "The metatable is locked")
+    Expect(ExpectThrows<LuauError>(lua.Run("setmetatable(player, {{}})")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Run("rawget(player, 'secret')")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Run("for k in pairs(player) do end")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Run("player.secret = 1")) != Null)
+End Function
+
+@Test
+Function AnErrorAMethodThrowsIsRaisedInTheScript() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Try lua.Set("player", Player())
+    Local message =
+        Try lua.Evaluate<String>(r"local ok, err = pcall(function() player:Fail() end) return err")
+    Expect(message == "chunk:1: no saves", message)
+    Local wrong = Try lua.Evaluate<String>(
+        r"local ok, err = pcall(function() player:Heal('lots') end) return err")
+    Expect(wrong.Contains("invalid argument #2 to 'Heal' (expected Int32, got string)"), wrong)
+End Function
+
+@Test
+Function AnObjectIsTheSameUserdataEachTimeAndComesBackItself() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Local player = Player()
+    Try lua.Set("a", player)
+    Try lua.Set("b", player)
+    Expect(Try lua.Evaluate<Bool>("return a == b"))
+    Expect(Try lua.Evaluate<Bool>(r"local t = {} t[a] = 1 return t[b] == 1"))
+    Local back = Try lua.Get<Player>("a")
+    Expect(RefEquals(back, player))
+End Function
+
+@Test
+Function AnotherTypesObjectIsAConversionError() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Try lua.Register<Door>()
+    Try lua.Set("door", Door())
+    Local error = ExpectThrows<LuauError>(lua.Get<Player>("door"))
+    Expect(error?.Kind == LuauErrorKind.CONVERSION)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Player>("return 5"))?.Message ==
+           "expected Player, got number")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Player>("return newproxy()")) != Null)
+    Try lua.SetFunction("open", Function(door: Door) => door.Open())
+    Expect(Try lua.Evaluate<Bool>("return open(door)"))
+    Expect(ExpectThrows<LuauError>(lua.Run("open(5)")) != Null)
+End Function
+
+@Test
+Function AnObjectLivesWhileLuauHasItAndGoesAfter() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Try lua.Set("kept", Player())
+    Expect(lua.Objects.Count == 1)
+    Try lua.Run("kept:Heal(1)")
+    Try lua.Run("kept = nil")
+    lua.Collect()
+    Try lua.Run("x = 1")
+    Expect(lua.Objects.Count == 0)
+    // A new one crosses as a new userdata.
+    Local player = Player()
+    Try lua.Set("again", player)
+    Try lua.Set("again", LuauNil())
+    lua.Collect()
+    Try lua.Run("x = 2")
+    Try lua.Set("again", player)
+    Expect(Try lua.Evaluate<Int>("return again.Health") == 100)
+End Function
+
+@Test
+Function TheBuilderAddsWhatReflectionCant() Throws LuauError
+    Local lua = LuauState()
+    Local players = Try lua.Register<Player>()
+    Try players.AddMethod("shout",
+                          Try lua.Wrap(Function(p: Player, text: String) => text.ToUpper()))
+    Try players.AddGetter("secret", Try lua.Wrap(Function(p: Player) => p.Hidden()))
+    Try players.AddSetter("secret", Try lua.Wrap(Function(p: Player, value: Int)
+        p.secret = value
+    End Function))
+    Try players.AddOperator(LuauOperator.LEN, Try lua.Wrap(Function(p: Player) => p.health))
+    Local player = Player()
+    Try lua.Set("player", player)
+    Expect(Try lua.Evaluate<String>("return player:shout('hi')") == "HI")
+    Expect(Try lua.Evaluate<Int>("return player.secret") == 7)
+    Try lua.Run("player.secret = 9")
+    Expect(player.secret == 9)
+    Expect(Try lua.Evaluate<Int>("return #player") == 100)
+    Expect(RefEquals(Try lua.Register<Player>(), players))
+End Function
+
+@Test
+Function ACycleAcrossTheEdgeGoesWhenTheStateCloses() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Local player = Player()
+    Local bag = Try lua.NewTable()
+    Try bag.Set("owner", player)
+    player.Bag = bag
+    Try lua.Set("bag", bag)
+    lua.Close()
+    player.Bag = Null
+End Function

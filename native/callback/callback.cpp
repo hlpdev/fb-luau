@@ -35,6 +35,20 @@ void released(lua_State* thread, void* data) {
     state->live_functions--;
 }
 
+int call_back(lua_State* thread);
+
+// What a type's __namecall is: the method's name, which Luau keeps apart from the arguments, goes
+// first, then it's what call_back is.
+int call_back_named(lua_State* thread) {
+    const char* method = lua_namecallatom(thread, nullptr);
+    if (method == nullptr) {
+        luaL_error(thread, "a method is called with ':'");
+    }
+    lua_pushstring(thread, method);
+    lua_insert(thread, 1);
+    return call_back(thread);
+}
+
 // What each of the program's functions is in Luau: it calls the callback with its arguments as a
 // frame, and gives what's left in it, or raises the error left in it. Luau calls it, so an error
 // it raises here, from its own frame, unwinds only through Luau.
@@ -82,6 +96,41 @@ bool fbl_callback_set(fbl_callback_t callback) try {
 } catch (...) {
     fbl::escaped();
     return false;
+}
+
+int32_t fbl_callback_namecall(uint64_t state, int32_t frame, int64_t function,
+                              const char* name) try {
+    fbl::state_t* found = fbl::find_state(state);
+    const fbl::frame_t* in = found == nullptr ? nullptr : fbl::find_frame(*found, frame);
+    if (in == nullptr) {
+        return FBL_MISUSE;
+    }
+    if (name == nullptr) {
+        return fbl::misuse("a function needs a name");
+    }
+    const char* kept = nullptr;
+    try {
+        // Room for its number when it's collected, before it can be.
+        found->released.reserve(static_cast<size_t>(found->live_functions + 1));
+        kept = found->names.emplace(name).first->c_str();
+    } catch (const std::exception&) {
+        return fbl::record_error(*found, FBL_MEMORY, "not enough memory");
+    }
+    auto work = [function, kept](lua_State* stack) {
+        auto* box = static_cast<function_box_t*>(
+            lua_newuserdatatagged(stack, sizeof(function_box_t), fbl::function_tag));
+        box->function = function;
+        lua_pushcclosurek(stack, call_back_named, kept, 1, nullptr);
+        return 1;
+    };
+    const int32_t status =
+        fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+    if (status == FBL_OK) {
+        found->live_functions++;
+    }
+    return status;
+} catch (...) {
+    return fbl::escaped();
 }
 
 int32_t fbl_callback_function(uint64_t state, int32_t frame, int64_t function,

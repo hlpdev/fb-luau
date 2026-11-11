@@ -52,6 +52,13 @@ struct state_t {
     std::vector<int64_t> released;
     // Their names, which Luau keeps pointers to.
     std::unordered_set<std::string> names;
+    // The program's objects Luau has, as for its functions; the registry's references to each
+    // registered type's metatable, by type from 1; and the registry's weak table of each object's
+    // userdata, by its number.
+    int64_t live_objects = 0;
+    std::vector<int64_t> released_objects;
+    std::vector<int> type_refs;
+    int objects_ref = LUA_NOREF;
     // The last error a call met, its value kept by the registry at error_ref.
     int error_ref = LUA_NOREF;
     int32_t error_kind = FBL_OK;
@@ -113,6 +120,12 @@ constexpr int function_tag = 1;
 
 // Sets a new State up for the program's functions: their destructor.
 void prepare_callbacks(lua_State* thread) noexcept;
+
+// The userdata tag of a program's object, whose destructor gives its number back.
+constexpr int object_tag = 2;
+
+// Sets a new State up for the program's objects: their destructor, and their weak table.
+void prepare_objects(lua_State* thread, state_t& state);
 
 // Takes the error value on top of `thread`'s stack as the State's last error, of `kind`, with
 // `traceback`, and pops it.

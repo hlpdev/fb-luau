@@ -11,10 +11,12 @@ Import "./c/fbl_frame"
 Import "./c/fbl_load"
 Import "./c/fbl_state"
 Import "./c/fbl_table"
+Import "./c/fbl_udata"
 Import "./callbacks"
 Import "./errors"
 Import "./functions"
 Import "./library"
+Import "./objects"
 Import "./shim"
 Import "./tables"
 Import "./value"
@@ -76,12 +78,25 @@ Public Class LuauState
     /// The program's errors raised in Luau in the program's call that's running, by the message
     /// they were raised with, so one that comes back out is the LuauError's Cause.
     Package Field Raised: Map<String, Error>
+    /// Its registered types, by their names, each a LuauTypeBuilder, and what lets go of an
+    /// object of each type, by its number.
+    Package Field Types: Map<String, Object>
+    Package Field TypesByNumber: Map<Int32, Func(Int64)>
+    /// The program's objects Luau has, by the numbers their userdata hold, and each one's type.
+    Package Field Objects: Map<Int64, LuauKept>
+    Package Field ObjectTypes: Map<Int64, Int32>
+    Field nextType: Int32 = 0
+    Field nextObject: Int64 = 0
 
     /// Makes a State with the default options: no memory limit, and Luau's libraries.
     @PanicsAtCaller
     Public New()
         Functions = {}
         Raised = {}
+        Types = {}
+        TypesByNumber = {}
+        Objects = {}
+        ObjectTypes = {}
         Local made = Made(LuauOptions())
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
@@ -101,6 +116,10 @@ Public Class LuauState
     Public New(options: LuauOptions) Throws LuauError
         Functions = {}
         Raised = {}
+        Types = {}
+        TypesByNumber = {}
+        Objects = {}
+        ObjectTypes = {}
         Local made = Made(options)
         If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
         If made.0 == 0 Then Panic(made.2)
@@ -130,6 +149,10 @@ Public Class LuauState
         Handle = 0
         Functions.Clear()
         Raised.Clear()
+        Types.Clear()
+        TypesByNumber.Clear()
+        Objects.Clear()
+        ObjectTypes.Clear()
     End Method
 
     /// The bytes its VM holds now.
@@ -310,8 +333,110 @@ Public Class LuauState
             For index = 0 Until count
                 Functions.Remove(taken[index])
             End For
+            If count < 64 Then Break
+        End While
+        While True
+            Local count: Int32
+            Unsafe
+                count = fbl_udata_released(Handle, AddressOf(taken[0]), 64)
+            End Unsafe
+            For index = 0 Until count
+                Local id = taken[index]
+                Local number = ObjectTypes.Get(id)
+                If number != Null
+                    Local release = TypesByNumber.Get(number)
+                    If release != Null Then release(id)
+                End If
+                Objects.Remove(id)
+                ObjectTypes.Remove(id)
+            End For
             If count < 64 Then Return
         End While
+    End Method
+
+    /// T's registration, if it has one.
+    Package Method KeptType<T: LuauObject>(): LuauTypeBuilder<T>?
+        Local kept = Types.Get(TypeName<T>())
+        If kept == Null Then Return Null
+        Return kept As LuauTypeBuilder<T>
+    End Method
+
+    /// A new registration of T, which Finished finishes.
+    Package Method NewType<T: LuauObject>(): LuauTypeBuilder<T>
+        nextType++
+        Return LuauTypeBuilder<T>(Self, nextType, TypeName<T>())
+    End Method
+
+    /// Gives `type`'s objects their metatable, of its __index, __newindex, and __namecall, and its
+    /// Methods each a Luau function, and keeps it.
+    @PanicsAtCaller
+    Package Method Finished<T: LuauObject>(type: LuauTypeBuilder<T>) Throws LuauError
+        For entry In type.Methods
+            type.Functions[entry.0] = Try NewFunction(entry.0, entry.1)
+        End For
+        Local name = type.Name
+        Local index = Try NewFunction(name + ".__index",
+                                      Function(slots: LuauSlots) => type.Indexed(slots))
+        Local newIndex = Try NewFunction(name + ".__newindex",
+                                         Function(slots: LuauSlots) => type.NewIndexed(slots))
+        Local nameCall = Try NewFunction(name + ".__namecall",
+                                         Function(slots: LuauSlots) => type.NameCalled(slots), True)
+        Local frame = Opened()
+        Defer Closed(frame)
+        Local slots = LuauSlots(Self, frame)
+        Try LuauFunction.ToLuau(slots, index)
+        Try LuauFunction.ToLuau(slots, newIndex)
+        Try LuauFunction.ToLuau(slots, nameCall)
+        Try Check(fbl_udata_type(Handle, frame, type.Number, name, 0, 1, 2))
+        Types[name] = type
+        TypesByNumber[type.Number] = Function(id: Int64) => type.Released(id)
+        For entry In type.Pending
+            Try type.AddOperator(entry.0, entry.1)
+        End For
+    End Method
+
+    /// T's registration, panicking at the caller when it has none.
+    @PanicsAtCaller
+    Package Method TypeOf<T: LuauObject>(): LuauTypeBuilder<T>
+        Local kept = Types.Get(TypeName<T>())
+        If kept == Null Then Panic("{TypeName<T>()} isn't registered; Register<{TypeName<T>()}>() first")
+        Return kept As LuauTypeBuilder<T>
+    End Method
+
+    /// Adds `value`'s userdata to the frame: the one Luau has for it, or a new one.
+    @PanicsAtCaller
+    Package Method PushObject<T: LuauObject>(slots: LuauSlots, value: T) Throws LuauError
+        Local type = TypeOf<T>()
+        Local id = type.Ids.Get(value)
+        If id != Null && fbl_udata_push(Live(), slots.Frame, id) == FBL_OK Then Return
+        nextObject++
+        Local object = nextObject
+        Local status = fbl_udata_new(Live(), slots.Frame, object, type.Number)
+        Try Check(status)
+        Objects[object] = LuauBox<T>(value)
+        ObjectTypes[object] = type.Number
+        type.Ids[value] = object
+    End Method
+
+    /// The object a userdata slot holds, as a T.
+    @PanicsAtCaller
+    Package Method ObjectAt<T: LuauObject>(slots: LuauSlots, index: Int32): T Throws LuauError
+        Local name = TypeName<T>()
+        If slots.TypeAt(index) != FBL_TYPE_USERDATA Then Throw slots.Wrong(name, index)
+        Local id: Int64 = 0
+        Local number: Int32 = 0
+        Local found: Bool
+        Unsafe
+            found = fbl_udata_object(Live(), slots.Frame, index, AddressOf(id), AddressOf(number))
+        End Unsafe
+        If !found Then Throw slots.Wrong(name, index)
+        Local kept = Objects.Get(id)
+        Local box: LuauBox<T>? = Null
+        If kept != Null Then box = kept As? LuauBox<T>
+        If box == Null
+            Throw LuauError(LuauErrorKind.CONVERSION, "expected {name}, got another type's object")
+        End If
+        Return box.Value
     End Method
 
     /// Runs the program's function `function` for a call of it from Luau, whose frame is `frame`:
@@ -322,16 +447,22 @@ Public Class LuauState
         Return invoke(LuauSlots(Self, frame))
     End Method
 
-    /// A new Luau function, named `name`, that runs `invoke` when Luau calls it.
+    /// A new Luau function, named `name`, that runs `invoke` when Luau calls it; for a type's
+    /// __namecall, `named`, with the method's name first in its slots.
     @PanicsAtCaller
-    Package Method NewFunction(name: String,
-                               invoke: Func(LuauSlots): Int32): LuauFunction Throws LuauError
+    Package Method NewFunction(name: String, invoke: Func(LuauSlots): Int32,
+                               named: Bool = False): LuauFunction Throws LuauError
         Local frame = Opened()
         Defer Closed(frame)
         nextFunction++
         Local function = nextFunction
         Functions[function] = invoke
-        Local status = fbl_callback_function(Handle, frame, function, name)
+        Local status: Int32
+        If named
+            status = fbl_callback_namecall(Handle, frame, function, name)
+        Else
+            status = fbl_callback_function(Handle, frame, function, name)
+        End If
         If status != FBL_OK Then Functions.Remove(function)
         Try Check(status)
         Return Try LuauFunction.FromLuau(LuauSlots(Self, frame), 0)

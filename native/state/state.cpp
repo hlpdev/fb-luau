@@ -97,6 +97,7 @@ int set_up(lua_State* stack) {
     state->error_ref = lua_ref(stack, -1);
     lua_pop(stack, 1);
     fbl::prepare_callbacks(stack);
+    fbl::prepare_objects(stack, *state);
     return 0;
 }
 

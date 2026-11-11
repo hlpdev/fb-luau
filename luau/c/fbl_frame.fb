@@ -20,6 +20,8 @@ Package Extern "C" Lib "luau_native"
     Function fbl_frame_close(state: UInt64, frame: Int32): Bool
     Function fbl_frame_count(state: UInt64, frame: Int32): Int32
     Function fbl_frame_truncate(state: UInt64, frame: Int32, count: Int32): Bool
+    Function fbl_frame_insert(state: UInt64, frame: Int32, slot: Int32): Bool
+    Function fbl_frame_remove(state: UInt64, frame: Int32, slot: Int32): Bool
     Function fbl_frame_type(state: UInt64, frame: Int32, slot: Int32): Int32
     Function fbl_frame_push_nil(state: UInt64, frame: Int32): Int32
     Function fbl_frame_push_boolean(state: UInt64, frame: Int32, value: Bool): Int32

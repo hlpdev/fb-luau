@@ -1,9 +1,11 @@
 // The package's panics, each a mistake a program can make, which fb test can't catch: ctest runs
 // this with a case's name and checks it panics with the case's message.
 
-Import std.core
 Import std.os
 Import luau
+
+Class Door Implements LuauObject
+End Class
 
 Function Run(name: String) Throws LuauError
     Select name
@@ -22,16 +24,20 @@ Function Run(name: String) Throws LuauError
         Case "dropped-state"
             Local function = Try Dropped()
             Try function.Invoke()
+        // An object of a type the State hasn't registered.
+        Case "unregistered"
+            Local lua = LuauState()
+            Try lua.Set("door", Door())
         // A memory limit below 0.
         Case "negative-limit"
             Local options = LuauOptions()
             options.MemoryLimit = -1
-            Local lua = Try LuauState(options)
+            Local _lua = Try LuauState(options)
         // A compile option out of its range.
         Case "optimization"
             Local options = LuauOptions()
             options.Compile.Optimization = 3
-            Local lua = Try LuauState(options)
+            Local _lua = Try LuauState(options)
         Default
             Panic("no such case as {name}")
     End Select

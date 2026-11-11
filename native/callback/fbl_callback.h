@@ -28,6 +28,11 @@ FBL_API bool fbl_callback_set(fbl_callback_t callback);
 FBL_API int32_t fbl_callback_function(uint64_t state, int32_t frame, int64_t function,
                                       const char* name);
 
+// As fbl_callback_function, for a type's __namecall: its frame has the method's name first, as
+// `object:name(...)` called it, then the object, then the arguments.
+FBL_API int32_t fbl_callback_namecall(uint64_t state, int32_t frame, int64_t function,
+                                      const char* name);
+
 // Takes up to `capacity` numbers of functions Luau has collected, into `functions`: how many it
 // took, which are taken off what's left to take; -1 for a handle that isn't a State's.
 FBL_API int32_t fbl_callback_released(uint64_t state, int64_t* functions, int32_t capacity);

@@ -283,22 +283,22 @@ End Try
 ### Registering types
 
 ```vb
-Class Player
-    @LuauExpose Field Name: String
-    @LuauExpose @LuauReadOnly Field Health: Int = 100
+Class Player Implements LuauObject
+    Field health: Int = 100
     Field secret: Int                                  // never seen by a script
 
-    @LuauExpose Method Heal(amount: Int)
-        Health = Min(Health + amount, 100)
+    @LuauAction Method Heal(amount: Int)
+        health = Min(health + amount, 100)
     End Method
 
-    @LuauExpose("teleport") Method MoveTo(position: Vec3)
-        ...
+    @LuauExpose("hurt") Method Damage(amount: Int): Int
+        health -= amount
+        Return health
     End Method
 
-    @LuauExpose Property Alive: Bool
-        Get => Health > 0
-    End Property
+    @LuauGet Method Health(): Int => health
+
+    Method ToString(): String => "Player"
 End Class
 
 Try lua.Register<Player>()
@@ -307,30 +307,36 @@ Try lua.Set("player", player)
 
 ```lua
 player:Heal(10)
-print(player.Name, player.Alive)
-player:teleport(vector.create(0, 1, 0))
-player.Health = 1        -- error: Health is read-only
+print(player:hurt(5), player.Health, tostring(player))
+player.Health = 1        -- error: Player's Health is read-only
 ```
 
-- `Register<T>()` makes T's metatable by compile-time reflection, `For Field`, `For Property`,
-  and `For Method` over T, with a loop for each shape of Method it takes (0 to 8 parameters, a
-  result or none, throwing or not). It's done once per State, before the first T crosses.
-- Nothing is exposed unless it says so: a Field, Property, or Method crosses only with
-  `@LuauExpose`, or `@LuauExpose("name")` for another name, and a Field or Property with a Set
-  is read-only to a script with `@LuauReadOnly`. A mod is untrusted code, so a member that
-  isn't marked is one it can't see, wherever the type's other members go. Reflection goes over
-  Private members too, so a Private member a program marks is exposed; that's the program's
-  choice, made in the type's own file.
+- A Class that implements `LuauObject` crosses as itself, a userdata of the object, and
+  `Register<T>()` says what a script reaches of it, by compile-time reflection, `For Method` over
+  T, with a loop for each shape of Method it takes (0 to 7 arguments, a result or none, throwing
+  or not). It's done once per State, before the first T crosses; crossing before is a panic that
+  says so.
+- Nothing is exposed unless it says so: a Method that gives a value crosses with `@LuauExpose`,
+  one that gives nothing with `@LuauAction`, a Method of no arguments that gives a value is a field
+  a script reads with `@LuauGet`, and one of one argument is what a script's assignment calls with
+  `@LuauSet`; each takes a name, `@LuauExpose("hurt")`, for another name in Luau. A mod is
+  untrusted code, so a member that isn't marked is one it can't reach. Reflection goes over
+  Private Methods too, so a Private Method a program marks is exposed; that's its choice, made in
+  the type's own file. Fields and Properties can't be marked yet, nor `@LuauExpose` take both
+  kinds of Method, as FutureBlitz can't yet pick them in a loop
+  ([What FutureBlitz can't do yet](#what-futureblitz-cant-do-yet)), so a field a script reads is a
+  `@LuauGet` Method meanwhile.
 - What reflection doesn't reach is added by hand, on what `Register<T>` gives, a
-  `LuauTypeBuilder<T>`: `.Method(name, f)` and `.Get(name, f)` for anything, and
-  `.Operator(LuauOperator.ADD, f)` for `__add` and the other metamethods, since reflection
-  doesn't go over Operators yet.
-- An object of a Class extending a registered one crosses as its own Class's when that's
-  registered too, or else as the nearest registered Class it extends, as `Is` would find it.
-- `__index` on a userdata looks members up by an atom, an integer Luau keeps on each string, so a
-  call by name costs a table lookup, not a string compare; `__namecall` makes `obj:Method()` one
-  lookup. `__type` and `typeof` give the Class's name, and `__tostring` its `ToString` when
-  it's Printable.
+  `LuauTypeBuilder<T>`: `AddMethod(name, f)`, `AddGetter(name, f)`, `AddSetter(name, f)`, with a
+  `LuauFunction` that takes the object first, and `AddOperator(LuauOperator.ADD, f)` for `__add`
+  and the other metamethods, since reflection doesn't go over Operators yet.
+- An object reads back as the type it crossed as: FutureBlitz can't yet keep an Interface's
+  implementers to Classes, so an object is kept boxed by its type, and one that crossed as a
+  `Player` isn't read as a Class it extends.
+- Its metatable is locked: `getmetatable` gives "The metatable is locked", and `setmetatable`,
+  `rawget`, and `pairs` on the object are errors. `__index`, `__newindex`, and `__namecall`, which
+  makes `obj:Method()` one call, are the program's; `typeof` gives the Class's name, and
+  `tostring` its `ToString` when it has one.
 - `lua.Definitions()` gives a Luau definitions file of what's registered and set, the types of
   each member and function, for the type checker and for a mod's editor
   ([Type checking](#type-checking-and-diagnostics)).
@@ -341,8 +347,9 @@ A program's object in Luau is a userdata whose memory holds an id; the State kee
 in a map by that id, which counts as one reference. So an object a script holds stays alive
 while the script holds it, however many times it crosses, and goes when neither side does:
 
-- The same object crossing again is the same userdata, found by its id, so `==` and table keys
-  work in a script, as they do in FutureBlitz.
+- The same object crossing again is the same userdata, found through a weak table of Luau's by
+  its id, so `==` and table keys work in a script, as they do in FutureBlitz; once Luau has
+  collected that userdata, the object crossing again is a new one, with a new id.
 - When Luau's collector frees the userdata, its destructor queues the id; it can't release the
   object there, since the object's `Destroy` could call into Luau, which a destructor mustn't.
   The queue is drained, and its objects let go of, as each call into the State returns to
@@ -789,6 +796,17 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
    overload,** though `Func() Throws Error` alone takes it, and a named Function that throws
    does. A lambda given to `SetFunction` says `Throws Error` meanwhile
    (fbengine-notes/luau/throws_overload.fb shows it).
+10. **A Field or Property loop can't pick by an attribute,** only a Method loop can, so a loop's
+    Where lines on F hold for every Field, and `Register<T>` can't expose only the Fields marked
+    `@LuauExpose`; field-like members are `@LuauGet` and `@LuauSet` Methods meanwhile
+    (fbengine-notes/luau/field_pick.fb).
+11. **An Interface can't say what implements it is a Class** (no `Where Self: Class` in a default),
+    so `LuauObject`'s defaults can't keep an object as an `Object`; it's boxed by its type, and
+    reads back only as that type.
+12. **A bug: a `For Method` loop of `Func(): R` binds a Method that gives nothing, with R as
+    nothing,** so a Where line on R fails for it, and a loop over the Methods that give a value
+    can't be written beside those that don't; `@LuauAction` marks the second kind meanwhile
+    (fbengine-notes/luau/void_result.fb).
 
 ## Milestones
 
@@ -858,9 +876,10 @@ with its Cause and its traceback; deep recursion across the edge is an error, ne
 
 ### L4: registering types and userdata
 
-- The shim's `udata`: metatables by tag, an object's userdata by id, the destructor's queue.
-- `Register<T>` by reflection, `@LuauExpose`, `@LuauReadOnly`, `LuauTypeBuilder<T>`, atoms and
-  `__namecall`, `__type`, `__tostring`, `__eq`; inheritance.
+- The shim's `udata`: a registered type's locked metatable, an object's userdata by id, its weak
+  table, the destructor's queue; a `__namecall` that gets the method's name.
+- `LuauObject`, `Register<T>` by reflection, `@LuauExpose`, `@LuauAction`, `@LuauGet`,
+  `@LuauSet`, `LuauTypeBuilder<T>`, `__namecall`, `__type`, `__tostring`.
 - Lifetimes: one userdata per object, release after collection, Close releasing everything.
 
 Done means: a registered Class's exposed members work from a script, and its others can't be

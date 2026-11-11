@@ -40,6 +40,12 @@ FBL_API int32_t fbl_frame_count(uint64_t state, int32_t frame);
 // Takes the frame's values from `count` on away, so it has `count`.
 FBL_API bool fbl_frame_truncate(uint64_t state, int32_t frame, int32_t count);
 
+// Moves the frame's last value to `slot`, the slots from there each one higher.
+FBL_API bool fbl_frame_insert(uint64_t state, int32_t frame, int32_t slot);
+
+// Takes a slot's value out of the frame, the slots after it each one lower.
+FBL_API bool fbl_frame_remove(uint64_t state, int32_t frame, int32_t slot);
+
 // The type of a slot's value, or -1.
 FBL_API int32_t fbl_frame_type(uint64_t state, int32_t frame, int32_t slot);
 

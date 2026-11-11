@@ -39,6 +39,7 @@ fbl_add_tests(frame frame/frame_tests.cpp)
 fbl_add_tests(call call/call_tests.cpp)
 fbl_add_tests(table table/table_tests.cpp)
 fbl_add_tests(callback callback/callback_tests.cpp)
+fbl_add_tests(udata udata/udata_tests.cpp)
 
 find_program(FBL_SH sh DOC "A POSIX shell, for the tools' scripts")
 find_program(FBL_PYTHON NAMES python3 python DOC "Python 3, for the tools' checks")
@@ -90,6 +91,7 @@ if(FBL_FB_TESTS)
       "closed-state=the Luau State is closed"
       "closed-function=the Luau State is closed"
       "dropped-state=the Luau State is closed"
+      "unregistered=Door isn't registered"
       "negative-limit=a memory limit of -1 bytes is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2")
   foreach(case IN LISTS fbl_panics)

@@ -62,3 +62,17 @@ with its date; the rest are the lane's, which the user can change.
 - **No `LuauState` first parameter** for the program's functions: a function captures `[Weak lua]`.
 - **`ToFunc` and `ToAction` take their type arguments written**, as overloads by type-argument
   count with no arguments aren't told apart from the type expected.
+
+## L4 (2026-11-11)
+
+- **A Class crosses as itself when it implements `LuauObject`**, an Interface with Static defaults,
+  as `LuauRecord` is for data; `Register<T>()` is generated whole by tools/gen_arity.py, as a
+  function that calls reflection loops passes their needs on to its callers.
+- **What's exposed is Methods, marked:** `@LuauExpose` (gives a value), `@LuauAction` (gives
+  nothing), `@LuauGet`, `@LuauSet`. The plan's `@LuauExpose Field` and `@LuauReadOnly` wait for
+  FutureBlitz to pick Fields by attribute (gap 10); the two kinds of Method are apart for gap 12.
+- **Objects are kept boxed by their type** (gap 11), so one reads back as the type it crossed as.
+- **Builder methods are AddMethod, AddGetter, AddSetter, AddOperator**, as Method, Get, Set, and
+  Operator are keywords; each takes a `LuauFunction`.
+- **Names are strings, not atoms**, in __index and __namecall; atoms wait for a measure that says
+  they're needed.

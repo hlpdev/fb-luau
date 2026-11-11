@@ -177,6 +177,82 @@ def function_methods(count):
     return lines
 
 
+def invoker(indent, reads, call, gives, throws):
+    """A lambda that runs a member for a call of it from Luau: reads its slots, calls, and gives its
+    result or raises its error."""
+    lines = [f"{indent}Function(slots: LuauSlots): Int32", f"{indent}    Try"]
+    lines += [f"{indent}        {read}" for read in reads]
+    call = ("Try " if throws else "") + call
+    if gives:
+        lines.append(f"{indent}        Return Try slots.Result({call})")
+    else:
+        lines.append(f"{indent}        {call}")
+        lines.append(f"{indent}        Return slots.NoResult()")
+    lines += [f"{indent}    Catch error", f"{indent}        Return slots.Raise(error)", f"{indent}    End Try",
+              f"{indent}End Function"]
+    return lines
+
+
+def loop(attribute, func, type_names, throws):
+    """The head of a For Method loop over T's Methods of `func`'s shape that `attribute` marks."""
+    lines = ["    For Method m: M In T", f"        Where m Has {attribute}", f"        Where M: {func}"]
+    lines += [f"        Where {name}: LuauType" for name in type_names]
+    if throws:
+        lines.append("        Where E: Error")
+    lines.append(f"        Local name = MemberName(m.Attribute({attribute})?.Name, m.Name)")
+    return lines
+
+
+def expose_members():
+    """ExposeMembers, which goes over a registered type's Methods by reflection, a loop for each
+    shape a Method can have."""
+    lines = doc("    ", "Registers T, whose objects cross as themselves, and exposes what its reflection says a\n"
+                        "script reaches: its Methods marked [LuauExpose], [LuauAction], [LuauGet], and\n"
+                        "[LuauSet], each of LuauTypes, and its ToString, for tostring. Registering it again\n"
+                        "gives the same builder.\n\n# Errors\n\nA LuauError of MEMORY.")
+    lines += ["    @PanicsAtCaller",
+              "    Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError",
+              "        Local kept = KeptType<T>()",
+              "        If kept != Null Then Return kept",
+              "        Local type = NewType<T>()"]
+    body = []
+    for count in range(MOST):
+        names = arguments(count)
+        reads = ["Local object = Try slots.Argument<T>(0, name)"]
+        reads += [f"Local a{index} = Try slots.Argument<A{index}>({index}, name)" for index in range(1, count + 1)]
+        call = f"m.Call({', '.join(['object'] + [f'a{index}' for index in range(1, count + 1)])})"
+        for gives in (True, False):
+            for throws in (False, True):
+                func = f"Func({', '.join(names)})" + (": R" if gives else "") + (" Throws E" if throws else "")
+                body += loop("LuauExpose" if gives else "LuauAction", func, names + (["R"] if gives else []),
+                             throws)
+                made = invoker("        ", reads, call, gives, throws)
+                made[0] = "        type.Methods[name] = " + made[0].strip()
+                body += made
+                body.append("    End For")
+    for throws in (False, True):
+        body += loop("LuauGet", "Func(): R" + (" Throws E" if throws else ""), ["R"], throws)
+        made = invoker("        ", ["Local object = Try slots.Argument<T>(0, name)"], "m.Call(object)", True, throws)
+        made[0] = "        type.Getters[name] = " + made[0].strip()
+        body += made
+        body.append("    End For")
+        body += loop("LuauSet", "Func(V)" + (" Throws E" if throws else ""), ["V"], throws)
+        reads = ["Local object = Try slots.Argument<T>(0, name)", "Local value = Try slots.Argument<V>(1, name)"]
+        made = invoker("        ", reads, "m.Call(object, value)", False, throws)
+        made[0] = "        type.Setters[name] = " + made[0].strip()
+        body += made
+        body.append("    End For")
+    body += ["    For Method m: M In T", "        Where M: Func(): String", "        If m.Name != \"ToString\" Then Continue"]
+    made = invoker("        ", ["Local object = Try slots.Argument<T>(0, \"__tostring\")"], "m.Call(object)", True, False)
+    made[0] = "        Local show = " + made[0].strip()
+    body += made
+    body += ["        type.Pending.Add((LuauOperator.TOSTRING, Try NewFunction(\"__tostring\", show)))",
+             "    End For"]
+    lines += ["    " + line for line in body]
+    lines += ["        Try Finished(type)", "        Return type", "    End Method"]
+    return lines
+
+
 def generate():
     lines = [
         "//! What's the same for each number of a function's arguments, from none to "
@@ -188,6 +264,7 @@ def generate():
         "Import \"./c/fbl_call\"",
         "Import \"./errors\"",
         "Import \"./functions\"",
+        "Import \"./objects\"",
         "Import \"./state\"",
         "Import \"./value\"",
         "Import \"./values\"",
@@ -197,8 +274,7 @@ def generate():
     ]
     for count in range(MOST + 1):
         lines += state_methods(count)
-    if lines[-1] == "":
-        lines.pop()
+    lines += expose_members()
     lines += ["End Extend", "", "/// A Luau function's calls from the program.", "Extend LuauFunction"]
     for count in range(MOST + 1):
         lines += function_methods(count)

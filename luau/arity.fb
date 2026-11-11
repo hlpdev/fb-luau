@@ -6,6 +6,7 @@ Import std.core
 Import "./c/fbl_call"
 Import "./errors"
 Import "./functions"
+Import "./objects"
 Import "./state"
 Import "./value"
 Import "./values"
@@ -1763,6 +1764,786 @@ Extend LuauState
                 Return slots.Raise(error)
             End Try
         End Function)
+    End Method
+
+    /// Registers T, whose objects cross as themselves, and exposes what its reflection says a
+    /// script reaches: its Methods marked [LuauExpose], [LuauAction], [LuauGet], and
+    /// [LuauSet], each of LuauTypes, and its ToString, for tostring. Registering it again
+    /// gives the same builder.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError
+        Local kept = KeptType<T>()
+        If kept != Null Then Return kept
+        Local type = NewType<T>()
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(): R
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Return Try slots.Result(m.Call(object))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(): R Throws E
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Return Try slots.Result(Try m.Call(object))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func()
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    m.Call(object)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func() Throws E
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Try m.Call(object)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1): R
+            Where A1: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Return Try slots.Result(m.Call(object, a1))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1): R Throws E
+            Where A1: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Return Try slots.Result(Try m.Call(object, a1))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1)
+            Where A1: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    m.Call(object, a1)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1) Throws E
+            Where A1: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Try m.Call(object, a1)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2): R
+            Where A1: LuauType
+            Where A2: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Return Try slots.Result(m.Call(object, a1, a2))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2): R Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Return Try slots.Result(Try m.Call(object, a1, a2))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2)
+            Where A1: LuauType
+            Where A2: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    m.Call(object, a1, a2)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2) Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Try m.Call(object, a1, a2)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3): R
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Return Try slots.Result(m.Call(object, a1, a2, a3))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3): R Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Return Try slots.Result(Try m.Call(object, a1, a2, a3))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3)
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    m.Call(object, a1, a2, a3)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3) Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Try m.Call(object, a1, a2, a3)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4): R
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Return Try slots.Result(m.Call(object, a1, a2, a3, a4))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4): R Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Return Try slots.Result(Try m.Call(object, a1, a2, a3, a4))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4)
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    m.Call(object, a1, a2, a3, a4)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4) Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Try m.Call(object, a1, a2, a3, a4)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4, A5): R
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Return Try slots.Result(m.Call(object, a1, a2, a3, a4, a5))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4, A5): R Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Return Try slots.Result(Try m.Call(object, a1, a2, a3, a4, a5))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4, A5)
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    m.Call(object, a1, a2, a3, a4, a5)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4, A5) Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Try m.Call(object, a1, a2, a3, a4, a5)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4, A5, A6): R
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Return Try slots.Result(m.Call(object, a1, a2, a3, a4, a5, a6))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4, A5, A6): R Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Return Try slots.Result(Try m.Call(object, a1, a2, a3, a4, a5, a6))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4, A5, A6)
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    m.Call(object, a1, a2, a3, a4, a5, a6)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4, A5, A6) Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Try m.Call(object, a1, a2, a3, a4, a5, a6)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4, A5, A6, A7): R
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where A7: LuauType
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Local a7 = Try slots.Argument<A7>(7, name)
+                    Return Try slots.Result(m.Call(object, a1, a2, a3, a4, a5, a6, a7))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauExpose
+            Where M: Func(A1, A2, A3, A4, A5, A6, A7): R Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where A7: LuauType
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Local a7 = Try slots.Argument<A7>(7, name)
+                    Return Try slots.Result(Try m.Call(object, a1, a2, a3, a4, a5, a6, a7))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4, A5, A6, A7)
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where A7: LuauType
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Local a7 = Try slots.Argument<A7>(7, name)
+                    m.Call(object, a1, a2, a3, a4, a5, a6, a7)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauAction
+            Where M: Func(A1, A2, A3, A4, A5, A6, A7) Throws E
+            Where A1: LuauType
+            Where A2: LuauType
+            Where A3: LuauType
+            Where A4: LuauType
+            Where A5: LuauType
+            Where A6: LuauType
+            Where A7: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
+            type.Methods[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local a1 = Try slots.Argument<A1>(1, name)
+                    Local a2 = Try slots.Argument<A2>(2, name)
+                    Local a3 = Try slots.Argument<A3>(3, name)
+                    Local a4 = Try slots.Argument<A4>(4, name)
+                    Local a5 = Try slots.Argument<A5>(5, name)
+                    Local a6 = Try slots.Argument<A6>(6, name)
+                    Local a7 = Try slots.Argument<A7>(7, name)
+                    Try m.Call(object, a1, a2, a3, a4, a5, a6, a7)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauGet
+            Where M: Func(): R
+            Where R: LuauType
+            Local name = MemberName(m.Attribute(LuauGet)?.Name, m.Name)
+            type.Getters[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Return Try slots.Result(m.Call(object))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauSet
+            Where M: Func(V)
+            Where V: LuauType
+            Local name = MemberName(m.Attribute(LuauSet)?.Name, m.Name)
+            type.Setters[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local value = Try slots.Argument<V>(1, name)
+                    m.Call(object, value)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauGet
+            Where M: Func(): R Throws E
+            Where R: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauGet)?.Name, m.Name)
+            type.Getters[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Return Try slots.Result(Try m.Call(object))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where m Has LuauSet
+            Where M: Func(V) Throws E
+            Where V: LuauType
+            Where E: Error
+            Local name = MemberName(m.Attribute(LuauSet)?.Name, m.Name)
+            type.Setters[name] = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, name)
+                    Local value = Try slots.Argument<V>(1, name)
+                    Try m.Call(object, value)
+                    Return slots.NoResult()
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+        End For
+        For Method m: M In T
+            Where M: Func(): String
+            If m.Name != "ToString" Then Continue
+            Local show = Function(slots: LuauSlots): Int32
+                Try
+                    Local object = Try slots.Argument<T>(0, "__tostring")
+                    Return Try slots.Result(m.Call(object))
+                Catch error
+                    Return slots.Raise(error)
+                End Try
+            End Function
+            type.Pending.Add((LuauOperator.TOSTRING, Try NewFunction("__tostring", show)))
+        End For
+        Try Finished(type)
+        Return type
     End Method
 End Extend
 

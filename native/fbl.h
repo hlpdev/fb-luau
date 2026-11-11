@@ -11,5 +11,6 @@
 #include "ref/fbl_ref.h"
 #include "state/fbl_state.h"
 #include "table/fbl_table.h"
+#include "udata/fbl_udata.h"
 
 #endif
