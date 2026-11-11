@@ -53,8 +53,8 @@ End Enum
 Public Class LuauValue Implements LuauType, Printable
     /// What type it is.
     Public ReadOnly Field Kind: LuauValueKind
-    // Its State.
-    ReadOnly Field owner: LuauState
+    // Its State, held weakly, as a handle holds it.
+    ReadOnly Field owner: Weak<LuauState>
     // A copied value: a boolean's, a number's, an integer's, or a string's bytes.
     ReadOnly Field flag: Bool
     ReadOnly Field number: Float64
@@ -75,8 +75,19 @@ Public Class LuauValue Implements LuauType, Printable
     End New
 
     Method Destroy()
-        If ref != 0 && owner.IsOpen Then fbl_ref_free(owner.Handle, ref)
+        Local held: LuauState? = owner
+        If ref != 0 && held != Null && held.IsOpen Then fbl_ref_free(held.Handle, ref)
     End Method
+
+    /// Its State, panicking at the caller once it's gone.
+    @PanicsAtCaller
+    Package Property Owner: LuauState
+        Get
+            Local held: LuauState? = owner
+            If held == Null Then Panic("the Luau State is closed")
+            Return held
+        End Get
+    End Property
 
     /// Gives it to Luau as it was, which has to be the State it came from for a value it keeps.
     @PanicsAtCaller
@@ -94,7 +105,7 @@ Public Class LuauValue Implements LuauType, Printable
             Case LuauValueKind.STRING
                 Try slots.PushBytes(value.bytes)
             Default
-                If !RefEquals(value.owner, slots.Owner)
+                If !RefEquals(value.Owner, slots.Owner)
                     Panic("a LuauValue of another Luau State")
                 End If
                 Try slots.PushRef(value.ref)
@@ -154,9 +165,10 @@ Public Class LuauValue Implements LuauType, Printable
     /// A LuauError of CONVERSION when it isn't a T.
     @PanicsAtCaller
     Public Method Read<T: LuauType>(): T Throws LuauError
-        Local frame = owner.Opened()
-        Defer owner.Closed(frame)
-        Local slots = LuauSlots(owner, frame)
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Local slots = LuauSlots(state, frame)
         Try ToLuau(slots, Self)
         Return Try T.FromLuau(slots, 0)
     End Method

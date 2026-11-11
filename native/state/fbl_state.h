@@ -46,6 +46,10 @@ FBL_API int32_t fbl_state_error_kind(uint64_t state);
 // for a handle that isn't a State's.
 FBL_API const uint8_t* fbl_state_error_message(uint64_t state, int64_t* length);
 
+// Adds its value to the frame: what the script raised, which can be any value; a syntax error's
+// message; or nil for an error that isn't a value of Luau's, like one the library met. A status.
+FBL_API int32_t fbl_state_error_value(uint64_t state, int32_t frame);
+
 // Where it was raised, Luau's traceback, one call a line, innermost first; empty when it wasn't
 // raised in Luau code.
 FBL_API const uint8_t* fbl_state_error_traceback(uint64_t state, int64_t* length);

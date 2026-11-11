@@ -16,5 +16,6 @@ Package Extern "C" Lib "luau_native"
     Function fbl_state_collect(state: UInt64): Int32
     Function fbl_state_error_kind(state: UInt64): Int32
     Function fbl_state_error_message(state: UInt64, length: Ptr<Int64>): Ptr<UInt8>
+    Function fbl_state_error_value(state: UInt64, frame: Int32): Int32
     Function fbl_state_error_traceback(state: UInt64, length: Ptr<Int64>): Ptr<UInt8>
 End Extern

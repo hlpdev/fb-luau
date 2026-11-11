@@ -1,0 +1,187 @@
+Import std.core
+Import std.io
+Import std.test
+Import std.text
+Import luau
+
+Function Length(text: String): Int => text.Length
+
+Function ReadSave(name: String): String Throws IOError
+    Throw IOError(IOErrorKind.NOT_FOUND, "{name} doesn't exist", name)
+End Function
+
+@Test
+Function AFunctionOfTheProgramsIsCalledFromLuau() Throws LuauError
+    Local lua = LuauState()
+    Try lua.SetFunction("add", Function(a: Int, b: Int) => a + b)
+    Try lua.SetFunction("length", Length)
+    Expect(Try lua.Evaluate<Int>("return add(2, 3)") == 5)
+    Expect(Try lua.Evaluate<Int>("return length('four')") == 4)
+    Local said = ""
+    Try lua.SetFunction("say", Function(text: String)
+        said = text
+    End Function)
+    Try lua.Run("say('hello')")
+    Expect(said == "hello")
+    Try lua.SetFunction("seven", Function() => 7)
+    Expect(Try lua.Evaluate<Int>("return seven() + seven()") == 14)
+End Function
+
+@Test
+Function EachArityCrosses() Throws LuauError
+    Local lua = LuauState()
+    Try lua.SetFunction("sum8",
+                        Function(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int,
+                                 h: Int): Int
+        Return a + b + c + d + e + f + g + h
+    End Function)
+    Expect(Try lua.Evaluate<Int>("return sum8(1, 2, 3, 4, 5, 6, 7, 8)") == 36)
+    Local area = Try lua.Load("local w, h = ... return w * h")
+    Expect(Try area.Call<Float64>(2.0, 3.5) == 7.0)
+    Local pair = Try lua.Load("local a, b = ... return b, a, 'third'")
+    Local swapped = Try pair.Call2<String, Int>(1, "one")
+    Expect(swapped.0 == "one" && swapped.1 == 1)
+    Local three = Try pair.Call3<String, Int, String>(1, "one")
+    Expect(three.2 == "third")
+    Local all = Try pair.CallAll(1, "one")
+    Expect(all.Count == 3 && all[2].AsString() == "third")
+    Local count = Try lua.Load("calls = (calls or 0) + 1")
+    Try count.Invoke()
+    Expect(Try lua.Get<Int>("calls") == 1)
+End Function
+
+@Test
+Function ALuauFunctionIsAFutureBlitzOne() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run("function area(w, h) return w * h end function log(text) last = text end")
+    Local area = Try lua.Get<LuauFunction>("area")
+    Local f: Func(Float64,
+                  Float64): Float64 Throws LuauError = area.ToFunc<Float64, Float64, Float64>()
+    Expect(Try f(4.0, 5.0) == 20.0)
+    Local log = (Try lua.Get<LuauFunction>("log")).ToAction<String>()
+    Try log("seen")
+    Expect(Try lua.Get<String>("last") == "seen")
+End Function
+
+@Test
+Function AnErrorTheProgramThrowsIsRaisedInTheScript() Throws LuauError
+    Local lua = LuauState()
+    Try lua.SetFunction("read_save", ReadSave)
+    // Called by pcall itself, it has no caller in Luau's code to say where, as Luau's own
+    // functions haven't.
+    Local caught = Try lua.Evaluate<String>(
+        r"local ok, err = pcall(read_save, 'save.dat') return err")
+    Expect(caught == "save.dat doesn't exist", caught)
+    Local message = Try lua.Evaluate<String>(
+        "local ok, err = pcall(function() return read_save('x.dat') end) return err",
+        "@mods/a.luau")
+    Expect(message == "mods/a.luau:1: x.dat doesn't exist", message)
+End Function
+
+@Test
+Function AnErrorThatComesBackOutHasItsCause() Throws LuauError
+    Local lua = LuauState()
+    Local thrown = IOError(IOErrorKind.NOT_FOUND, "gone")
+    // A lambda beside the overloads says Throws Error; fb's lane has why (throws_overload.fb).
+    Try lua.SetFunction("fail", Function() Throws Error
+        Throw thrown
+    End Function)
+    Local error = ExpectThrows<LuauError>(lua.Run("local x = 1\nfail()", "@mods/b.luau"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.RUNTIME)
+    Expect(error.Message == "mods/b.luau:2: gone", error.Message)
+    Expect(error.Cause != Null && RefEquals(error.Cause, thrown))
+    Expect(error.Traceback.Contains("mods/b.luau:2"), error.Traceback)
+End Function
+
+@Test
+Function AnArgumentOfAnotherTypeIsAnErrorInTheScript() Throws LuauError
+    Local lua = LuauState()
+    Try lua.SetFunction("damage", Function(target: String, amount: Int) => amount)
+    Local message =
+        Try lua.Evaluate<String>(r"local ok, err = pcall(damage, 'door', 'lots') return err")
+    Expect(message == "invalid argument #2 to 'damage' (expected Int32, got string)", message)
+    Local placed = Try lua.Evaluate<String>(
+        r"local ok, err = pcall(function() return damage('door', {}) end) return err")
+    Expect(placed == "chunk:1: invalid argument #2 to 'damage' (expected Int32, got table)", placed)
+    Local missing = Try lua.Evaluate<String>(r"local ok, err = pcall(damage, 'door') return err")
+    Expect(missing.Contains("invalid argument #2 to 'damage' (expected Int32, got nil)"), missing)
+    // More than it takes are let go, as Luau's own functions do.
+    Expect(Try lua.Evaluate<Int>("return damage('door', 5, 'extra')") == 5)
+End Function
+
+@Test
+Function AnErrorCrossesOutAndBackInAndOutAgain() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run(r"function inner() error({ code = 5 }) end")
+    Local inner = Try lua.Get<LuauFunction>("inner")
+    Try lua.SetFunction("middle", Function() Throws Error
+        Try inner.Invoke()
+    End Function)
+    Local error = ExpectThrows<LuauError>(lua.Run("middle()"))
+    If error == Null Then Return
+    Local value = error.Value
+    Expect(value != Null && value.Kind == LuauValueKind.TABLE)
+    If value == Null Then Return
+    Expect(Try value.Read<LuauTable>().Get<Int>("code") == 5)
+    // As a string, its message is kept, not given its place again.
+    Try lua.Run("function inner2() error('deep') end")
+    Local inner2 = Try lua.Get<LuauFunction>("inner2")
+    Try lua.SetFunction("middle2", Function() Throws Error
+        Try inner2.Invoke()
+    End Function)
+    Local again = ExpectThrows<LuauError>(lua.Run("middle2()"))
+    Expect(again?.Message == "chunk:1: deep", again?.Message ?? "")
+End Function
+
+@Test
+Function CallsDeeperThanTheLimitAreAnErrorNotACrash() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run("function down(n) return deeper(n) end")
+    Local down = Try lua.Get<LuauFunction>("down")
+    Try lua.SetFunction("deeper", Function(n: Int): Int Throws Error
+        If n == 0 Then Return 0
+        Return Try down.Call<Int>(n - 1)
+    End Function)
+    Expect(Try lua.Evaluate<Int>("return down(20)") == 0)
+    Local error = ExpectThrows<LuauError>(lua.Run("down(200)"))
+    If error == Null Then Return
+    Expect(error.Message.Contains("deep"), error.Message)
+    Expect(Try lua.Evaluate<Int>("return down(3)") == 0)
+End Function
+
+@Test
+Function FunctionsLuauCollectsAreLetGo() Throws LuauError
+    Local lua = LuauState()
+    For index = 1 To 100
+        Local made = Try lua.Wrap(Function() => index)
+    End For
+    Try lua.SetFunction("kept", Function() => 1)
+    Try lua.Run("for i = 1, 3 do local f = kept end")
+    lua.Collect()
+    // The next call of the program's lets them go.
+    Try lua.Run("x = 1")
+    Expect(lua.Functions.Count == 1, "{lua.Functions.Count}")
+    Expect(Try lua.Evaluate<Int>("return kept()") == 1)
+End Function
+
+@Test
+Function TwoStatesOnOneThreadCallTheirOwn() Throws LuauError
+    Local first = LuauState()
+    Local second = LuauState()
+    Try first.SetFunction("who", Function() => "first")
+    Try second.SetFunction("who", Function() => "second")
+    Expect(Try first.Evaluate<String>("return who()") == "first")
+    Expect(Try second.Evaluate<String>("return who()") == "second")
+End Function
+
+@Test
+Function AFunctionCanHoldItsStateWeakly() Throws LuauError
+    Local lua = LuauState()
+    Try lua.SetFunction("count", Function[Weak lua](): Int Throws Error
+        Local held = lua
+        If held == Null Then Return 0
+        Return Try held.Evaluate<Int>("return 41") + 1
+    End Function)
+    Expect(Try lua.Evaluate<Int>("return count()") == 42)
+End Function

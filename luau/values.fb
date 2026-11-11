@@ -2,12 +2,16 @@
 //! the package gives it, the numbers, Bool, and String.
 
 Import std.ffi
+Import std.core
+Import "./c/fbl_callback"
+Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_ref"
 Import "./errors"
 Import "./library"
 Import "./shim"
 Import "./state"
+Import "./value"
 
 /// What crosses between a program and Luau by its type: a type that implements it is one a
 /// State's Get and Set, a function's arguments and results, and a table's keys and values take.
@@ -139,6 +143,69 @@ Public Struct LuauSlots
             Throw LuauError(LuauErrorKind.CONVERSION, "expected {expected}, got {value}")
         End If
         Return value
+    End Method
+
+    /// Argument `index` of a call of the program's function `name`, as a T: nil when the call has
+    /// fewer.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when it isn't a T, as Luau says it: "invalid argument #2 to
+    /// 'damage' (expected Int32, got string)".
+    @PanicsAtCaller
+    Package Method Argument<T: LuauType>(index: Int32, name: String): T Throws LuauError
+        While Count() <= index
+            Try Owner.Check(fbl_frame_push_nil(Owner.Live(), Frame))
+        End While
+        Try
+            Return Try T.FromLuau(Self, index)
+        Catch error As LuauError
+            If error.Kind != LuauErrorKind.CONVERSION Then Throw error
+            Throw LuauError(LuauErrorKind.CONVERSION,
+                            "invalid argument #{index + 1} to '{name}' ({error.Message})")
+        End Try
+    End Method
+
+    /// Leaves `value` as a call's one result: FBL_OK.
+    @PanicsAtCaller
+    Package Method Result<T: LuauType>(value: T): Int32 Throws LuauError
+        Truncate(0)
+        Try T.ToLuau(Self, value)
+        Return FBL_OK
+    End Method
+
+    /// Leaves a call no results: FBL_OK.
+    @PanicsAtCaller
+    Package Method NoResult(): Int32
+        Truncate(0)
+        Return FBL_OK
+    End Method
+
+    /// Leaves `error` as what a call raises, a status for the library: the value a LuauError from
+    /// Luau's code raised, as it was, and any other error's message after where the function was
+    /// called, as Luau's own errors are; and keeps it, so it's the Cause of the LuauError it comes
+    /// back out as.
+    Package Method Raise(error: Error): Int32
+        Truncate(0)
+        If error Is LuauError
+            Local value = (error As LuauError).Value
+            If value != Null
+                Try
+                    Try LuauValue.ToLuau(Self, value)
+                    Return FBL_RUNTIME
+                Catch failed As LuauError
+                    Truncate(0)
+                End Try
+            End If
+        End If
+        Local message = error.Message
+        If fbl_callback_where(Owner.Live(), Frame) == FBL_OK
+            message = (Try? String.FromLuau(Self, 0) ?? "") + message
+            Truncate(0)
+        End If
+        Owner.Raised[message] = error
+        Try? String.ToLuau(Self, message)
+        Return FBL_RUNTIME
     End Method
 
     /// Gives a number to Luau.

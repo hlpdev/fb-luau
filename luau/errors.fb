@@ -1,6 +1,7 @@
 //! The errors Luau's code and the package give: LuauError, and what kind each is.
 
 Import std.core
+Import "./value"
 
 /// What kind of error a [LuauError] is.
 Public Enum LuauErrorKind
@@ -44,11 +45,17 @@ Public Class LuauError Extends Error
     /// Where it was raised, as Luau's `debug.traceback` writes it, the innermost call first, a
     /// line each; "" for an error that wasn't raised in Luau's code.
     Public ReadOnly Field Traceback: String
+    /// What the script raised, which can be any value, as `error({ code = 5 })` raises a table, or
+    /// a syntax error's message; Null for an error that isn't a value of Luau's.
+    Public ReadOnly Field Value: LuauValue?
 
-    /// Makes a LuauError of `kind` that says `message`, raised where `traceback` says.
-    Public New(kind: LuauErrorKind, message: String, traceback: String = "", cause: Error? = Null)
+    /// Makes a LuauError of `kind` that says `message`, raised where `traceback` says, from
+    /// `cause`, with the value Luau raised.
+    Public New(kind: LuauErrorKind, message: String, traceback: String = "", cause: Error? = Null,
+               value: LuauValue? = Null)
         Super.New(message, cause)
         Kind = kind
         Traceback = traceback
+        Value = value
     End New
 End Class

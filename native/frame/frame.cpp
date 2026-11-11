@@ -59,7 +59,7 @@ int32_t fbl_frame_open(uint64_t state) try {
         return -1;
     }
     try {
-        found->frames.push_back({ .thread = found->main, .base = lua_gettop(found->main) });
+        found->frames.push_back({ .thread = found->current, .base = lua_gettop(found->current) });
     } catch (const std::exception&) {
         fbl::fail("not enough memory for a frame");
         return -1;

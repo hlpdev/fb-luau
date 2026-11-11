@@ -145,17 +145,6 @@ Function AFunctionLoadsAndRunsLater() Throws LuauError
 End Function
 
 @Test
-Function AFunctionKeepsItsStateAlive() Throws LuauError
-    Local function = Try Made()
-    Try function.Invoke()
-End Function
-
-Function Made(): LuauFunction Throws LuauError
-    Local lua = LuauState()
-    Return Try lua.Load("assert(1 + 1 == 2)")
-End Function
-
-@Test
 Function ClosingIsOnceAndFinal() Throws LuauError
     Local lua = LuauState()
     Local function = Try lua.Load("return 1")

@@ -1,0 +1,33 @@
+//! How Luau calls the program's functions: the library calls one Callback, Dispatch, which finds
+//! the State by its handle among this thread's, as a Callback can't hold anything, and the State
+//! runs the function by its number.
+
+Import "./c/fbl_callback"
+Import "./c/fbl_core"
+Import "./state"
+
+// This thread's States, by their handles' slots. A State is only its own thread's, and the
+// library calls Dispatch only inside a call that thread made, so this thread's are the ones it
+// asks for.
+ThreadLocal Global states: Weak<LuauState>[] = []
+
+/// Keeps `state` among this thread's, by its handle, for Dispatch, and gives the library Dispatch.
+Package Function Registered(state: LuauState)
+    Local slot = (state.Handle >> 32) As Int
+    While states.Count <= slot
+        states.Add(Null)
+    End While
+    states[slot] = state
+    fbl_callback_set(Dispatch)
+End Function
+
+/// The Callback the library calls for each of the program's functions: the State whose handle
+/// it's given runs its function `function`, with the frame of its call. FBL_OTHER, with no error,
+/// for a State this thread hasn't, which the library only gives for a bug.
+Function Dispatch(state: UInt64, frame: Int32, function: Int64): Int32
+    Local slot = (state >> 32) As Int
+    If slot >= states.Count Then Return FBL_OTHER
+    Local owner: LuauState? = states[slot]
+    If owner == Null || owner.Handle != state Then Return FBL_OTHER
+    Return owner.Invoked(frame, function)
+End Function

@@ -29,6 +29,9 @@ struct frame_t {
 // compiles with, and what the program has open on it.
 struct state_t {
     lua_State* main = nullptr;
+    // The thread the program's calls run on now: the main thread, or the one a function of the
+    // program's was called on, while it runs.
+    lua_State* current = nullptr;
     uint64_t handle = 0;
     std::thread::id owner;
     int64_t memory_limit = 0;
@@ -42,7 +45,15 @@ struct state_t {
     int depth = 0;
     // The registry's references the program holds, by their numbers, so a stale one is refused.
     std::unordered_set<int> refs;
-    // The last error a call met.
+    // The program's functions Luau has, and the numbers of those it's collected, which the
+    // program takes; there's always room for each live one's number, so a destructor never needs
+    // memory.
+    int64_t live_functions = 0;
+    std::vector<int64_t> released;
+    // Their names, which Luau keeps pointers to.
+    std::unordered_set<std::string> names;
+    // The last error a call met, its value kept by the registry at error_ref.
+    int error_ref = LUA_NOREF;
     int32_t error_kind = FBL_OK;
     std::string error_message;
     std::string error_traceback;
@@ -96,6 +107,12 @@ int protect(const state_t& state, lua_State* thread, int arguments, int results,
 // What a protect()'s status is to the program: FBL_OK, or the error, kept as the State's, its
 // value taken off `thread`'s stack.
 int32_t settle(state_t& state, lua_State* thread, int status) noexcept;
+
+// The userdata tag of a program's function's number, whose destructor gives it back.
+constexpr int function_tag = 1;
+
+// Sets a new State up for the program's functions: their destructor.
+void prepare_callbacks(lua_State* thread) noexcept;
 
 // Takes the error value on top of `thread`'s stack as the State's last error, of `kind`, with
 // `traceback`, and pops it.

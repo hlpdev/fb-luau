@@ -1,6 +1,5 @@
 //! A Luau function, as a handle the program calls.
 
-Import "./c/fbl_call"
 Import "./c/fbl_frame"
 Import "./c/fbl_ref"
 Import "./errors"
@@ -20,18 +19,30 @@ Import "./values"
 /// Expect(Try lua.Get<Int>("calls") == 2)
 /// ```
 Public Class LuauFunction Implements LuauType
-    /// The State it's in.
-    Package ReadOnly Field Owner: LuauState
+    /// The State it's in, which the program keeps: it holds it weakly, so a function of the
+    /// program's that holds it, which the State holds, isn't a cycle.
+    ReadOnly Field owner: Weak<LuauState>
+
+    /// The State it's in, panicking at the caller once it's gone.
+    @PanicsAtCaller
+    Package Property Owner: LuauState
+        Get
+            Local held: LuauState? = owner
+            If held == Null Then Panic("the Luau State is closed")
+            Return held
+        End Get
+    End Property
     /// The State's reference to it.
     Package ReadOnly Field Ref: Int32
 
     Package New(owner: LuauState, ref: Int32)
-        Owner = owner
+        Self.owner = owner
         Ref = ref
     End New
 
     Method Destroy()
-        If Owner.IsOpen Then fbl_ref_free(Owner.Handle, Ref)
+        Local held: LuauState? = owner
+        If held != Null && held.IsOpen Then fbl_ref_free(held.Handle, Ref)
     End Method
 
     /// Gives it to Luau: the function itself, which has to be of the State it's given to.
@@ -59,16 +70,16 @@ Public Class LuauFunction Implements LuauType
         Return LuauFunction(owner, ref)
     End Method
 
-    /// Calls it with no arguments, and lets its results go.
-    ///
-    /// # Errors
-    ///
-    /// A LuauError for what it raises or meets as it runs.
+    /// A frame with the function in slot 0, which the caller closes with Owner.Closed.
     @PanicsAtCaller
-    Public Method Invoke() Throws LuauError
-        Local frame = Owner.Opened()
-        Defer Owner.Closed(frame)
-        Try Owner.Check(fbl_ref_push(Owner.Live(), frame, Ref))
-        Try Owner.Check(fbl_call_function(Owner.Handle, frame, 0, 0))
+    Package Method Opened(): LuauSlots Throws LuauError
+        Local slots = LuauSlots(Owner, Owner.Opened())
+        Try
+            Try slots.PushRef(Ref)
+        Catch error As LuauError
+            Owner.Closed(slots.Frame)
+            Throw error
+        End Try
+        Return slots
     End Method
 End Class

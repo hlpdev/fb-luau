@@ -5,16 +5,19 @@ Import std.collections
 Import std.core
 
 Import "./c/fbl_call"
+Import "./c/fbl_callback"
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_load"
 Import "./c/fbl_state"
 Import "./c/fbl_table"
+Import "./callbacks"
 Import "./errors"
 Import "./functions"
 Import "./library"
 Import "./shim"
 Import "./tables"
+Import "./value"
 Import "./values"
 
 /// How a State's code is compiled, as Luau's compiler takes it.
@@ -66,13 +69,23 @@ End Struct
 Public Class LuauState
     /// The library's handle of the State, or 0 once it's closed.
     Package Field Handle: UInt64
+    /// The program's functions Luau has, by their numbers, each run with its call's slots.
+    Package Field Functions: Map<Int64, Func(LuauSlots): Int32>
+    /// The numbers the next one takes.
+    Field nextFunction: Int64 = 0
+    /// The program's errors raised in Luau in the program's call that's running, by the message
+    /// they were raised with, so one that comes back out is the LuauError's Cause.
+    Package Field Raised: Map<String, Error>
 
     /// Makes a State with the default options: no memory limit, and Luau's libraries.
     @PanicsAtCaller
     Public New()
+        Functions = {}
+        Raised = {}
         Local made = Made(LuauOptions())
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
+        Registered(Self)
     End New
 
     /// Makes a State with `options`.
@@ -86,10 +99,13 @@ Public Class LuauState
     /// When a memory limit is below 0, or a compile option isn't from 0 to 2.
     @PanicsAtCaller
     Public New(options: LuauOptions) Throws LuauError
+        Functions = {}
+        Raised = {}
         Local made = Made(options)
         If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
+        Registered(Self)
     End New
 
     Method Destroy()
@@ -112,6 +128,8 @@ Public Class LuauState
         If Handle == 0 Then Return
         If !fbl_state_close(Handle) Then Panic(LastError())
         Handle = 0
+        Functions.Clear()
+        Raised.Clear()
     End Method
 
     /// The bytes its VM holds now.
@@ -276,9 +294,47 @@ Public Class LuauState
         Return frame
     End Method
 
-    /// Closes the frame Opened gave.
+    /// Closes the frame Opened gave. Once the program's call that opened the first is done, it lets
+    /// go of the functions Luau has collected, and of the errors it raised.
     Package Method Closed(frame: Int32)
-        If Handle != 0 Then fbl_frame_close(Handle, frame)
+        If Handle == 0 Then Return
+        fbl_frame_close(Handle, frame)
+        If frame != 0 Then Return
+        Raised.Clear()
+        Local taken: Int64[64]
+        While True
+            Local count: Int32
+            Unsafe
+                count = fbl_callback_released(Handle, AddressOf(taken[0]), 64)
+            End Unsafe
+            For index = 0 Until count
+                Functions.Remove(taken[index])
+            End For
+            If count < 64 Then Return
+        End While
+    End Method
+
+    /// Runs the program's function `function` for a call of it from Luau, whose frame is `frame`:
+    /// a status, its results or its error left in the frame. FBL_OTHER for one it hasn't.
+    Package Method Invoked(frame: Int32, function: Int64): Int32
+        Local invoke = Functions.Get(function)
+        If invoke == Null Then Return FBL_OTHER
+        Return invoke(LuauSlots(Self, frame))
+    End Method
+
+    /// A new Luau function, named `name`, that runs `invoke` when Luau calls it.
+    @PanicsAtCaller
+    Package Method NewFunction(name: String,
+                               invoke: Func(LuauSlots): Int32): LuauFunction Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        nextFunction++
+        Local function = nextFunction
+        Functions[function] = invoke
+        Local status = fbl_callback_function(Handle, frame, function, name)
+        If status != FBL_OK Then Functions.Remove(function)
+        Try Check(status)
+        Return Try LuauFunction.FromLuau(LuauSlots(Self, frame), 0)
     End Method
 
     /// Nothing, for FBL_OK; or the State's last error as a LuauError, or a panic, at the caller, for
@@ -294,7 +350,19 @@ Public Class LuauState
             message = TextAt(fbl_state_error_message(Handle, AddressOf(length)), length)
             traceback = TextAt(fbl_state_error_traceback(Handle, AddressOf(length)), length)
         End Unsafe
-        Throw LuauError(status As LuauErrorKind, message, traceback)
+        Throw LuauError(status As LuauErrorKind, message, traceback, Raised.Get(message),
+                        ErrorValue())
+    End Method
+
+    /// The value of the last error a call met, or Null for one that isn't a value of Luau's.
+    Package Method ErrorValue(): LuauValue?
+        Local frame = fbl_frame_open(Handle)
+        If frame < 0 Then Return Null
+        Defer fbl_frame_close(Handle, frame)
+        If fbl_state_error_value(Handle, frame) != FBL_OK Then Return Null
+        Local value = Try? LuauValue.FromLuau(LuauSlots(Self, frame), 0)
+        If value == Null || value.IsNil Then Return Null
+        Return value
     End Method
 
     /// Compiles `source` as `name` into the frame's next slot, as a function: a status.

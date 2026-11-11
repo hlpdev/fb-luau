@@ -271,6 +271,9 @@ def check_bindings():
     step("bindings")
     if run(["sh", "tools/bindgen.sh", "--check"]) != 0:
         fail("the bindings aren't what their headers make; run tools/bindgen.sh")
+    step("arity")
+    if run([sys.executable, "tools/gen_arity.py", "--check"]) != 0:
+        fail("luau/arity.fb isn't what tools/gen_arity.py writes; run it")
 
 
 def check_line_ends():

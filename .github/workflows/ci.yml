@@ -147,4 +147,5 @@ jobs:
           git ls-files '*.h' '*.hpp' '*.c' '*.cpp' | xargs clang-format --dry-run -Werror
           fb fmt --check luau tests/panics
           sh tools/bindgen.sh --check
+          python3 tools/gen_arity.py --check
           fb doc --check luau

@@ -38,3 +38,27 @@ with its date; the rest are the lane's, which the user can change.
   work on another thread. L1 proves it on fb 1.3.0 before anything rests on it.
 - **The bindings are Package**, made so by tools/bindgen.sh after fb-bindgen, since a program
   mustn't call them and `fb doc --check` would need docs on them otherwise.
+
+## L1 to L3 (2026-11-11)
+
+- **Calls run on a runner thread for each depth, by lua_resume**, not lua_pcall: a failed call
+  keeps its frames, which luaL_traceback reads after, and a yield is told apart from an error.
+- **Work that can raise runs under one C function the State makes, by lua_pcall**, with copies of
+  the frame's values as its arguments and its results left in the caller's frame; what can't
+  raise, a push after lua_checkstack, runs bare; and every exported function is a
+  function-try-block that catches everything.
+- **Arrays don't implement LuauType** (an array type has no Statics); they cross through tables
+  and records. Map does.
+- **Records are std's Load and Save**, not a For Field loop of the package's own: a record's
+  Fields get `T?`, arrays, Maps, Enums, and std's attributes. An empty Luau table is an Array,
+  swapped for an Object where Load's error says a Field wanted one.
+- **Handles hold their State weakly**, not strongly as the plan first said: a program function
+  that holds a handle is held by the State, so a strong handle made a cycle in the most common
+  use, a function of the program's calling a Luau function. A handle used after its State is gone
+  panics. This changes what the plan, as the user approved it, said of lifetimes.
+- **An error crossing into Luau is its Message after where it was called**, as Luau's own errors
+  are, since FutureBlitz can't give an Error's Class name as the program runs; it's the Cause of
+  the LuauError it comes back out as, matched by its message.
+- **No `LuauState` first parameter** for the program's functions: a function captures `[Weak lua]`.
+- **`ToFunc` and `ToAction` take their type arguments written**, as overloads by type-argument
+  count with no arguments aren't told apart from the type expected.

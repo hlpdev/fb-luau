@@ -92,6 +92,11 @@ int set_up(lua_State* stack) {
     lua_pushcfunction(stack, run_work, "fbl");
     state->protect_ref = lua_ref(stack, -1);
     lua_pop(stack, 1);
+    // A slot of the registry's for the last error's value, which only ever changes in place.
+    lua_pushboolean(stack, 0);
+    state->error_ref = lua_ref(stack, -1);
+    lua_pop(stack, 1);
+    fbl::prepare_callbacks(stack);
     return 0;
 }
 
@@ -180,6 +185,11 @@ int32_t misuse(std::string_view why) noexcept {
 int32_t record_error(state_t& state, int32_t kind, std::string_view message,
                      std::string_view traceback) noexcept {
     state.error_kind = kind;
+    // An error that isn't a value of Luau's has none.
+    if (state.error_ref != LUA_NOREF && lua_checkstack(state.main, 1) != 0) {
+        lua_pushnil(state.main);
+        lua_rawseti(state.main, LUA_REGISTRYINDEX, state.error_ref);
+    }
     try {
         state.error_message = message;
         state.error_traceback = traceback;
@@ -239,7 +249,9 @@ int32_t take_error(state_t& state, lua_State* thread, int32_t kind,
     } catch (const std::exception&) {
         record_error(state, kind, "", traceback);
     }
-    lua_pop(thread, 1);
+    // The value itself, in the registry's slot for it, which the slot's being there already lets
+    // change without memory.
+    lua_rawseti(thread, LUA_REGISTRYINDEX, state.error_ref);
     return kind;
 }
 
@@ -278,6 +290,9 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
         state->compile_options.debugLevel = options->debug;
         state->compile_options.coverageLevel = options->coverage;
         state->main = lua_newstate(allocate, state.get());
+        if (state->main != nullptr) {
+            lua_callbacks(state->main)->userdata = state.get();
+        }
         if (state->main == nullptr ||
             lua_cpcall(state->main, set_up, static_cast<void*>(state.get())) != LUA_OK) {
             said = FBL_MEMORY;
@@ -285,7 +300,7 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
                                   options->memory_limit));
             return 0;
         }
-        lua_callbacks(state->main)->userdata = state.get();
+        state->current = state->main;
         try {
             const std::scoped_lock lock(slots_mutex);
             uint32_t slot = 0;
@@ -379,6 +394,21 @@ const uint8_t* fbl_state_error_message(uint64_t state, int64_t* length) try {
 } catch (...) {
     fbl::escaped();
     return nullptr;
+}
+
+int32_t fbl_state_error_value(uint64_t state, int32_t frame) try {
+    fbl::state_t* found = fbl::find_state(state);
+    const fbl::frame_t* in = found == nullptr ? nullptr : fbl::find_frame(*found, frame);
+    if (in == nullptr) {
+        return FBL_MISUSE;
+    }
+    if (lua_checkstack(in->thread, 1) == 0) {
+        return fbl::record_error(*found, FBL_MEMORY, "not enough memory");
+    }
+    lua_getref(in->thread, found->error_ref);
+    return FBL_OK;
+} catch (...) {
+    return fbl::escaped();
 }
 
 const uint8_t* fbl_state_error_traceback(uint64_t state, int64_t* length) try {

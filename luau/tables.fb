@@ -27,18 +27,30 @@ Import "./values"
 /// Expect(Try player.Get<Int>("lives") == 3)
 /// ```
 Public Class LuauTable Implements LuauType
-    /// The State it's in.
-    Package ReadOnly Field Owner: LuauState
+    /// The State it's in, which the program keeps: it holds it weakly, so a function of the
+    /// program's that holds it, which the State holds, isn't a cycle.
+    ReadOnly Field owner: Weak<LuauState>
+
+    /// The State it's in, panicking at the caller once it's gone.
+    @PanicsAtCaller
+    Package Property Owner: LuauState
+        Get
+            Local held: LuauState? = owner
+            If held == Null Then Panic("the Luau State is closed")
+            Return held
+        End Get
+    End Property
     /// The State's reference to it.
     Package ReadOnly Field Ref: Int32
 
     Package New(owner: LuauState, ref: Int32)
-        Owner = owner
+        Self.owner = owner
         Ref = ref
     End New
 
     Method Destroy()
-        If Owner.IsOpen Then fbl_ref_free(Owner.Handle, Ref)
+        Local held: LuauState? = owner
+        If held != Null && held.IsOpen Then fbl_ref_free(held.Handle, Ref)
     End Method
 
     /// Gives it to Luau: the table itself, which has to be of the State it's given to.

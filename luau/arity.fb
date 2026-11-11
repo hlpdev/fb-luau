@@ -1,0 +1,3110 @@
+//! What's the same for each number of a function's arguments, from none to 8: a State's
+//! SetFunction and Wrap, and a LuauFunction's calls. tools/gen_arity.py writes it; run it again
+//! instead of editing it.
+
+Import std.core
+Import "./c/fbl_call"
+Import "./errors"
+Import "./functions"
+Import "./state"
+Import "./value"
+Import "./values"
+
+/// A State's functions both ways: the program's, given to Luau.
+Extend LuauState
+    /// Sets the global `name` to `f`, a function of no arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<R: LuauType>(name: String, f: Func(): R) Throws LuauError
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<R: LuauType>(f: Func(): R,
+                                    name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Return Try slots.Result(f())
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<R: LuauType>(name: String, f: Func(): R Throws Error) Throws LuauError
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<R: LuauType>(f: Func(): R Throws Error,
+                                    name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Return Try slots.Result(Try f())
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction(name: String, f: Func()) Throws LuauError
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap(f: Func(), name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            f()
+            Return slots.NoResult()
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction(name: String, f: Func() Throws Error) Throws LuauError
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap(f: Func() Throws Error,
+                       name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try f()
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, R>(name: String, f: Func(A1): R) Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, R>(f: Func(A1): R,
+                              name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Return Try slots.Result(f(a1))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, R>(name: String, f: Func(A1): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, R>(f: Func(A1): R Throws Error,
+                              name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Return Try slots.Result(Try f(a1))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1: LuauType>(name: String, f: Func(A1)) Throws LuauError
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1: LuauType>(f: Func(A1),
+                                     name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                f(a1)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1: LuauType>(name: String, f: Func(A1) Throws Error) Throws LuauError
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1: LuauType>(f: Func(A1) Throws Error,
+                                     name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Try f(a1)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, R>(name: String, f: Func(A1, A2): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, R>(f: Func(A1, A2): R,
+                                  name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Return Try slots.Result(f(a1, a2))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, R>(name: String,
+                                         f: Func(A1, A2): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, R>(f: Func(A1, A2): R Throws Error,
+                                  name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Return Try slots.Result(Try f(a1, a2))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2>(name: String, f: Func(A1, A2)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2>(f: Func(A1, A2),
+                               name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                f(a1, a2)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2>(name: String, f: Func(A1, A2) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2>(f: Func(A1, A2) Throws Error,
+                               name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Try f(a1, a2)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, R>(name: String, f: Func(A1, A2, A3): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, R>(f: Func(A1, A2, A3): R,
+                                      name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Return Try slots.Result(f(a1, a2, a3))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, R>(name: String,
+                                             f: Func(A1, A2, A3): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, R>(f: Func(A1, A2, A3): R Throws Error,
+                                      name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Return Try slots.Result(Try f(a1, a2, a3))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3>(name: String, f: Func(A1, A2, A3)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3>(f: Func(A1, A2, A3),
+                                   name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                f(a1, a2, a3)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3>(name: String,
+                                          f: Func(A1, A2, A3) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3>(f: Func(A1, A2, A3) Throws Error,
+                                   name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Try f(a1, a2, a3)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, R>(name: String,
+                                                 f: Func(A1, A2, A3, A4): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, R>(f: Func(A1, A2, A3, A4): R,
+                                          name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Return Try slots.Result(f(a1, a2, a3, a4))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, R>(name: String,
+                                                 f: Func(A1, A2, A3,
+                                                         A4): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, R>(f: Func(A1, A2, A3, A4): R Throws Error,
+                                          name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Return Try slots.Result(Try f(a1, a2, a3, a4))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4>(name: String,
+                                              f: Func(A1, A2, A3, A4)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4>(f: Func(A1, A2, A3, A4),
+                                       name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                f(a1, a2, a3, a4)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4>(name: String,
+                                              f: Func(A1, A2, A3, A4) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4>(f: Func(A1, A2, A3, A4) Throws Error,
+                                       name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Try f(a1, a2, a3, a4)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, R>(name: String,
+                                                     f: Func(A1, A2, A3, A4,
+                                                             A5): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, R>(f: Func(A1, A2, A3, A4, A5): R,
+                                              name: String =
+                                              "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Return Try slots.Result(f(a1, a2, a3, a4, a5))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, R>(name: String,
+                                                     f: Func(A1, A2, A3, A4,
+                                                             A5): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, R>(f: Func(A1, A2, A3, A4, A5): R Throws Error,
+                                              name: String =
+                                              "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Return Try slots.Result(Try f(a1, a2, a3, a4, a5))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5>(name: String,
+                                                  f: Func(A1, A2, A3, A4, A5)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5>(f: Func(A1, A2, A3, A4, A5),
+                                           name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                f(a1, a2, a3, a4, a5)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5>(name: String,
+                                                  f: Func(A1, A2, A3, A4,
+                                                          A5) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5>(f: Func(A1, A2, A3, A4, A5) Throws Error,
+                                           name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Try f(a1, a2, a3, a4, a5)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, R>(name: String,
+                                                         f: Func(A1, A2, A3, A4, A5,
+                                                                 A6): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, R>(f: Func(A1, A2, A3, A4, A5, A6): R,
+                                                  name: String =
+                                                  "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Return Try slots.Result(f(a1, a2, a3, a4, a5, a6))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, R>(name: String,
+                                                         f: Func(
+                                                             A1, A2, A3, A4, A5,
+                                                             A6): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, R>(f: Func(A1, A2, A3, A4, A5, A6): R Throws Error,
+                                                  name: String =
+                                                  "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Return Try slots.Result(Try f(a1, a2, a3, a4, a5, a6))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6>(name: String,
+                                                      f: Func(A1, A2, A3, A4, A5,
+                                                              A6)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6>(f: Func(A1, A2, A3, A4, A5, A6),
+                                               name: String =
+                                               "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                f(a1, a2, a3, a4, a5, a6)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6>(name: String,
+                                                      f: Func(A1, A2, A3, A4, A5,
+                                                              A6) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6>(f: Func(A1, A2, A3, A4, A5, A6) Throws Error,
+                                               name: String =
+                                               "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Try f(a1, a2, a3, a4, a5, a6)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7, R>(name: String,
+                                                             f: Func(A1, A2, A3, A4, A5, A6,
+                                                                     A7): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7, R>(f: Func(A1, A2, A3, A4, A5, A6, A7): R,
+                                                      name: String =
+                                                      "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Return Try slots.Result(f(a1, a2, a3, a4, a5, a6, a7))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7, R>(
+            name: String, f: Func(A1, A2, A3, A4, A5, A6, A7): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7, R>(f: Func(A1, A2, A3, A4, A5, A6,
+                                                              A7): R Throws Error,
+                                                      name: String =
+                                                      "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Return Try slots.Result(Try f(a1, a2, a3, a4, a5, a6, a7))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7>(name: String,
+                                                          f: Func(A1, A2, A3, A4, A5, A6,
+                                                                  A7)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7>(f: Func(A1, A2, A3, A4, A5, A6, A7),
+                                                   name: String =
+                                                   "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                f(a1, a2, a3, a4, a5, a6, a7)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7>(name: String,
+                                                          f: Func(A1, A2, A3, A4, A5, A6,
+                                                                  A7) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7>(f: Func(A1, A2, A3, A4, A5, A6, A7) Throws Error,
+                                                   name: String =
+                                                   "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Try f(a1, a2, a3, a4, a5, a6, a7)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives a result, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7, A8, R>(name: String,
+                                                                 f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                         A8): R) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives a result, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7, A8, R>(f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                  A8): R,
+                                                          name: String =
+                                                          "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Return Try slots.Result(f(a1, a2, a3, a4, a5, a6, a7, a8))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives a result, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7, A8, R>(name: String, f: Func(A1, A2, A3, A4, A5, A6, A7, A8): R Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives a result, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7, A8, R>(f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                  A8): R Throws Error,
+                                                          name: String =
+                                                          "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Return Try slots.Result(Try f(a1, a2, a3, a4, a5, a6, a7, a8))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives nothing, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7, A8>(name: String,
+                                                              f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                      A8)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives nothing, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7, A8>(f: Func(A1, A2, A3, A4, A5, A6, A7, A8),
+                                                       name: String =
+                                                       "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                f(a1, a2, a3, a4, a5, a6, a7, a8)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives nothing, and throws, as a Luau
+    /// function, as [Wrap] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetFunction<A1, A2, A3, A4, A5, A6, A7, A8>(name: String,
+                                                              f: Func(
+                                                                  A1, A2, A3, A4, A5, A6, A7,
+                                                                  A8) Throws Error) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Try Set(name, Try Wrap(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives nothing, and throws, as a Luau function, named `name` in
+    /// Luau's errors and tracebacks: its arguments are read as their types, a missing one as
+    /// nil, and an argument of another type is an error in the script, "invalid argument #1
+    /// to 'name' (expected Int32, got string)"; its result is given back as its type; and an
+    /// error it throws is raised in the script, as its Message after where it was called,
+    /// which a script's pcall catches, and which comes back out of the program's call as the
+    /// LuauError's Cause.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Wrap<A1, A2, A3, A4, A5, A6, A7, A8>(f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                               A8) Throws Error,
+                                                       name: String =
+                                                       "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Try f(a1, a2, a3, a4, a5, a6, a7, a8)
+                Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+End Extend
+
+/// A Luau function's calls from the program.
+Extend LuauFunction
+    /// Calls it with no arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R: LuauType>(): R Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with no arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke() Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with no arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2>(): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with no arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3>(): (R1, R2, R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with no arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll(): LuauValue[] Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of no arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<R: LuauType>(): (Func(): R Throws LuauError)
+        Return Function(): R Throws LuauError
+            Return Try Call<R>()
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of no arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction(): (Func() Throws LuauError)
+        Return Function() Throws LuauError
+            Try Invoke()
+        End Function
+    End Method
+
+    /// Calls it with one argument, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1>(a1: A1): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with one argument, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1: LuauType>(a1: A1) Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with one argument, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1>(a1: A1): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with one argument, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1>(a1: A1): (R1, R2, R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with one argument, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1: LuauType>(a1: A1): LuauValue[] Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of one argument that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, R>(): (Func(A1): R Throws LuauError)
+        Where A1: LuauType
+        Where R: LuauType
+        Return Function(a1: A1): R Throws LuauError
+            Return Try Call<R, A1>(a1)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of one argument that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1: LuauType>(): (Func(A1) Throws LuauError)
+        Return Function(a1: A1) Throws LuauError
+            Try Invoke(a1)
+        End Function
+    End Method
+
+    /// Calls it with 2 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2>(a1: A1, a2: A2): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 2 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2>(a1: A1, a2: A2) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 2 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2>(a1: A1, a2: A2): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 2 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2>(a1: A1, a2: A2): (R1, R2, R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 2 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2>(a1: A1, a2: A2): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 2 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, R>(): (Func(A1, A2): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2): R Throws LuauError
+            Return Try Call<R, A1, A2>(a1, a2)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 2 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2>(): (Func(A1, A2) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Return Function(a1: A1, a2: A2) Throws LuauError
+            Try Invoke(a1, a2)
+        End Function
+    End Method
+
+    /// Calls it with 3 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2, A3>(a1: A1, a2: A2, a3: A3): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 3 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2, A3>(a1: A1, a2: A2, a3: A3) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 3 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2, A3>(a1: A1, a2: A2, a3: A3): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 3 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2, A3>(a1: A1, a2: A2, a3: A3): (R1, R2,
+                                                                          R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 3 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2, A3>(a1: A1, a2: A2, a3: A3): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 3 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, A3, R>(): (Func(A1, A2, A3): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3): R Throws LuauError
+            Return Try Call<R, A1, A2, A3>(a1, a2, a3)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 3 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2, A3>(): (Func(A1, A2, A3) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3) Throws LuauError
+            Try Invoke(a1, a2, a3)
+        End Function
+    End Method
+
+    /// Calls it with 4 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3, a4: A4): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 4 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3, a4: A4) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 4 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3,
+                                                a4: A4): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 4 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3,
+                                                    a4: A4): (R1, R2, R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 4 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3,
+                                          a4: A4): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 4 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, A3, A4, R>(): (Func(A1, A2, A3, A4): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4): R Throws LuauError
+            Return Try Call<R, A1, A2, A3, A4>(a1, a2, a3, a4)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 4 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2, A3, A4>(): (Func(A1, A2, A3, A4) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4) Throws LuauError
+            Try Invoke(a1, a2, a3, a4)
+        End Function
+    End Method
+
+    /// Calls it with 5 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                              a5: A5): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 5 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                             a5: A5) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 5 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                                    a5: A5): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 5 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                                        a5: A5): (R1, R2, R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 5 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                              a5: A5): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 5 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, A3, A4, A5, R>(): (Func(A1, A2, A3, A4, A5): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5): R Throws LuauError
+            Return Try Call<R, A1, A2, A3, A4, A5>(a1, a2, a3, a4, a5)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 5 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2, A3, A4, A5>(): (Func(A1, A2, A3, A4, A5) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) Throws LuauError
+            Try Invoke(a1, a2, a3, a4, a5)
+        End Function
+    End Method
+
+    /// Calls it with 6 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                  a6: A6): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 6 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                 a6: A6) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 6 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                        a6: A6): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 6 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                            a6: A6): (R1, R2, R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 6 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                  a6: A6): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 6 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, A3, A4, A5, A6, R>(): (Func(A1, A2, A3, A4, A5,
+                                                             A6): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6): R Throws LuauError
+            Return Try Call<R, A1, A2, A3, A4, A5, A6>(a1, a2, a3, a4, a5, a6)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 6 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2, A3, A4, A5, A6>(): (Func(A1, A2, A3, A4, A5,
+                                                            A6) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) Throws LuauError
+            Try Invoke(a1, a2, a3, a4, a5, a6)
+        End Function
+    End Method
+
+    /// Calls it with 7 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                      a6: A6, a7: A7): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 7 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6,
+                                                     a7: A7) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 7 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                            a6: A6, a7: A7): (R1,
+                                                                              R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 7 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                                                a5: A5, a6: A6,
+                                                                a7: A7): (R1, R2,
+                                                                          R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 7 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                      a6: A6, a7: A7): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 7 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, A3, A4, A5, A6, A7, R>(): (Func(A1, A2, A3, A4, A5, A6,
+                                                                 A7): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7): R Throws LuauError
+            Return Try Call<R, A1, A2, A3, A4, A5, A6, A7>(a1, a2, a3, a4, a5, a6, a7)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 7 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2, A3, A4, A5, A6, A7>(): (Func(A1, A2, A3, A4, A5, A6,
+                                                                A7) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7) Throws LuauError
+            Try Invoke(a1, a2, a3, a4, a5, a6, a7)
+        End Function
+    End Method
+
+    /// Calls it with 8 arguments, and gives its first result as an R, or nil's when it gives
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call<R, A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                          a6: A6, a7: A7,
+                                                          a8: A8): R Throws LuauError
+        Where R: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try A8.ToLuau(slots, a8)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 1))
+        Return Try R.FromLuau(slots, 0)
+    End Method
+
+    /// Calls it with 8 arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke<A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                         a6: A6, a7: A7, a8: A8) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try A8.ToLuau(slots, a8)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 0))
+    End Method
+
+    /// Calls it with 8 arguments, and gives its first 2 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call2<R1, R2, A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                                                a5: A5, a6: A6, a7: A7,
+                                                                a8: A8): (R1, R2) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try A8.ToLuau(slots, a8)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 2))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1))
+    End Method
+
+    /// Calls it with 8 arguments, and gives its first 3 results, each as its type.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, or of CONVERSION when a result isn't
+    /// of its type.
+    @PanicsAtCaller
+    Public Method Call3<R1, R2, R3, A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                                                    a5: A5, a6: A6, a7: A7,
+                                                                    a8: A8): (R1, R2,
+                                                                              R3) Throws LuauError
+        Where R1: LuauType
+        Where R2: LuauType
+        Where R3: LuauType
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try A8.ToLuau(slots, a8)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, 3))
+        Return (Try R1.FromLuau(slots, 0), Try R2.FromLuau(slots, 1), Try R3.FromLuau(slots, 2))
+    End Method
+
+    /// Calls it with 8 arguments, and gives every result it gives, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method CallAll<A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                          a6: A6, a7: A7,
+                                                          a8: A8): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try A8.ToLuau(slots, a8)
+        Try Owner.Check(fbl_call_function(Owner.Handle, slots.Frame, 0, -1))
+        Local results: LuauValue[] = []
+        For index = 0 Until slots.Count()
+            results.Add(Try LuauValue.FromLuau(slots, index))
+        End For
+        Return results
+    End Method
+
+    /// It as a FutureBlitz function of 8 arguments that gives a result, which calls it
+    /// as Call does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToFunc<A1, A2, A3, A4, A5, A6, A7, A8, R>(): (Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                     A8): R Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7,
+                        a8: A8): R Throws LuauError
+            Return Try Call<R, A1, A2, A3, A4, A5, A6, A7, A8>(a1, a2, a3, a4, a5, a6, a7, a8)
+        End Function
+    End Method
+
+    /// It as a FutureBlitz function of 8 arguments that gives nothing, which calls it
+    /// as Invoke does, and keeps it alive while it's held.
+    @PanicsAtCaller
+    Public Method ToAction<A1, A2, A3, A4, A5, A6, A7, A8>(): (Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                    A8) Throws LuauError)
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Return Function(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7,
+                        a8: A8) Throws LuauError
+            Try Invoke(a1, a2, a3, a4, a5, a6, a7, a8)
+        End Function
+    End Method
+End Extend

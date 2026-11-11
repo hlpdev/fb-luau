@@ -94,8 +94,10 @@ Print(Try lua.Get<Int>("lives"))           // 3
   two threads are two VMs that share nothing, which Luau allows, as nothing in its VM is per
   process but its flags, which the library sets once, before the first State.
 - `lua.Close()` closes it at once: the VM and everything in it go, and so does what it held of
-  the program's (the objects and functions it was given). A State that nothing refers to closes
-  in its Destroy. Using a handle of a closed State panics, saying so, at the call.
+  the program's (the objects and functions it was given). A State closes in its Destroy when the
+  program lets go of it. Its handles hold it weakly, as sol2's references don't keep their state,
+  since a function of the program's that holds a handle is held by the State: a handle used once
+  its State is closed, or gone, panics, saying so, at the call.
 - `lua.MemoryUsed`, `lua.Collect()` (a full collection), and `lua.Step(kilobytes)` look at and
   drive Luau's collector.
 
@@ -222,13 +224,16 @@ Try lua.SetFunction("add", Function(a: Int, b: Int) => a + b)
 
 - `SetFunction(name, f)` and `lua.Wrap(f)`, which gives the `LuauFunction`, take a Func of 0 to
   8 parameters, each a `LuauType`, that gives nothing or one `LuauType`, and throws or doesn't,
-  as fb 1.3.0's `Func(A): R Throws E` has it. A script that passes the wrong type gets Luau's own
-  message: `invalid argument #2 to 'damage' (number expected, got string)`. A function that
-  takes a `LuauState` first is given the State that calls it, so it needn't capture it.
-- An error a FutureBlitz function throws is a Luau error in the script, whose message is
-  `IOError: save.dat doesn't exist`, and which a script's `pcall` catches. One the script lets
-  go comes back out of the call that ran it as a `LuauError` whose `Cause` is that IOError, the
-  object itself.
+  as fb 1.3.0's `Func(A): R Throws E` has it. A missing argument is nil, and an extra one is let
+  go, as Luau's own functions do. A script that passes the wrong type gets an error worded as
+  Luau's are: `chunk:3: invalid argument #2 to 'damage' (expected Int32, got string)`. A
+  function that needs its State captures it `[Weak lua]`, which isn't a cycle.
+- An error a FutureBlitz function throws is a Luau error in the script, whose message is its
+  Message after where the function was called, as Luau's own errors are, `mods/doors.luau:3:
+  save.dat doesn't exist`, and which a script's `pcall` catches. One the script lets go comes
+  back out of the call that ran it as a `LuauError` whose `Cause` is that IOError, the object
+  itself. A `LuauError` that comes up through the program's function from a call it made into
+  Luau goes on as it was, its value and its message.
 - `SetAsync(name, f)` takes a Func that gives a `Task<R>`, an Async Function's: the script's
   thread waits for the Task, as an Await does ([Threads](#coroutines-and-the-scheduler)).
 
@@ -246,8 +251,10 @@ Local b = Try f(4.0, 5.0)
   `db.Query<User>(sql, id)` infers them; `Invoke(args...)` gives none; `Call2<R1, R2>` and
   `Call3<R1, R2, R3>` give tuples; `CallAll(args...)` gives a `LuauValue[]`. Each takes 0 to 8
   arguments.
-- `ToFunc()` gives a `Func(...) Throws LuauError` of the shape the program expects, which it
-  calls like any function value, and passes where one is wanted.
+- `ToFunc<A, B, R>()` gives a `Func(A, B): R Throws LuauError`, and `ToAction<A, B>()` a
+  `Func(A, B) Throws LuauError`, which the program calls like any function value, and passes
+  where one is wanted; their type arguments are written, as overloads that differ only by how
+  many there are can't be told apart from the type expected.
 - A handle keeps its function alive in the VM; `LuauFunction` is a Class, so the handle goes when
   its last reference does.
 
@@ -346,8 +353,9 @@ while the script holds it, however many times it crosses, and goes when neither 
   isn't seen by either collector, so it lives until the State closes, when the State lets go of
   everything. That's the one leak this design can have, and the guide says how to avoid it:
   hold a `Weak<T>` in the table's place, or a key, not the handle.
-- A function given to Luau that captures the State keeps it alive the same way, through the
-  State's own map: a function that takes the `LuauState` first, or captures `[Weak lua]`, doesn't.
+- A function given to Luau that captures the State strongly keeps it alive the same way, through
+  the State's own map of the program's functions; one that captures `[Weak lua]` doesn't. A
+  handle holds its State weakly, so a function that holds a handle doesn't.
 
 ### Vectors and buffers
 
@@ -774,6 +782,13 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
    Static Methods, as `Extend T[] Implements LuauType Where T: LuauType` would; generic code that
    converts by a type's Statics can't take arrays. Arrays cross through tables and records
    meanwhile (fbengine-notes/luau/array_statics.fb shows it).
+8. **An Error can't say its own Class's name as the program runs,** which the runtime knows, as
+   an uncaught error's message shows it, so an error crossing into Luau is its Message alone, not
+   `IOError: ...`.
+9. **A bug: beside an overload that takes a `Func()`, a lambda that throws an `IOError` fits no
+   overload,** though `Func() Throws Error` alone takes it, and a named Function that throws
+   does. A lambda given to `SetFunction` says `Throws Error` meanwhile
+   (fbengine-notes/luau/throws_overload.fb shows it).
 
 ## Milestones
 
@@ -828,10 +843,14 @@ error; tables that hold themselves, or go too deep, are errors, not hangs.
 ### L3: functions both ways
 
 - tools/gen_arity.py and its check in verify.py and CI.
+- The shim's `callback` area: the one Callback, Luau functions that call it, the numbers of
+  those Luau collects, where a call came from; the error's value.
 - FutureBlitz to Luau: `SetFunction` and `Wrap` for 0 to 8 parameters, with and without
   results, throwing and not, generated; argument errors in Luau's words; a FutureBlitz error as a
   Luau error and back as the same object.
-- Luau to FutureBlitz: `LuauFunction`, `Call`, `Invoke`, `Call2`, `Call3`, `CallAll`, `ToFunc`.
+- Luau to FutureBlitz: `LuauFunction`, `Call`, `Invoke`, `Call2`, `Call3`, `CallAll`, `ToFunc`,
+  `ToAction`.
+- Handles hold their State weakly.
 - Errors both ways with tracebacks; the nesting limit.
 
 Done means: each arity and shape works both ways; an error crosses out and back in and out again

@@ -18,6 +18,10 @@ Function Run(name: String) Throws LuauError
             Local function = Try lua.Load("return 1")
             lua.Close()
             Try function.Invoke()
+        // A function of a State the program let go of.
+        Case "dropped-state"
+            Local function = Try Dropped()
+            Try function.Invoke()
         // A memory limit below 0.
         Case "negative-limit"
             Local options = LuauOptions()
@@ -31,6 +35,12 @@ Function Run(name: String) Throws LuauError
         Default
             Panic("no such case as {name}")
     End Select
+End Function
+
+// A function of a State that's gone once this returns.
+Function Dropped(): LuauFunction Throws LuauError
+    Local lua = LuauState()
+    Return Try lua.Load("return 1")
 End Function
 
 Local arguments = Process.Arguments()

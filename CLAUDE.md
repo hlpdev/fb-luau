@@ -51,4 +51,4 @@ Breach X's mods.
 - tools/: verify.py, bindgen.sh, check-exports.sh, check_notices.py, gen_arity.py.
 
 ## Current step
-The plan and the repository's setup are done (2026-11-11). L0, setup, is on dev/l0-setup, L1, a State, on dev/l1-state, off it, and L2, values and tables, on dev/l2-values, off L1.
+The plan and the repository's setup are done (2026-11-11). L0, setup, is on dev/l0-setup, L1, a State, on dev/l1-state, off it, L2, values and tables, on dev/l2-values, off L1, and L3, functions both ways, on dev/l3-functions, off L2.
