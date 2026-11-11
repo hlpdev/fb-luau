@@ -30,7 +30,7 @@ mkdir -p "$scratch/bindings"
 for header in native/*/fbl_*.h; do
     [ -e "$header" ] || continue
     name="$(basename "$header" .h)"
-    fb-bindgen "$header" -o "$scratch/raw.fb" --lib "$lib" 2> "$scratch/log" ||
+    fb-bindgen "$header" -o "$scratch/raw.fb" --lib "$lib" -I native 2> "$scratch/log" ||
         { cat "$scratch/log" >&2; exit 1; }
     tr -d '\r' < "$scratch/raw.fb" |
         sed -e '1,2s|^// |//! |' -e 's/^Public /Package /' -e 's/^\(@[A-Za-z]* \)Public /\1Package /' \

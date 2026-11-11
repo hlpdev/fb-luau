@@ -1,0 +1,50 @@
+//! What the package's own code shares over its library's bindings: text from C, a String's bytes
+//! for C, and Luau's names for its types.
+
+Import std.ffi
+Import std.text
+Import "./c/fbl_frame"
+
+/// A String of the `length` bytes C gives at `bytes`, with U+FFFD for each byte that doesn't
+/// start well-formed UTF-8, as a Luau string can hold any bytes.
+Package Unsafe Function TextAt(bytes: Ptr<UInt8>, length: Int64): String
+    If bytes == Null || length <= 0 Then Return ""
+    Return String.FromUtf8Lossy(Buffer<UInt8>.View(bytes, length).ToArray())
+End Function
+
+/// Where `bytes`' first byte is, for C, or Null when it has none; good while the array is, and
+/// doesn't change its size.
+Package Unsafe Function PointerOf(ByRef bytes: UInt8[]): Ptr<UInt8>
+    If bytes.Count == 0 Then Return Null
+    Return AddressOf(bytes[0])
+End Function
+
+/// Luau's name for the type of a value the library says is of `type`, as `type()` gives it.
+Package Function LuauTypeName(type: Int32): String
+    Select type
+        Case FBL_TYPE_NIL
+            Return "nil"
+        Case FBL_TYPE_BOOLEAN
+            Return "boolean"
+        Case FBL_TYPE_NUMBER
+            Return "number"
+        Case FBL_TYPE_INTEGER
+            Return "integer"
+        Case FBL_TYPE_VECTOR
+            Return "vector"
+        Case FBL_TYPE_STRING
+            Return "string"
+        Case FBL_TYPE_TABLE
+            Return "table"
+        Case FBL_TYPE_FUNCTION
+            Return "function"
+        Case FBL_TYPE_USERDATA, FBL_TYPE_LIGHTUSERDATA
+            Return "userdata"
+        Case FBL_TYPE_THREAD
+            Return "thread"
+        Case FBL_TYPE_BUFFER
+            Return "buffer"
+        Default
+            Return "value"
+    End Select
+End Function

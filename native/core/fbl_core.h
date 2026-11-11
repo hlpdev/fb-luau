@@ -24,6 +24,30 @@
 extern "C" {
 #endif
 
+// What a call that runs Luau gives: FBL_OK, or the kind of error it met, whose message and
+// traceback the State keeps (fbl_state_error_message and fbl_state_error_traceback) until its next
+// call that fails; or FBL_MISUSE, for a call the program shouldn't have made, as with a handle
+// that isn't a live State's, or a slot outside its frame, whose message is fbl_core_error's.
+#define FBL_OK 0
+// Source that doesn't compile.
+#define FBL_SYNTAX 1
+// An error a script raised, or met as it ran.
+#define FBL_RUNTIME 2
+// Past the State's memory limit, or out of memory.
+#define FBL_MEMORY 3
+// Past the State's time budget.
+#define FBL_TIMEOUT 4
+// A value that isn't of the type asked for.
+#define FBL_CONVERSION 5
+// A yield where nothing can wait for it.
+#define FBL_YIELD 6
+// A State closed while it ran.
+#define FBL_CLOSED 7
+// Anything else.
+#define FBL_OTHER 8
+// A call the program shouldn't have made.
+#define FBL_MISUSE 9
+
 // The version of the luau package this library is, like "0.1.0".
 FBL_API const char* fbl_core_version(void);
 

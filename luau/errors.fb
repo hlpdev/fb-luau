@@ -1,0 +1,54 @@
+//! The errors Luau's code and the package give: LuauError, and what kind each is.
+
+Import std.core
+
+/// What kind of error a [LuauError] is.
+Public Enum LuauErrorKind
+    /// Source that doesn't compile, whose Message says its line.
+    SYNTAX = 1
+    /// An error a script raised, with `error()`, or met as it ran, like indexing nil.
+    RUNTIME
+    /// Past the State's memory limit, or out of memory.
+    MEMORY
+    /// Past the State's time budget.
+    TIMEOUT
+    /// A value that isn't of the type the program asked for.
+    CONVERSION
+    /// A yield where nothing can wait for it, as in a call that runs to its end.
+    YIELD
+    /// A State closed while it ran.
+    CLOSED
+    /// Anything else.
+    OTHER
+End Enum
+
+/// An error in Luau, or crossing between it and the program: its Kind, its Message, as Luau
+/// writes it, like "mods/doors.luau:12: attempt to index nil", and its Traceback.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// # Import std.text
+/// Local lua = LuauState()
+/// Try
+///     Try lua.Run("local door = nil\nprint(door.open)", "@doors.luau")
+/// Catch error As LuauError
+///     Expect(error.Kind == LuauErrorKind.RUNTIME)
+///     Expect(error.Message.StartsWith("doors.luau:2: attempt to index nil"))
+/// End Try
+/// ```
+Public Class LuauError Extends Error
+    /// What kind of error it is.
+    Public ReadOnly Field Kind: LuauErrorKind
+    /// Where it was raised, as Luau's `debug.traceback` writes it, the innermost call first, a
+    /// line each; "" for an error that wasn't raised in Luau's code.
+    Public ReadOnly Field Traceback: String
+
+    /// Makes a LuauError of `kind` that says `message`, raised where `traceback` says.
+    Public New(kind: LuauErrorKind, message: String, traceback: String = "", cause: Error? = Null)
+        Super.New(message, cause)
+        Kind = kind
+        Traceback = traceback
+    End New
+End Class

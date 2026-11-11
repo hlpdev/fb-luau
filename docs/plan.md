@@ -86,7 +86,9 @@ Print(Try lua.Get<Int>("lives"))           // 3
 ```
 
 - `LuauState()` makes a VM with the default options, which are sandboxed
-  ([Sandboxing](#sandboxing-and-limits)); `LuauState(options)` takes a `LuauOptions`.
+  ([Sandboxing](#sandboxing-and-limits)), and panics only when the system has no memory for one;
+  `LuauState(options)` takes a `LuauOptions`, and throws a `LuauError` of `MEMORY` when the State
+  doesn't fit in its memory limit.
 - A State is a Class, so it isn't Sendable: it stays on the thread that made it, as FutureBlitz
   keeps every Class's objects, and nothing else in the package is Sendable either. Two States on
   two threads are two VMs that share nothing, which Luau allows, as nothing in its VM is per
@@ -399,7 +401,7 @@ end
 Local options = LuauOptions()
 options.MemoryLimit = 64 * 1024 * 1024          // bytes, for the whole State
 options.TimeBudget = 50.Milliseconds            // each call into the State, or each resume
-Local lua = LuauState(options)
+Local lua = Try LuauState(options)
 
 Try lua.SetFunction("spawn_item", SpawnItem)    // what mods are given
 Try lua.Register<Door>()
@@ -789,10 +791,12 @@ each Release library; the export and notices checks fail when they should, by th
 
 - The callback spike first: a C function calls the package's Callback, which reaches a closure
   through the ThreadLocal map and calls it, on fb 1.3.0, with a test; gap 6 settled.
-- The shim's `state`, `load`, `frame`, `call` (no callbacks yet), and `core`: a State with its
-  allocator and memory limit, compile and load, a protected call, errors with their tracebacks.
-- `LuauState`, `LuauOptions` (memory limit; the rest as they come), `Run`, `Evaluate<T>` for
-  the plain types, `Load`, `Close`, `LuauError` and its kinds, `LuauCompileOptions`.
+- The shim's `state`, `load`, `frame`, `call` (no callbacks yet), `ref`, and `core`: a State with
+  its allocator and memory limit, compile and load, a protected call, errors with their
+  tracebacks.
+- `LuauState`, `LuauOptions` (memory limit; the rest as they come), `Run`, `Evaluate<T>`, `Load`,
+  `Close`, globals' `Get` and `Set`, `LuauType` for the numbers, Bool, and String, `LuauError` and
+  its kinds, `LuauCompileOptions`.
 
 Done means: source runs and gives results; a syntax error, a runtime error, and running out of
 memory each give their `LuauError` with the line and the traceback; a closed State's handle

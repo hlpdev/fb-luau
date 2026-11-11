@@ -1,0 +1,59 @@
+//! A Luau function, as a handle the program calls.
+
+Import "./c/fbl_call"
+Import "./c/fbl_ref"
+Import "./errors"
+Import "./state"
+
+/// A Luau function the program holds, which keeps it, and its State, alive until it goes.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Local count = Try lua.Load("calls = (calls or 0) + 1")
+/// Try count.Invoke()
+/// Try count.Invoke()
+/// Expect(Try lua.Get<Int>("calls") == 2)
+/// ```
+Public Class LuauFunction
+    /// The State it's in.
+    Package ReadOnly Field Owner: LuauState
+    /// The State's reference to it.
+    Package ReadOnly Field Ref: Int32
+
+    Package New(owner: LuauState, ref: Int32)
+        Owner = owner
+        Ref = ref
+    End New
+
+    Method Destroy()
+        If Owner.IsOpen Then fbl_ref_free(Owner.Handle, Ref)
+    End Method
+
+    /// A handle of the function in a frame's slot `index`.
+    Package Static Method Kept(owner: LuauState, frame: Int32,
+                               index: Int32): LuauFunction Throws LuauError
+        Local ref: Int32 = 0
+        Local status: Int32
+        Unsafe
+            status = fbl_ref_new(owner.Live(), frame, index, AddressOf(ref))
+        End Unsafe
+        Try owner.Check(status)
+        Return LuauFunction(owner, ref)
+    End Method
+
+    /// Calls it with no arguments, and lets its results go.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs.
+    @PanicsAtCaller
+    Public Method Invoke() Throws LuauError
+        Local frame = Owner.Opened()
+        Defer Owner.Closed(frame)
+        Try Owner.Check(fbl_ref_push(Owner.Live(), frame, Ref))
+        Try Owner.Check(fbl_call_function(Owner.Handle, frame, 0, 0))
+    End Method
+End Class

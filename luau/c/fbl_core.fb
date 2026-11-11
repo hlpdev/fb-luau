@@ -2,6 +2,16 @@
 //! Run fb-bindgen again instead of editing it.
 
 // skipped: FBL_API, a macro that isn't a number
+Package Const FBL_OK: Int32 = 0
+Package Const FBL_SYNTAX: Int32 = 1
+Package Const FBL_RUNTIME: Int32 = 2
+Package Const FBL_MEMORY: Int32 = 3
+Package Const FBL_TIMEOUT: Int32 = 4
+Package Const FBL_CONVERSION: Int32 = 5
+Package Const FBL_YIELD: Int32 = 6
+Package Const FBL_CLOSED: Int32 = 7
+Package Const FBL_OTHER: Int32 = 8
+Package Const FBL_MISUSE: Int32 = 9
 
 Package Extern "C" Lib "luau_native"
     Function fbl_core_version(): CString

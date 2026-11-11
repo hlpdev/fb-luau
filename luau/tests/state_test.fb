@@ -1,0 +1,167 @@
+Import std.test
+Import std.text
+Import luau
+
+@Test
+Function CodeRunsAndItsGlobalsAreRead() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run("lives = 3 name = 'ada' alive = true")
+    Expect(Try lua.Get<Int>("lives") == 3)
+    Expect(Try lua.Get<String>("name") == "ada")
+    Expect(Try lua.Get<Bool>("alive"))
+    Try lua.Set("speed", 4.5)
+    Expect(Try lua.Evaluate<Float64>("return speed * 2") == 9.0)
+End Function
+
+@Test
+Function EachNumberTypeCrossesBothWays() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("a", 7 As Int8)
+    Try lua.Set("b", 300 As Int16)
+    Try lua.Set("c", -70000)
+    Try lua.Set("d", 9007199254740992 As Int64)
+    Try lua.Set("e", 200 As UInt8)
+    Try lua.Set("f", 60000 As UInt16)
+    Try lua.Set("g", 4000000000 As UInt32)
+    Try lua.Set("h", 9007199254740992 As UInt64)
+    Try lua.Set("i", 0.5 As Float32)
+    Expect(Try lua.Evaluate<Float64>("return a + b + c + e + f + g + i") == 3999990507.5)
+    Expect(Try lua.Get<Int8>("a") == 7)
+    Expect(Try lua.Get<Int16>("b") == 300)
+    Expect(Try lua.Get<Int>("c") == -70000)
+    Expect(Try lua.Get<Int64>("d") == 9007199254740992)
+    Expect(Try lua.Get<UInt8>("e") == 200)
+    Expect(Try lua.Get<UInt16>("f") == 60000)
+    Expect(Try lua.Get<UInt32>("g") == 4000000000)
+    Expect(Try lua.Get<UInt64>("h") == 9007199254740992)
+    Expect(Try lua.Get<Float32>("i") == 0.5)
+    Expect(Try lua.Evaluate<Int64>("return -2^62") == -4611686018427387904)
+End Function
+
+@Test
+Function ANumberThatDoesntFitIsAConversionError()
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Evaluate<Int32>("return 2.5"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.CONVERSION)
+    Expect(error.Message == "expected Int32, got 2.5")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<UInt8>("return 256"))?.Message ==
+           "expected UInt8, got 256")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<UInt32>("return -1")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Int16>("return 0/0")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Int64>("return math.huge")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Float32>("return 1e300")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Int>("return '5'"))?.Message ==
+           "expected Int32, got string")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return nil"))?.Message ==
+           "expected Bool, got nil")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<String>("return 5"))?.Message ==
+           "expected String, got number")
+    // Infinity and NaN are a Float32's too.
+    Expect(Try? lua.Evaluate<Float32>("return math.huge") != Null)
+End Function
+
+@Test
+Function ANumberLuauWouldRoundIsntGiven()
+    Local lua = LuauState()
+    Expect(ExpectThrows<LuauError>(lua.Set("big", 9007199254740993 As Int64))?.Kind ==
+           LuauErrorKind.CONVERSION)
+    Expect(ExpectThrows<LuauError>(lua.Set("big", -9007199254740993 As Int64)) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Set("big", 18446744073709551615 As UInt64)) != Null)
+End Function
+
+@Test
+Function StringsKeepTheirBytes() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("text", "héllo, 世界")
+    Expect(Try lua.Evaluate<Int>("return #text") == 14)
+    Expect(Try lua.Get<String>("text") == "héllo, 世界")
+    Expect(Try lua.Evaluate<String>("return 'a\\0b'").Length == 3)
+    // A byte that doesn't start well-formed UTF-8 reads as U+FFFD.
+    Expect(Try lua.Evaluate<String>("return 'a\\255b'") == "a\u{FFFD}b")
+    Expect(Try lua.Evaluate<String>("return ''") == "")
+End Function
+
+@Test
+Function ASyntaxErrorSaysItsLine()
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Run("local x = 1\nlocal = 2", "@mods/doors.luau"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.SYNTAX)
+    Expect(error.Message.StartsWith("mods/doors.luau:2:"), error.Message)
+End Function
+
+@Test
+Function ARuntimeErrorHasItsTraceback()
+    Local lua = LuauState()
+    Local source = "local function open(door)\n  return door.hinge\nend\nopen(nil)"
+    Local error = ExpectThrows<LuauError>(lua.Run(source, "@doors.luau"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.RUNTIME)
+    Expect(error.Message.StartsWith("doors.luau:2: attempt to index nil"), error.Message)
+    Expect(error.Traceback.Contains("doors.luau:2 function open"), error.Traceback)
+    Expect(error.Traceback.Contains("doors.luau:4"), error.Traceback)
+    // The State goes on.
+    Expect(Try? lua.Evaluate<Int>("return 1 + 1") == 2)
+End Function
+
+@Test
+Function AYieldWhereNothingWaitsIsAnError()
+    Local lua = LuauState()
+    Expect(ExpectThrows<LuauError>(lua.Run("coroutine.yield()"))?.Kind == LuauErrorKind.YIELD)
+End Function
+
+@Test
+Function TheMemoryLimitHolds() Throws LuauError
+    Local options = LuauOptions()
+    options.MemoryLimit = 2 * 1024 * 1024
+    Local lua = Try LuauState(options)
+    Local error =
+        ExpectThrows<LuauError>(lua.Run("local t = {{}} for i = 1, 1e7 do t[i] = tostring(i) end"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.MEMORY)
+    Expect(error.Message == "not enough memory")
+    Expect(lua.MemoryUsed <= options.MemoryLimit)
+    lua.Collect()
+    Expect(Try lua.Evaluate<Int>("return 40 + 2") == 42)
+End Function
+
+@Test
+Function AStateTooSmallForItsLimitIsntMade()
+    Local options = LuauOptions()
+    options.MemoryLimit = 1000
+    Expect(ExpectThrows<LuauError>(LuauState(options))?.Kind == LuauErrorKind.MEMORY)
+End Function
+
+@Test
+Function AFunctionLoadsAndRunsLater() Throws LuauError
+    Local lua = LuauState()
+    Local count = Try lua.Load("calls = (calls or 0) + 1")
+    Expect(Try? lua.Get<Int>("calls") == Null)
+    Try count.Invoke()
+    Try count.Invoke()
+    Expect(Try lua.Get<Int>("calls") == 2)
+    Expect(ExpectThrows<LuauError>(lua.Load("return +"))?.Kind == LuauErrorKind.SYNTAX)
+End Function
+
+@Test
+Function AFunctionKeepsItsStateAlive() Throws LuauError
+    Local function = Try Made()
+    Try function.Invoke()
+End Function
+
+Function Made(): LuauFunction Throws LuauError
+    Local lua = LuauState()
+    Return Try lua.Load("assert(1 + 1 == 2)")
+End Function
+
+@Test
+Function ClosingIsOnceAndFinal() Throws LuauError
+    Local lua = LuauState()
+    Local function = Try lua.Load("return 1")
+    Expect(lua.IsOpen)
+    lua.Close()
+    Expect(!lua.IsOpen)
+    lua.Close()
+    Expect(function.Owner == lua)
+End Function

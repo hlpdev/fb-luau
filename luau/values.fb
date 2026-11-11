@@ -1,0 +1,275 @@
+//! What crosses between a program and Luau by its type: the LuauType Interface, and the types
+//! the package gives it, the numbers, Bool, and String.
+
+Import "./c/fbl_frame"
+Import "./errors"
+Import "./library"
+Import "./shim"
+Import "./state"
+
+/// What crosses between a program and Luau by its type: a type that implements it is one a
+/// State's Get and Set, a function's arguments and results, and a table's keys and values take.
+/// The package gives it to the numbers, Bool, and String, and to its handles; a program gives it
+/// to a type of its own through what the package has for that, never by these members, which
+/// only the package can use, since a [LuauSlots] is only its own.
+Public Interface LuauType
+    /// Gives `value` to Luau, after the values `slots` has.
+    Static Method ToLuau(slots: LuauSlots, value: Self) Throws LuauError
+    /// The value in slot `index` of `slots`, as this type.
+    Static Method FromLuau(slots: LuauSlots, index: Int32): Self Throws LuauError
+End Interface
+
+/// The values a call between a program and Luau has, which only the package's own code reads
+/// and fills.
+Public Struct LuauSlots
+    /// The State they're on.
+    Package Field Owner: LuauState
+    /// Their frame's number.
+    Package Field Frame: Int32
+
+    /// The type of slot `index`'s value, as the library numbers them.
+    @PanicsAtCaller
+    Package Method TypeAt(index: Int32): Int32
+        Local type = fbl_frame_type(Owner.Live(), Frame, index)
+        If type < 0 Then Panic(LastError())
+        Return type
+    End Method
+
+    /// A LuauError of CONVERSION, saying a T was expected, and what slot `index` has instead.
+    Package Method Wrong(expected: String, index: Int32): LuauError
+        Return LuauError(LuauErrorKind.CONVERSION,
+                         "expected {expected}, got {LuauTypeName(TypeAt(index))}")
+    End Method
+
+    /// Slot `index`'s number, which has to be one, as a value of the type `expected` names.
+    Package Method NumberAt(index: Int32, expected: String): Float64 Throws LuauError
+        If TypeAt(index) != FBL_TYPE_NUMBER Then Throw Wrong(expected, index)
+        Local value: Float64 = 0
+        Unsafe
+            fbl_frame_number(Owner.Handle, Frame, index, AddressOf(value))
+        End Unsafe
+        Return value
+    End Method
+
+    /// Slot `index`'s number, which has to be whole and from `low` to `high`, as a value of the
+    /// integer type `expected` names.
+    Package Method WholeAt(index: Int32, expected: String, low: Float64,
+                           high: Float64): Float64 Throws LuauError
+        Local value = Try NumberAt(index, expected)
+        If value != Floor(value) || value < low || value > high
+            Throw LuauError(LuauErrorKind.CONVERSION, "expected {expected}, got {value}")
+        End If
+        Return value
+    End Method
+
+    /// Gives a number to Luau.
+    @PanicsAtCaller
+    Package Method PushNumber(value: Float64) Throws LuauError
+        Try Owner.Check(fbl_frame_push_number(Owner.Live(), Frame, value))
+    End Method
+End Struct
+
+/// Rounds `value` down to a whole number, without std.math, whose Floor is for Floats too.
+Function Floor(value: Float64): Float64
+    If value != value || value >= 9.0e15 || value <= -9.0e15 Then Return value
+    Local whole = (value As Int64) As Float64
+    Return whole > value ? whole - 1 : whole
+End Function
+
+/// A Bool, which is Luau's boolean, and is read only from one: nil isn't False.
+Extend Bool Implements LuauType
+    /// Gives it to Luau as a boolean.
+    Public Static Method ToLuau(slots: LuauSlots, value: Bool) Throws LuauError
+        Try slots.Owner.Check(fbl_frame_push_boolean(slots.Owner.Live(), slots.Frame, value))
+    End Method
+
+    /// A boolean slot's value.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Bool Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_BOOLEAN Then Throw slots.Wrong("Bool", index)
+        Local value = False
+        Unsafe
+            fbl_frame_boolean(slots.Owner.Handle, slots.Frame, index, AddressOf(value))
+        End Unsafe
+        Return value
+    End Method
+End Extend
+
+/// A String, which is Luau's string. One Luau gives that isn't well-formed UTF-8 has U+FFFD for
+/// each byte that doesn't start well-formed UTF-8.
+Extend String Implements LuauType
+    /// Gives it to Luau as a string of its UTF-8 bytes.
+    Public Static Method ToLuau(slots: LuauSlots, value: String) Throws LuauError
+        Local bytes = value.Bytes
+        Local status: Int32
+        Unsafe
+            status = fbl_frame_push_string(slots.Owner.Live(), slots.Frame, PointerOf(ByRef bytes),
+                                           bytes.Count)
+        End Unsafe
+        Try slots.Owner.Check(status)
+    End Method
+
+    /// A string slot's value; a number isn't one.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): String Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_STRING Then Throw slots.Wrong("String", index)
+        Local length: Int64 = 0
+        Unsafe
+            Return TextAt(fbl_frame_string(slots.Owner.Handle, slots.Frame, index,
+                                           AddressOf(length)),
+                          length)
+        End Unsafe
+    End Method
+End Extend
+
+/// A Float64, which is Luau's number.
+Extend Float64 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: Float64) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A number slot's value.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Float64 Throws LuauError
+        Return Try slots.NumberAt(index, "Float64")
+    End Method
+End Extend
+
+/// A Float32, which is Luau's number, read from one a Float32 holds: a finite number past a
+/// Float32's largest isn't one, but infinity and NaN are.
+Extend Float32 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: Float32) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A number slot's value, which has to be one a Float32 holds.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Float32 Throws LuauError
+        Local value = Try slots.NumberAt(index, "Float32")
+        // Infinity less itself is NaN, as NaN less anything is, so this is a finite number.
+        Local finite = value - value == 0
+        If finite && (value > 3.4028234663852886e38 || value < -3.4028234663852886e38)
+            Throw LuauError(LuauErrorKind.CONVERSION, "expected Float32, got {value}")
+        End If
+        Return value As Float32
+    End Method
+End Extend
+
+/// An Int32, which is Luau's number, read from a whole one in its range.
+Extend Int32 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: Int32) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A whole number slot's value, in an Int32's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Int32 Throws LuauError
+        Return (Try slots.WholeAt(index, "Int32", -2147483648.0, 2147483647.0)) As Int32
+    End Method
+End Extend
+
+/// An Int64, which is Luau's number while it's one a number holds exactly, from -2^53 to 2^53.
+Extend Int64 Implements LuauType
+    /// Gives it to Luau as a number.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION past 2^53 either way, which a number would round.
+    Public Static Method ToLuau(slots: LuauSlots, value: Int64) Throws LuauError
+        If value > 9007199254740992 || value < -9007199254740992 Then Throw Inexact("{value}")
+        Try slots.PushNumber(value As Float64)
+    End Method
+
+    /// A whole number slot's value, in an Int64's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Int64 Throws LuauError
+        Return (Try slots.WholeAt(index, "Int64", -9223372036854775808.0,
+                                  9223372036854774784.0)) As Int64
+    End Method
+End Extend
+
+/// An Int16, which is Luau's number, read from a whole one in its range.
+Extend Int16 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: Int16) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A whole number slot's value, in an Int16's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Int16 Throws LuauError
+        Return (Try slots.WholeAt(index, "Int16", -32768.0, 32767.0)) As Int16
+    End Method
+End Extend
+
+/// An Int8, which is Luau's number, read from a whole one in its range.
+Extend Int8 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: Int8) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A whole number slot's value, in an Int8's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Int8 Throws LuauError
+        Return (Try slots.WholeAt(index, "Int8", -128.0, 127.0)) As Int8
+    End Method
+End Extend
+
+/// A UInt64, which is Luau's number while it's one a number holds exactly, up to 2^53.
+Extend UInt64 Implements LuauType
+    /// Gives it to Luau as a number.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION past 2^53, which a number would round.
+    Public Static Method ToLuau(slots: LuauSlots, value: UInt64) Throws LuauError
+        If value > 9007199254740992 Then Throw Inexact("{value}")
+        Try slots.PushNumber(value As Float64)
+    End Method
+
+    /// A whole number slot's value, in a UInt64's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): UInt64 Throws LuauError
+        Return (Try slots.WholeAt(index, "UInt64", 0.0, 18446744073709549568.0)) As UInt64
+    End Method
+End Extend
+
+/// A UInt32, which is Luau's number, read from a whole one in its range.
+Extend UInt32 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: UInt32) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A whole number slot's value, in a UInt32's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): UInt32 Throws LuauError
+        Return (Try slots.WholeAt(index, "UInt32", 0.0, 4294967295.0)) As UInt32
+    End Method
+End Extend
+
+/// A UInt16, which is Luau's number, read from a whole one in its range.
+Extend UInt16 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: UInt16) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A whole number slot's value, in a UInt16's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): UInt16 Throws LuauError
+        Return (Try slots.WholeAt(index, "UInt16", 0.0, 65535.0)) As UInt16
+    End Method
+End Extend
+
+/// A UInt8, which is Luau's number, read from a whole one in its range.
+Extend UInt8 Implements LuauType
+    /// Gives it to Luau as a number.
+    Public Static Method ToLuau(slots: LuauSlots, value: UInt8) Throws LuauError
+        Try slots.PushNumber(value)
+    End Method
+
+    /// A whole number slot's value, in a UInt8's range.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): UInt8 Throws LuauError
+        Return (Try slots.WholeAt(index, "UInt8", 0.0, 255.0)) As UInt8
+    End Method
+End Extend
+
+/// A LuauError of CONVERSION, saying `value` is past what a Luau number holds exactly.
+Function Inexact(value: String): LuauError
+    Return LuauError(LuauErrorKind.CONVERSION,
+                     "{value} is past what a Luau number holds exactly, 2^53 either way")
+End Function

@@ -28,6 +28,11 @@ bool fail(std::string_view message) noexcept {
     return false;
 }
 
+int32_t escaped() noexcept {
+    fail("an exception got to the edge of the library, which is a bug in it");
+    return FBL_OTHER;
+}
+
 void set_flags() noexcept {
     // A function's static is made once, by the first thread here, while any other waits for it.
     static const bool set = [] {
@@ -45,14 +50,17 @@ void set_flags() noexcept {
 
 } // namespace fbl
 
-const char* fbl_core_version(void) {
-    return FBL_VERSION;
+const char* fbl_core_version(void) try { return FBL_VERSION; } catch (...) {
+    fbl::escaped();
+    return "";
 }
 
-const char* fbl_core_luau_version(void) {
-    return FBL_LUAU_VERSION;
+const char* fbl_core_luau_version(void) try { return FBL_LUAU_VERSION; } catch (...) {
+    fbl::escaped();
+    return "";
 }
 
-const char* fbl_core_error(void) {
-    return last_error.c_str();
+const char* fbl_core_error(void) try { return last_error.c_str(); } catch (...) {
+    fbl::escaped();
+    return "";
 }

@@ -1,0 +1,261 @@
+//! A State, a Luau VM of the program's own: making one, running and loading code in it, its
+//! globals, and its memory.
+
+Import "./c/fbl_call"
+Import "./c/fbl_core"
+Import "./c/fbl_frame"
+Import "./c/fbl_load"
+Import "./c/fbl_state"
+Import "./errors"
+Import "./functions"
+Import "./library"
+Import "./shim"
+Import "./values"
+
+/// How a State's code is compiled, as Luau's compiler takes it.
+Public Struct LuauCompileOptions
+    /// How much the compiler optimizes: 0 not at all, 1 what keeps debugging as it is, the
+    /// default, or 2, which inlines functions and unrolls loops too.
+    Public Field Optimization: Int = 1
+    /// How much it keeps for debugging: 0 nothing, 1 lines and functions' names, the default,
+    /// which tracebacks need, or 2 every local's name too.
+    Public Field Debug: Int = 1
+    /// How much it counts for coverage: 0 nothing, the default, 1 each statement, or 2 each
+    /// expression too.
+    Public Field Coverage: Int = 0
+End Struct
+
+/// What a State is made with.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local options = LuauOptions()
+/// options.MemoryLimit = 16 * 1024 * 1024
+/// Local lua = Try LuauState(options)
+/// Expect(lua.MemoryUsed < options.MemoryLimit)
+/// ```
+Public Struct LuauOptions
+    /// The most bytes the State's VM may hold at once, or 0, the default, for no limit. Past it, a
+    /// script gets Luau's "not enough memory", which a call gives as a LuauError of MEMORY, and
+    /// the State goes on, with what was freed free.
+    Public Field MemoryLimit: Int64 = 0
+    /// How its code is compiled.
+    Public Field Compile: LuauCompileOptions = LuauCompileOptions()
+End Struct
+
+/// A Luau VM of the program's own, which runs scripts. It stays on the thread that made it, as
+/// every Class's objects do, and two States share nothing. It closes when nothing refers to it,
+/// or at [Close], and its handles, like a [LuauFunction], keep it until they go.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Try lua.Run("lives = 3")
+/// Expect(Try lua.Get<Int>("lives") == 3)
+/// Expect(Try lua.Evaluate<String>("return 'hi ' .. lives") == "hi 3")
+/// ```
+Public Class LuauState
+    /// The library's handle of the State, or 0 once it's closed.
+    Package Field Handle: UInt64
+
+    /// Makes a State with the default options: no memory limit, and Luau's libraries.
+    @PanicsAtCaller
+    Public New()
+        Local made = Made(LuauOptions())
+        If made.0 == 0 Then Panic(made.2)
+        Handle = made.0
+    End New
+
+    /// Makes a State with `options`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY when the State doesn't fit in `options`' memory limit.
+    ///
+    /// # Panics
+    ///
+    /// When a memory limit is below 0, or a compile option isn't from 0 to 2.
+    @PanicsAtCaller
+    Public New(options: LuauOptions) Throws LuauError
+        Local made = Made(options)
+        If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
+        If made.0 == 0 Then Panic(made.2)
+        Handle = made.0
+    End New
+
+    Method Destroy()
+        If Handle != 0 Then fbl_state_close(Handle)
+    End Method
+
+    /// Whether it's still open, not closed by [Close].
+    Public Property IsOpen: Bool
+        Get => Handle != 0
+    End Property
+
+    /// Closes it now: its VM and everything in it go, and what it held of the program's. Using it,
+    /// or a handle of it, after panics. Closing it again does nothing.
+    ///
+    /// # Panics
+    ///
+    /// Inside a call it runs, as from a function a script called.
+    @PanicsAtCaller
+    Public Method Close()
+        If Handle == 0 Then Return
+        If !fbl_state_close(Handle) Then Panic(LastError())
+        Handle = 0
+    End Method
+
+    /// The bytes its VM holds now.
+    @PanicsAtCaller
+    Public Property MemoryUsed: Int64
+        Get
+            Local used = fbl_state_memory(Live())
+            If used < 0 Then Panic(LastError())
+            Return used
+        End Get
+    End Property
+
+    /// Collects its garbage now, all of it, as Luau's collector would in steps.
+    @PanicsAtCaller
+    Public Method Collect()
+        If fbl_state_collect(Live()) != FBL_OK Then Panic(LastError())
+    End Method
+
+    /// Compiles and runs `source`, as the chunk `name`, which its errors and tracebacks show: Luau
+    /// names a file's chunk "@path", and any other "=name".
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, and of RUNTIME, MEMORY, or YIELD
+    /// for what it meets as it runs.
+    @PanicsAtCaller
+    Public Method Run(source: String, name: String = "=chunk") Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(Loaded(frame, source, name))
+        Try Check(fbl_call_function(Handle, frame, 0, 0))
+    End Method
+
+    /// Compiles and runs `source`, as Run does, and gives its first result as a T, or nil's.
+    ///
+    /// # Errors
+    ///
+    /// What Run throws, and a LuauError of CONVERSION when its result isn't a T.
+    @PanicsAtCaller
+    Public Method Evaluate<T: LuauType>(source: String, name: String = "=chunk"): T Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(Loaded(frame, source, name))
+        Try Check(fbl_call_function(Handle, frame, 0, 1))
+        Return Try T.FromLuau(LuauSlots(Self, frame), 0)
+    End Method
+
+    /// Compiles `source`, as Run does, into a function to call later, without running it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
+    @PanicsAtCaller
+    Public Method Load(source: String, name: String = "=chunk"): LuauFunction Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(Loaded(frame, source, name))
+        Return Try LuauFunction.Kept(Self, frame, 0)
+    End Method
+
+    /// The global `name`'s value, as a T, read as a script reads it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when it isn't a T, or what its globals' metatable raises.
+    @PanicsAtCaller
+    Public Method Get<T: LuauType>(name: String): T Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Local bytes = name.Bytes
+        Unsafe
+            Try Check(fbl_frame_get_global(Handle, frame, PointerOf(ByRef bytes), bytes.Count))
+        End Unsafe
+        Return Try T.FromLuau(LuauSlots(Self, frame), 0)
+    End Method
+
+    /// Sets the global `name` to `value`, as a script sets it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when `value` can't be given to Luau, MEMORY, or what its globals'
+    /// metatable raises.
+    @PanicsAtCaller
+    Public Method Set<T: LuauType>(name: String, value: T) Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try T.ToLuau(LuauSlots(Self, frame), value)
+        Local bytes = name.Bytes
+        Unsafe
+            Try Check(fbl_frame_set_global(Handle, frame, PointerOf(ByRef bytes), bytes.Count, 0))
+        End Unsafe
+    End Method
+
+    /// Its handle, panicking at the caller once it's closed.
+    @PanicsAtCaller
+    Package Method Live(): UInt64
+        If Handle == 0 Then Panic("the Luau State is closed")
+        Return Handle
+    End Method
+
+    /// A new frame on it, for a call's values, which Closed closes.
+    @PanicsAtCaller
+    Package Method Opened(): Int32
+        Local frame = fbl_frame_open(Live())
+        If frame < 0 Then Panic(LastError())
+        Return frame
+    End Method
+
+    /// Closes the frame Opened gave.
+    Package Method Closed(frame: Int32)
+        If Handle != 0 Then fbl_frame_close(Handle, frame)
+    End Method
+
+    /// Nothing, for FBL_OK; or the State's last error as a LuauError, or a panic, at the caller, for
+    /// a call the program shouldn't have made.
+    @PanicsAtCaller
+    Package Method Check(status: Int32) Throws LuauError
+        If status == FBL_OK Then Return
+        If status == FBL_MISUSE Then Panic(LastError())
+        Local message: String
+        Local traceback: String
+        Local length: Int64 = 0
+        Unsafe
+            message = TextAt(fbl_state_error_message(Handle, AddressOf(length)), length)
+            traceback = TextAt(fbl_state_error_traceback(Handle, AddressOf(length)), length)
+        End Unsafe
+        Throw LuauError(status As LuauErrorKind, message, traceback)
+    End Method
+
+    /// Compiles `source` as `name` into the frame's next slot, as a function: a status.
+    Package Method Loaded(frame: Int32, source: String, name: String): Int32
+        Local bytes = source.Bytes
+        Unsafe
+            Return fbl_load_source(Handle, frame, PointerOf(ByRef bytes), bytes.Count, name)
+        End Unsafe
+    End Method
+End Class
+
+/// A State made with `options`, as its handle, the library's status, and what it says went wrong;
+/// a handle of 0 when it couldn't be made.
+Function Made(options: LuauOptions): (UInt64, Int32, String)
+    Local given = fbl_state_options_t(memory_limit: options.MemoryLimit,
+                                      optimization: options.Compile.Optimization,
+                                      debug: options.Compile.Debug,
+                                      coverage: options.Compile.Coverage, unused: 0)
+    Local status: Int32 = FBL_OK
+    Local handle: UInt64
+    Unsafe
+        handle = fbl_state_new(AddressOf(given), AddressOf(status))
+    End Unsafe
+    Return (handle, status, handle == 0 ? LastError() : "")
+End Function
