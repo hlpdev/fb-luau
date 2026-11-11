@@ -3,6 +3,7 @@
 #include "state/state.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <exception>
 #include <lua.h>
@@ -67,7 +68,9 @@ int32_t failed(fbl::state_t& state, lua_State* thread, lua_State* runner, int st
     if (!traceback.empty() && traceback.back() == '\n') {
         traceback.pop_back();
     }
-    const int32_t kind = fbl::kind_of(status);
+    // An error the interrupt raised, or any the timeout led to, is the timeout.
+    const int32_t kind =
+        state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : fbl::kind_of(status);
     if (status == LUA_YIELD) {
         fbl::record_error(state, FBL_YIELD,
                           "attempt to yield where nothing can wait for it: a call from the "
@@ -112,9 +115,17 @@ int32_t fbl_call_function(uint64_t state, int32_t frame, int32_t slot, int32_t r
                              : fbl::record_error(*found, FBL_MEMORY, "not enough memory");
     }
     lua_xmove(thread, co, count);
+    const bool outermost = found->depth == 0;
+    if (outermost && found->time_budget.count() > 0) {
+        found->timed_out = false;
+        found->deadline = std::chrono::steady_clock::now() + found->time_budget;
+    }
     found->depth++;
     const int status = lua_resume(co, thread, count - 1);
     found->depth--;
+    if (outermost) {
+        found->deadline = {};
+    }
     if (status != LUA_OK) {
         return failed(*found, thread, co, status);
     }

@@ -76,3 +76,16 @@ with its date; the rest are the lane's, which the user can change.
   Operator are keywords; each takes a `LuauFunction`.
 - **Names are strings, not atoms**, in __index and __namecall; atoms wait for a measure that says
   they're needed.
+
+## L5 and L6 (2026-11-11)
+
+- **A buffer's reads and writes past its end panic**, as std's Buffer's do; the numbers are read
+  and written in FutureBlitz, little-endian, over byte copies the shim checks.
+- **A script is an environment, not a thread:** a table of its own, `_G` itself, reading through a
+  frozen and locked metatable to the frozen globals; its chunks load on a thread whose globals it
+  is, since Luau resolves globals at load from the loading thread's.
+- **print is a Luau function over one of the program's**, made with each State that has the base
+  library, writing to `LuauOptions.Print` or std's Print; the plan's script name in front is left
+  out, as a call doesn't know its script.
+- **No memory count per script:** scripts' code runs on the State's shared runner threads.
+- **The time budget is per outermost call**, the interrupt raising past it at every safe point.

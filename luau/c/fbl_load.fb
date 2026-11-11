@@ -4,4 +4,6 @@
 Package Extern "C" Lib "luau_native"
     Function fbl_load_source(state: UInt64, frame: Int32, source: Ptr<UInt8>, length: Int64,
                              name: CString): Int32
+    Function fbl_load_source_in(state: UInt64, frame: Int32, source: Ptr<UInt8>, length: Int64,
+                                name: CString, environment_slot: Int32): Int32
 End Extern

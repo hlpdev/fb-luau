@@ -1,0 +1,192 @@
+//! A State's sandbox: what it opens, and scripts, each with globals of its own over the State's
+//! frozen ones, so one mod can't change what another sees.
+
+Import "./c/fbl_call"
+Import "./c/fbl_load"
+Import "./c/fbl_ref"
+Import "./errors"
+Import "./shim"
+Import "./functions"
+Import "./state"
+Import "./tables"
+Import "./values"
+
+/// The libraries a State opens, of Luau's own: all of them by default. None of them reads or
+/// writes a file, starts a process, or opens a socket.
+@Flags
+Public Enum LuauLibraries
+    /// The base library: print, pcall, type, tostring, pairs, and the rest.
+    BASE
+    /// coroutine.
+    COROUTINE
+    /// table.
+    TABLE
+    /// os, which in Luau is only clock, date, difftime, and time.
+    OS
+    /// string.
+    STRING
+    /// math.
+    MATH
+    /// debug, which in Luau is only info and traceback.
+    DEBUG
+    /// utf8.
+    UTF8
+    /// bit32.
+    BIT32
+    /// buffer.
+    BUFFER
+    /// vector.
+    VECTOR
+    /// integer.
+    INTEGER
+    /// Every one of them.
+    ALL = BASE | COROUTINE | TABLE | OS | STRING | MATH | DEBUG | UTF8 | BIT32 | BUFFER | VECTOR |
+          INTEGER
+End Enum
+
+/// What `collectgarbage` a State's scripts have.
+Public Enum LuauCollectGarbage
+    /// None.
+    NONE
+    /// Only `collectgarbage("count")`, the memory in use, in kilobytes: the default.
+    COUNT
+    /// Every option of the one Luau's own tests have, which lets a script stop the collector.
+    FULL
+End Enum
+
+/// A script of a State's, with globals of its own: what it sets is its own, and what it reads
+/// that it hasn't set is the State's, which are frozen once the State has a script, so no script
+/// changes what another sees. Its code runs in it, and calls into the State's functions as any
+/// script's does.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Try lua.SetFunction("greet", Function(name: String) => "hi " + name)
+/// Local first = Try lua.NewScript()
+/// Local second = Try lua.NewScript()
+/// Try first.Run("x = 1")
+/// Try second.Run("x = 2")
+/// Expect(Try first.Get<Int>("x") == 1 && Try second.Get<Int>("x") == 2)
+/// Expect(Try first.Evaluate<String>("return greet('ada')") == "hi ada")
+/// Try first.Run("greet = nil")
+/// Expect(Try second.Evaluate<String>("return greet('bob')") == "hi bob")
+/// ```
+Public Class LuauScript
+    // Its State, held weakly, as a handle holds it.
+    ReadOnly Field owner: Weak<LuauState>
+    /// The State's reference to its globals' table.
+    Package ReadOnly Field Ref: Int32
+
+    Package New(owner: LuauState, ref: Int32)
+        Self.owner = owner
+        Ref = ref
+    End New
+
+    Method Destroy()
+        Local held: LuauState? = owner
+        If held != Null && held.IsOpen Then fbl_ref_free(held.Handle, Ref)
+    End Method
+
+    /// Its State, panicking at the caller once it's gone.
+    @PanicsAtCaller
+    Package Property Owner: LuauState
+        Get
+            Local held: LuauState? = owner
+            If held == Null Then Panic("the Luau State is closed")
+            Return held
+        End Get
+    End Property
+
+    /// Its globals, as a table, which reads through to the State's.
+    @PanicsAtCaller
+    Public Method Globals(): LuauTable Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Local slots = LuauSlots(state, frame)
+        Try slots.PushRef(Ref)
+        Return Try LuauTable.FromLuau(slots, 0)
+    End Method
+
+    /// Compiles and runs `source` in it, as the chunk `name`, as LuauState.Run does.
+    ///
+    /// # Errors
+    ///
+    /// What LuauState.Run throws.
+    @PanicsAtCaller
+    Public Method Run(source: String, name: String = "=script") Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try Loaded(state, frame, source, name)
+        Try state.Check(fbl_call_function(state.Handle, frame, 1, 0))
+    End Method
+
+    /// Compiles and runs `source` in it, and gives its first result as a T.
+    ///
+    /// # Errors
+    ///
+    /// What Run throws, and a LuauError of CONVERSION when its result isn't a T.
+    @PanicsAtCaller
+    Public Method Evaluate<T: LuauType>(source: String,
+                                        name: String = "=script"): T Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try Loaded(state, frame, source, name)
+        Try state.Check(fbl_call_function(state.Handle, frame, 1, 1))
+        Return Try T.FromLuau(LuauSlots(state, frame), 1)
+    End Method
+
+    /// Compiles `source` in it into a function to call later, without running it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
+    @PanicsAtCaller
+    Public Method Load(source: String, name: String = "=script"): LuauFunction Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try Loaded(state, frame, source, name)
+        Return Try LuauFunction.FromLuau(LuauSlots(state, frame), 1)
+    End Method
+
+    /// Its global `name`, as a T: its own, or the State's when it hasn't set one.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when it isn't a T.
+    @PanicsAtCaller
+    Public Method Get<T: LuauType>(name: String): T Throws LuauError
+        Return Try (Try Globals()).Get<T>(name)
+    End Method
+
+    /// Sets its own global `name` to `value`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when `value` can't be given to Luau, or of MEMORY.
+    @PanicsAtCaller
+    Public Method Set<T: LuauType>(name: String, value: T) Throws LuauError
+        Try (Try Globals()).Set(name, value)
+    End Method
+
+    /// Compiles `source` as `name` into slot 1 of the frame, its environment its globals, which go
+    /// in slot 0.
+    @PanicsAtCaller
+    Method Loaded(state: LuauState, frame: Int32, source: String, name: String) Throws LuauError
+        Local slots = LuauSlots(state, frame)
+        Try slots.PushRef(Ref)
+        Local bytes = source.Bytes
+        Local status: Int32
+        Unsafe
+            status = fbl_load_source_in(state.Handle, frame, PointerOf(ByRef bytes), bytes.Count,
+                                        name, 0)
+        End Unsafe
+        Try state.Check(status)
+    End Method
+End Class

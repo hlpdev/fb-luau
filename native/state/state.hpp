@@ -2,6 +2,7 @@
 
 #include "core/fbl_core.h"
 
+#include <chrono>
 #include <cstdint>
 #include <lua.h>
 #include <luacode.h>
@@ -36,6 +37,16 @@ struct state_t {
     std::thread::id owner;
     int64_t memory_limit = 0;
     int64_t memory_used = 0;
+    // Each outermost call's time budget, and when the one running ends, or none.
+    std::chrono::microseconds time_budget{ 0 };
+    std::chrono::steady_clock::time_point deadline;
+    bool timed_out = false;
+    // What it was made with, and whether its globals are frozen.
+    uint32_t libraries = 0;
+    int32_t collect_garbage = 0;
+    bool load_string = false;
+    bool environments = false;
+    bool frozen = false;
     lua_CompileOptions compile_options{};
     // The registry's reference to the C function protect() runs work in, made with the State.
     int protect_ref = LUA_NOREF;
@@ -126,6 +137,9 @@ constexpr int object_tag = 2;
 
 // Sets a new State up for the program's objects: their destructor, and their weak table.
 void prepare_objects(lua_State* thread, state_t& state);
+
+// Freezes the State's globals, unless they are: a status.
+int32_t frozen(state_t& state) noexcept;
 
 // Takes the error value on top of `thread`'s stack as the State's last error, of `kind`, with
 // `traceback`, and pops it.

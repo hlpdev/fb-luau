@@ -438,11 +438,13 @@ Local doors = Try lua.NewScript("mods/doors")   // a LuauScript: its own globals
 Try doors.Run(source, "@mods/doors/init.luau")
 ```
 
-- A State is sandboxed unless its options say otherwise, as Luau's own `luaL_sandbox` and
-  `luaL_sandboxthread` make it: `Freeze()` makes the globals and every library read-only, and
-  each `LuauScript` is a thread with its own globals, which read through to the frozen ones, so
-  one mod can't change what another sees. A State that's never frozen freezes at its first
-  `NewScript`.
+- A State is sandboxed as Luau's own `luaL_sandbox` and `luaL_sandboxthread` make it:
+  `Freeze()` makes the globals and every library read-only, and each `LuauScript` has globals of
+  its own, its `_G`, which read through to the frozen ones by a locked metatable, so one mod can't
+  change what another sees, or reach the shared table. A State that's never frozen freezes at its
+  first `NewScript`. A script's code is loaded on a thread whose globals are the script's, as Luau
+  resolves a chunk's globals as it loads from the loading thread's, not from the environment it's
+  given.
 - The libraries, `LuauOptions.Libraries`, a `@Flags` Enum, are by default Luau's safe ones:
   the base library, `coroutine`, `table`, `string`, `math`, `utf8`, `bit32`, `buffer`, `vector`,
   `integer`, `os` (which in Luau is only `clock`, `date`, `difftime`, and `time`), `debug`
@@ -452,17 +454,18 @@ Try doors.Run(source, "@mods/doors/init.luau")
   `collectgarbage("count")` unless the options say `FULL`, as Luau's conformance tests need.
   Nothing in Luau reads or writes a file, starts a process, or opens a socket: a script does
   that only through what the program gives it.
-- `print` goes to `LuauOptions.Print`, a `Func(LuauScriptInfo, String)`, by default std's
-  `Print` with the script's name first, since Luau's own writes to the C runtime's stdout.
+- `print` goes to `LuauOptions.Print`, a `Func(String)` of each line, its arguments by tostring
+  with tabs between, by default std's `Print`, since Luau's own writes to the C runtime's stdout.
 - The memory limit is the State's allocator's: past it, an allocation fails, and the script gets
   Luau's `not enough memory`, which reaches the program as a `LuauError` of `MEMORY`. The State
-  stays usable: what was freed is free. `lua.MemoryUsed` and each script's `MemoryUsed`, by
-  Luau's memory categories, say where it went.
+  stays usable: what was freed is free. `lua.MemoryUsed` says how much it holds; a script's own
+  share isn't kept, as its code runs on the State's threads, which Luau's memory categories count
+  by.
 - The time budget is Luau's interrupt, which Luau calls at each loop's back edge, each call, and
   each return. Once a call is past its budget, the interrupt raises `TIMEOUT` there, and again at
   each interrupt after, so a script's own `pcall` can't swallow it, until the call returns. A C
-  function that runs long, like a string pattern that backtracks, delays it to that function's
-  end, which Luau's docs say too; the package's own functions check the budget as they go.
+  function that runs long, like a string pattern that backtracks, or a function of the program's,
+  delays it to that function's end, which Luau's docs say too.
 - Deep recursion: Luau stops its own at 200 C calls; the package stops a call that goes from
   FutureBlitz into Luau and back more than 64 times deep, with `RUNTIME`, before the native
   stack runs out.
@@ -899,8 +902,8 @@ Done means: both cross both ways, with bounds checked on every access.
 ### L6: sandboxing and limits
 
 - `Freeze`, `LuauScript` and its own globals, the libraries by `LuauOptions.Libraries`, `print`
-  to the program, `loadstring` and `collectgarbage` as options.
-- The time budget by Luau's interrupt, sticky past a `pcall`; per-script memory by categories.
+  to the program, `loadstring`, `getfenv` and `setfenv`, and `collectgarbage` as options.
+- The time budget by Luau's interrupt, sticky past a `pcall`.
 
 Done means: tests of escapes fail, each one a test: a script changing another's globals, a
 library, the string metatable, or a frozen global; reaching `getfenv`; an infinite loop, one in

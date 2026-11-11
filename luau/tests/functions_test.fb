@@ -153,6 +153,8 @@ End Function
 @Test
 Function FunctionsLuauCollectsAreLetGo() Throws LuauError
     Local lua = LuauState()
+    // A State has print's already.
+    Local before = lua.Functions.Count
     For index = 1 To 100
         Local made = Try lua.Wrap(Function() => index)
     End For
@@ -161,7 +163,7 @@ Function FunctionsLuauCollectsAreLetGo() Throws LuauError
     lua.Collect()
     // The next call of the program's lets them go.
     Try lua.Run("x = 1")
-    Expect(lua.Functions.Count == 1, "{lua.Functions.Count}")
+    Expect(lua.Functions.Count == before + 1, "{lua.Functions.Count}")
     Expect(Try lua.Evaluate<Int>("return kept()") == 1)
 End Function
 

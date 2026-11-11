@@ -3,7 +3,9 @@
 
 Import std.collections
 Import std.core
+Import std.time
 
+Import "./arity"
 Import "./buffers"
 Import "./c/fbl_buffer"
 Import "./c/fbl_call"
@@ -11,6 +13,7 @@ Import "./c/fbl_callback"
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_load"
+Import "./c/fbl_sandbox"
 Import "./c/fbl_state"
 Import "./c/fbl_table"
 Import "./c/fbl_udata"
@@ -19,6 +22,7 @@ Import "./errors"
 Import "./functions"
 Import "./library"
 Import "./objects"
+Import "./scripts"
 Import "./shim"
 Import "./tables"
 Import "./value"
@@ -53,8 +57,27 @@ Public Struct LuauOptions
     /// script gets Luau's "not enough memory", which a call gives as a LuauError of MEMORY, and
     /// the State goes on, with what was freed free.
     Public Field MemoryLimit: Int64 = 0
+    /// How long each call of the program's into the State may run, or 0, the default, for no
+    /// limit. Past it, the script meets a LuauError of TIMEOUT at each of Luau's safe points, its
+    /// loops' and calls', which its own pcall can't keep it from, until the call returns; a C
+    /// function that runs long, like a string pattern that backtracks, has it only once it
+    /// returns.
+    Public Field TimeBudget: Duration
     /// How its code is compiled.
     Public Field Compile: LuauCompileOptions = LuauCompileOptions()
+    /// The libraries it opens.
+    Public Field Libraries: LuauLibraries = LuauLibraries.ALL
+    /// What collectgarbage its scripts have.
+    Public Field CollectGarbage: LuauCollectGarbage = LuauCollectGarbage.COUNT
+    /// Whether its scripts have loadstring, which compiles source, never bytecode: False by
+    /// default.
+    Public Field LoadString: Bool = False
+    /// Whether its scripts have getfenv and setfenv, which reach other functions' environments
+    /// and turn off Luau's fast paths: False by default.
+    Public Field Environments: Bool = False
+    /// Where `print` writes, a line each call, its arguments by tostring with tabs between; or
+    /// Null, the default, for std's Print, as Luau's own writes to the C runtime's stdout.
+    Public Field Print: (Func(String))? = Null
 End Struct
 
 /// A Luau VM of the program's own, which runs scripts. It stays on the thread that made it, as
@@ -103,6 +126,7 @@ Public Class LuauState
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
+        Try? Printing(Null)
     End New
 
     /// Makes a State with `options`.
@@ -127,6 +151,7 @@ Public Class LuauState
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
+        Try Printing(options.Print)
     End New
 
     Method Destroy()
@@ -331,6 +356,65 @@ Public Class LuauState
         Local made = Try NewBuffer(bytes.Count)
         made.Write(0, bytes)
         Return made
+    End Method
+
+    /// Freezes its globals and every library in them: from then on nothing changes them, a script
+    /// or the program, and Luau's fast paths take them as they are. Its first NewScript freezes it
+    /// too. Freezing it again does nothing.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Freeze() Throws LuauError
+        Try Check(fbl_sandbox_freeze(Live()))
+    End Method
+
+    /// Whether its globals are frozen.
+    @PanicsAtCaller
+    Public Property IsFrozen: Bool
+        Get
+            Local frozen = fbl_sandbox_is_frozen(Live())
+            If frozen < 0 Then Panic(LastError())
+            Return frozen == 1
+        End Get
+    End Property
+
+    /// A new script, with globals of its own over its State's, which it freezes.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method NewScript(): LuauScript Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(fbl_sandbox_environment(Handle, frame))
+        Local slots = LuauSlots(Self, frame)
+        Return LuauScript(Self, Try slots.RefAt(0))
+    End Method
+
+    /// Sets `print` to write through `printer`, or std's Print for Null, when it has Luau's print.
+    @PanicsAtCaller
+    Method Printing(printer: (Func(String))?) Throws LuauError
+        If Try? Evaluate<String>("return typeof(print)") != "function" Then Return
+        Local write: Func(String) = Function(text: String)
+            Print(text)
+        End Function
+        If printer != Null Then write = printer
+        Local out = Try Wrap(write, "print")
+        Local made = Try Load("local out, tostring, select = ...\n" +
+                              "return function(...)\n" +
+                              "    local text = ''\n" +
+                              "    for i = 1, select('#', ...) do\n" +
+                              "        if i > 1 then text = text .. '\\t' end\n" +
+                              "        text = text .. tostring((select(i, ...)))\n" +
+                              "    end\n" +
+                              "    out(text)\n" +
+                              "end", "=print")
+        Local tostring = Try Get<LuauFunction>("tostring")
+        Local select = Try Get<LuauFunction>("select")
+        Try Set("print", Try made.Call<LuauFunction>(out, tostring, select))
     End Method
 
     /// Its handle, panicking at the caller once it's closed.
@@ -540,9 +624,14 @@ End Class
 /// a handle of 0 when it couldn't be made.
 Function Made(options: LuauOptions): (UInt64, Int32, String)
     Local given = fbl_state_options_t(memory_limit: options.MemoryLimit,
+                                      time_budget: options.TimeBudget.TotalMicroseconds As Int64,
                                       optimization: options.Compile.Optimization,
                                       debug: options.Compile.Debug,
-                                      coverage: options.Compile.Coverage, unused: 0)
+                                      coverage: options.Compile.Coverage,
+                                      libraries: options.Libraries As Int32,
+                                      collect_garbage: options.CollectGarbage As Int32,
+                                      load_string: options.LoadString,
+                                      environments: options.Environments, unused: [False, False])
     Local status: Int32 = FBL_OK
     Local handle: UInt64
     Unsafe

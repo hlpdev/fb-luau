@@ -12,7 +12,18 @@
 
 // The options the package makes a State with by default.
 inline fbl_state_options_t default_options() {
-    return { .memory_limit = 0, .optimization = 1, .debug = 1, .coverage = 0, .unused = 0 };
+    return {
+        .memory_limit = 0,
+        .time_budget = 0,
+        .optimization = 1,
+        .debug = 1,
+        .coverage = 0,
+        .libraries = 0xFFF,
+        .collect_garbage = FBL_COLLECT_COUNT,
+        .load_string = false,
+        .environments = false,
+        .unused = {},
+    };
 }
 
 // The bytes of a string, as C takes them.

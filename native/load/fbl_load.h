@@ -16,6 +16,10 @@ extern "C" {
 FBL_API int32_t fbl_load_source(uint64_t state, int32_t frame, const uint8_t* source,
                                 int64_t length, const char* name);
 
+// As fbl_load_source, with the function's environment the table in `environment_slot`.
+FBL_API int32_t fbl_load_source_in(uint64_t state, int32_t frame, const uint8_t* source,
+                                   int64_t length, const char* name, int32_t environment_slot);
+
 #ifdef __cplusplus
 }
 #endif

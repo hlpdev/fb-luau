@@ -3,11 +3,13 @@
 #include "core/core.hpp"
 #include "fbl.h"
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <format>
+#include <luacode.h>
 #include <lualib.h>
 #include <memory>
 #include <mutex>
@@ -84,11 +86,115 @@ int run_work(lua_State* stack) {
     }
 }
 
-// What a State is set up with, under lua_cpcall: Luau's libraries, and the function protect()
-// runs work in.
+// collectgarbage, as Luau's own tests have it, or only its "count".
+int collect_garbage(lua_State* stack) {
+    static constexpr std::array<const char*, 10> options = {
+        "stop", "restart", "collect",    "count",       "isrunning",
+        "step", "setgoal", "setstepmul", "setstepsize", nullptr,
+    };
+    static constexpr std::array<int, 9> operations = {
+        LUA_GCSTOP, LUA_GCRESTART, LUA_GCCOLLECT,    LUA_GCCOUNT,       LUA_GCISRUNNING,
+        LUA_GCSTEP, LUA_GCSETGOAL, LUA_GCSETSTEPMUL, LUA_GCSETSTEPSIZE,
+    };
+    const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
+    const int option = luaL_checkoption(stack, 1, "collect", options.data());
+    const int operation = operations.at(static_cast<size_t>(option));
+    if (state != nullptr && state->collect_garbage != FBL_COLLECT_FULL &&
+        operation != LUA_GCCOUNT) {
+        luaL_error(stack, "collectgarbage only gives the memory in use, with 'count'");
+    }
+    const int result = lua_gc(stack, operation, luaL_optinteger(stack, 2, 0));
+    if (operation == LUA_GCSTEP || operation == LUA_GCISRUNNING) {
+        lua_pushboolean(stack, result);
+    } else {
+        lua_pushnumber(stack, result);
+    }
+    return 1;
+}
+
+// loadstring: compiles source with the State's options, never loading bytecode, into a function of
+// the caller's environment, which it marks unsafe for Luau's fast paths, as Luau's own does; nil
+// and the error for source that doesn't compile.
+int load_string(lua_State* stack) {
+    const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
+    size_t length = 0;
+    const char* source = luaL_checklstring(stack, 1, &length);
+    const char* name = luaL_optstring(stack, 2, "=loadstring");
+    lua_setsafeenv(stack, LUA_ENVIRONINDEX, 0);
+    lua_CompileOptions options = state == nullptr ? lua_CompileOptions{} : state->compile_options;
+    size_t size = 0;
+    const std::unique_ptr<char, decltype(&std::free)> bytecode(
+        luau_compile(source, length, &options, &size), &std::free);
+    if (bytecode == nullptr) {
+        luaL_error(stack, "not enough memory to compile");
+    }
+    if (luau_load(stack, name, bytecode.get(), size, 0) == 0) {
+        return 1;
+    }
+    lua_pushnil(stack);
+    lua_insert(stack, -2);
+    return 2;
+}
+
+// The interrupt, at Luau's safe points: past the running call's deadline, it raises the timeout,
+// and again at each one after, so a pcall can't keep the script going, until the call returns.
+void interrupt(lua_State* stack, int gc) {
+    if (gc >= 0) {
+        return;
+    }
+    auto* state = static_cast<fbl::state_t*>(lua_callbacks(stack)->userdata);
+    if (state == nullptr || state->deadline == std::chrono::steady_clock::time_point{} ||
+        std::chrono::steady_clock::now() < state->deadline) {
+        return;
+    }
+    state->timed_out = true;
+    luaL_error(stack, "the call went past its time budget of %lld microseconds",
+               static_cast<long long>(state->time_budget.count()));
+}
+
+// Opens one of Luau's libraries, `name` by `function`, when the State's options have its bit.
+void open(lua_State* stack, const fbl::state_t& state, int32_t bit, const char* name,
+          lua_CFunction function) {
+    if ((state.libraries & static_cast<uint32_t>(bit)) == 0U) {
+        return;
+    }
+    lua_pushcfunction(stack, function, nullptr);
+    lua_pushstring(stack, name);
+    lua_call(stack, 1, 0);
+}
+
+// What a State is set up with, under lua_cpcall: Luau's libraries its options say, and the
+// function protect() runs work in.
 int set_up(lua_State* stack) {
     auto* state = static_cast<fbl::state_t*>(lua_touserdata(stack, 1));
-    luaL_openlibs(stack);
+    open(stack, *state, FBL_LIBRARY_BASE, "", luaopen_base);
+    open(stack, *state, FBL_LIBRARY_COROUTINE, LUA_COLIBNAME, luaopen_coroutine);
+    open(stack, *state, FBL_LIBRARY_TABLE, LUA_TABLIBNAME, luaopen_table);
+    open(stack, *state, FBL_LIBRARY_OS, LUA_OSLIBNAME, luaopen_os);
+    open(stack, *state, FBL_LIBRARY_STRING, LUA_STRLIBNAME, luaopen_string);
+    open(stack, *state, FBL_LIBRARY_MATH, LUA_MATHLIBNAME, luaopen_math);
+    open(stack, *state, FBL_LIBRARY_DEBUG, LUA_DBLIBNAME, luaopen_debug);
+    open(stack, *state, FBL_LIBRARY_UTF8, LUA_UTF8LIBNAME, luaopen_utf8);
+    open(stack, *state, FBL_LIBRARY_BIT32, LUA_BITLIBNAME, luaopen_bit32);
+    open(stack, *state, FBL_LIBRARY_BUFFER, LUA_BUFFERLIBNAME, luaopen_buffer);
+    open(stack, *state, FBL_LIBRARY_VECTOR, LUA_VECLIBNAME, luaopen_vector);
+    open(stack, *state, FBL_LIBRARY_INTEGER, LUA_INTLIBNAME, luaopen_integer);
+    if ((state->libraries & static_cast<uint32_t>(FBL_LIBRARY_BASE)) != 0U &&
+        !state->environments) {
+        lua_pushnil(stack);
+        lua_setglobal(stack, "getfenv");
+        lua_pushnil(stack);
+        lua_setglobal(stack, "setfenv");
+    }
+    if (state->collect_garbage != FBL_COLLECT_NONE) {
+        lua_pushcfunction(stack, collect_garbage, "collectgarbage");
+        lua_setglobal(stack, "collectgarbage");
+    }
+    if (state->load_string) {
+        lua_pushcfunction(stack, load_string, "loadstring");
+        lua_setglobal(stack, "loadstring");
+    }
+    lua_callbacks(stack)->interrupt = interrupt;
     lua_pushcfunction(stack, run_work, "fbl");
     state->protect_ref = lua_ref(stack, -1);
     lua_pop(stack, 1);
@@ -267,6 +373,20 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
             fbl::fail("a State needs its options");
             return 0;
         }
+        if (options->time_budget < 0) {
+            fbl::fail(fbl::formatted("a time budget of {} microseconds is below 0",
+                                     options->time_budget));
+            return 0;
+        }
+        if (options->collect_garbage < FBL_COLLECT_NONE ||
+            options->collect_garbage > FBL_COLLECT_FULL) {
+            fbl::fail(fbl::formatted("{} isn't a collectgarbage", options->collect_garbage));
+            return 0;
+        }
+        if ((static_cast<uint32_t>(options->libraries) & ~0xFFFU) != 0U) {
+            fbl::fail(fbl::formatted("{:#x} has bits that aren't libraries", options->libraries));
+            return 0;
+        }
         if (options->memory_limit < 0) {
             fbl::fail(std::format("a memory limit of {} bytes is below 0", options->memory_limit));
             return 0;
@@ -287,6 +407,11 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
         }
         state->owner = std::this_thread::get_id();
         state->memory_limit = options->memory_limit;
+        state->time_budget = std::chrono::microseconds(options->time_budget);
+        state->libraries = static_cast<uint32_t>(options->libraries);
+        state->collect_garbage = options->collect_garbage;
+        state->load_string = options->load_string;
+        state->environments = options->environments;
         state->compile_options.optimizationLevel = options->optimization;
         state->compile_options.debugLevel = options->debug;
         state->compile_options.coverageLevel = options->coverage;

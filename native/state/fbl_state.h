@@ -11,17 +11,49 @@
 extern "C" {
 #endif
 
+// The libraries a State opens, as bits of fbl_state_options_t's libraries.
+#define FBL_LIBRARY_BASE      1
+#define FBL_LIBRARY_COROUTINE 2
+#define FBL_LIBRARY_TABLE     4
+#define FBL_LIBRARY_OS        8
+#define FBL_LIBRARY_STRING    16
+#define FBL_LIBRARY_MATH      32
+#define FBL_LIBRARY_DEBUG     64
+#define FBL_LIBRARY_UTF8      128
+#define FBL_LIBRARY_BIT32     256
+#define FBL_LIBRARY_BUFFER    512
+#define FBL_LIBRARY_VECTOR    1024
+#define FBL_LIBRARY_INTEGER   2048
+
+// What `collectgarbage` a State's scripts have: none, only collectgarbage("count"), or every
+// option of the one Luau's own tests have.
+#define FBL_COLLECT_NONE  0
+#define FBL_COLLECT_COUNT 1
+#define FBL_COLLECT_FULL  2
+
 // What a State is made with. C has no `using`, so it's a typedef.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct fbl_state_options_t {
     // The most bytes the State's VM may hold at once, or 0 for no limit.
     int64_t memory_limit;
+    // How long, in microseconds, each call of the program's into the State may run, or 0 for no
+    // limit: past it, the script's code meets a FBL_TIMEOUT error at each of Luau's interrupts,
+    // which a pcall in it can't keep, until the call returns.
+    int64_t time_budget;
     // Luau's compile options for the State's code: optimization 0 to 2, debug 0 to 2, coverage 0
     // to 2.
     int32_t optimization;
     int32_t debug;
     int32_t coverage;
-    int32_t unused;
+    // The libraries it opens, FBL_LIBRARY_ bits.
+    int32_t libraries;
+    // Its collectgarbage, an FBL_COLLECT_.
+    int32_t collect_garbage;
+    // Whether scripts have loadstring, which compiles source, never bytecode, and getfenv and
+    // setfenv, which reach other functions' environments.
+    bool load_string;
+    bool environments;
+    bool unused[2];
 } fbl_state_options_t;
 
 // Makes a State, with Luau's flags set first, as its release's CLI sets them, and its libraries

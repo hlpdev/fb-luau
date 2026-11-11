@@ -1,0 +1,109 @@
+Import std.core
+Import std.test
+Import std.text
+Import std.time
+Import luau
+
+@Test
+Function ScriptsDontSeeEachOthersGlobals() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("shared", 1)
+    Local first = Try lua.NewScript()
+    Local second = Try lua.NewScript()
+    Try first.Run("mine = 'first' shared = 99")
+    Expect(Try first.Get<String>("mine") == "first")
+    Expect(Try second.Evaluate<Bool>("return mine == nil"))
+    Expect(Try second.Get<Int>("shared") == 1)
+    Expect(Try lua.Get<Int>("shared") == 1)
+    Try second.Set("given", "two")
+    Expect(Try second.Evaluate<String>("return given") == "two")
+    Expect(Try first.Evaluate<Bool>("return given == nil"))
+End Function
+
+@Test
+Function TheSharedGlobalsAndLibrariesAreFrozen() Throws LuauError
+    Local lua = LuauState()
+    Local script = Try lua.NewScript()
+    Expect(lua.IsFrozen)
+    Expect(ExpectThrows<LuauError>(script.Run("string.upper = nil")) != Null)
+    Expect(ExpectThrows<LuauError>(script.Run("math.pi = 3")) != Null)
+    Expect(ExpectThrows<LuauError>(script.Run("getmetatable('').__index = {{}}")) != Null)
+    // Its _G is its own globals.
+    Try script.Run("rawset(_G, 'x', 1) _G.y = 2")
+    Expect(Try script.Evaluate<Int>("return x + y") == 3)
+    Expect(ExpectThrows<LuauError>(script.Run("setmetatable(_G, nil)")) != Null)
+    Expect(Try script.Evaluate<String>("return getmetatable(_G)") == "The metatable is locked")
+    Expect(ExpectThrows<LuauError>(lua.Set("late", 1)) != Null)
+    Expect(Try script.Evaluate<String>("return string.upper('ok')") == "OK")
+End Function
+
+@Test
+Function WhatReachesOtherEnvironmentsIsLeftOut() Throws LuauError
+    Local lua = LuauState()
+    Expect(Try lua.Evaluate<Bool>("return getfenv == nil and setfenv == nil and loadstring == nil"))
+    Local options = LuauOptions()
+    options.Environments = True
+    options.LoadString = True
+    Local open = Try LuauState(options)
+    Expect(Try open.Evaluate<Bool>("return type(getfenv) == 'function'"))
+    Expect(Try open.Evaluate<Int>("return loadstring('return 40 + 2')()") == 42)
+    Expect(Try open.Evaluate<Bool>(
+        r"local f, err = loadstring('return +') return f == nil and err ~= nil"))
+End Function
+
+@Test
+Function CollectGarbageIsWhatTheOptionsSay() Throws LuauError
+    Local lua = LuauState()
+    Expect(Try lua.Evaluate<Float64>("return collectgarbage('count')") > 0)
+    Expect(ExpectThrows<LuauError>(lua.Run("collectgarbage('stop')")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Run("collectgarbage()")) != Null)
+    Local options = LuauOptions()
+    options.CollectGarbage = LuauCollectGarbage.FULL
+    Local full = Try LuauState(options)
+    Try full.Run("collectgarbage() collectgarbage('step') assert(collectgarbage('isrunning'))")
+    options.CollectGarbage = LuauCollectGarbage.NONE
+    Local none = Try LuauState(options)
+    Expect(Try none.Evaluate<Bool>("return collectgarbage == nil"))
+End Function
+
+@Test
+Function OnlyTheLibrariesAskedForAreOpen() Throws LuauError
+    Local options = LuauOptions()
+    options.Libraries = LuauLibraries.BASE | LuauLibraries.STRING
+    Local lua = Try LuauState(options)
+    Expect(Try lua.Evaluate<Bool>("return math == nil and os == nil and string ~= nil"))
+End Function
+
+@Test
+Function ALoopPastItsTimeBudgetEndsEvenInAPcall() Throws LuauError
+    Local options = LuauOptions()
+    options.TimeBudget = 50.Milliseconds
+    Local lua = Try LuauState(options)
+    For source In ["while true do end",
+                   "while true do pcall(function() while true do end end) end",
+                   r"local t = setmetatable({}, { __index = function() while true do end end }) local x = t.y",
+                   "coroutine.wrap(function() while true do end end)()",
+                   "repeat local t = {{}} until false"]
+        Local watch = Stopwatch.StartNew()
+        Local error = ExpectThrows<LuauError>(lua.Run(source))
+        Expect(error?.Kind == LuauErrorKind.TIMEOUT, source)
+        Expect(watch.Elapsed < 5.Seconds, source)
+    End For
+    // The next call has its own budget.
+    Expect(Try lua.Evaluate<Int>("local n = 0 for i = 1, 1000 do n += i end return n") == 500500)
+End Function
+
+@Test
+Function PrintGoesWhereTheOptionsSay() Throws LuauError
+    Local lines: String[] = []
+    Local options = LuauOptions()
+    options.Print = Function(text: String)
+        lines.Add(text)
+    End Function
+    Local lua = Try LuauState(options)
+    Try lua.Run("print('one', 2, true, nil) print()")
+    Expect(lines == ["one\t2\ttrue\tnil", ""], "{lines}")
+    Local script = Try lua.NewScript()
+    Try script.Run("print('from a script')")
+    Expect(lines.Count == 3 && lines[2] == "from a script")
+End Function
