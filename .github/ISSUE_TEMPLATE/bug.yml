@@ -1,0 +1,61 @@
+name: Bug
+description: The package does something wrong.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting it. A bug in Luau itself goes to Luau's issues, one in the language,
+        fb, or std to FutureBlitz's, and a vulnerability, like a script getting out of its
+        sandbox, to the Security tab, privately, as SECURITY.md says.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: program
+    attributes:
+      label: A program that shows it
+      description: The smallest .fb program, and the Luau script it runs, that does it.
+      placeholder: |
+        ```fb
+        Import luau
+
+        Local lua = Luau.State()
+        Try lua.Run("print('hi')")
+        ```
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Errors, the program's output, or a stack trace.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: The package's version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: fb-version
+    attributes:
+      label: fb --version
+      placeholder: fb 1.3.0 (abc1234, windows-x64)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Windows x64
+        - Linux x64
+        - Linux arm64
+        - macOS arm64
+        - macOS x64
+    validations:
+      required: true

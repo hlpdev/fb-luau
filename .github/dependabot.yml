@@ -1,0 +1,15 @@
+# Version updates once a month, in one pull request, as each runs CI on every target; security
+# updates come as soon as there's an advisory. Luau itself is pinned in CMakeLists.txt and moved
+# by hand, with its conformance tests run again.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories: [/]
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies, area/ci]
+    commit-message:
+      prefix: ci

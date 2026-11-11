@@ -1,0 +1,23 @@
+name: Idea
+description: Something the package could do.
+labels: [feature, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What it's for
+      description: What your program needs, and what makes it hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: How it could work, with a sketch of the code you'd write, and the script.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways
+      description: What you've tried instead, or how another binding, like sol2, does it.
