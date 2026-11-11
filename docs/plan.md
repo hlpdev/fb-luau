@@ -774,9 +774,11 @@ The repository builds an empty library on every target and tests it.
 - CMakeLists.txt, cmake/native.cmake and luau.cmake: Luau 0.746 fetched and built, the
   `luau_native` library with `fbl_core_version` and `fbl_core_error`, exporting only `fbl_`, its
   C++ runtime inside, copied into `luau/native/<target>/`; the flags set once.
-- The package: project.toml, `LuauVersion()`, which gives the library's version and Luau's, its
-  bindings, a test that the library is the package's version, the README, LICENSE, and notices.
-- tools/: verify.py, bindgen.sh, check-exports.sh, check_notices.py, gen_arity.py's frame.
+- The package: project.toml, `LuauLibraryVersion()` and `LuauVersion()`, the library's version
+  and Luau's, its bindings, a test that the library is the package's version, the README,
+  LICENSE, and notices.
+- tools/: verify.py, bindgen.sh, check-exports.sh, check_notices.py. gen_arity.py comes with L3,
+  the first code it writes.
 - Catch2 and a first test; a stringstream in the Release DLL on Windows.
 - .github/: install-fb, native.yml, ci.yml, targeted.yml.
 
@@ -808,6 +810,7 @@ error; tables that hold themselves, or go too deep, are errors, not hangs.
 
 ### L3: functions both ways
 
+- tools/gen_arity.py and its check in verify.py and CI.
 - FutureBlitz to Luau: `SetFunction` and `Wrap` for 0 to 8 parameters, with and without
   results, throwing and not, generated; argument errors in Luau's words; a FutureBlitz error as a
   Luau error and back as the same object.

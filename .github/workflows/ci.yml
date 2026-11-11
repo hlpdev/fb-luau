@@ -1,0 +1,150 @@
+name: CI
+
+# Each target's library (native.yml, with the C++ tests on its Release build), then fb's release on
+# a plain runner of each target, which runs the package's tests on that library with no compiler;
+# a Debug build with every test where fb's programs can link it; and the format and docs checks.
+
+on:
+  push:
+    branches: [master]
+    paths-ignore: ['**/*.md']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FB_VERSION: 1.3.0
+
+jobs:
+  native:
+    uses: ./.github/workflows/native.yml
+
+  test:
+    name: test ${{ matrix.target }}
+    needs: native
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-2025
+          - target: linux-x64
+            os: ubuntu-22.04
+          - target: linux-arm64
+            os: ubuntu-22.04-arm
+          - target: macos-arm64
+            os: macos-15
+          - target: macos-x64
+            os: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-${{ matrix.target }}
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Test
+        run: |
+          tar -xf native-${{ matrix.target }}.tar
+          fb --version
+          fb test luau
+
+  # A Debug build, where the tests' asserts and Luau's run, with fb's tests too on Windows and
+  # macOS. Linux's is built in the manylinux container, as fb's programs link for its glibc, so
+  # there the C++ tests run, and the test job runs fb's on the Release library.
+  debug:
+    name: debug ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-2025
+            shell: msys2 {0}
+            configure: -G Ninja
+            fb: 'ON'
+          - target: linux-x64
+            os: ubuntu-22.04
+            container: quay.io/pypa/manylinux_2_28_x86_64
+            shell: bash
+            fb: 'OFF'
+          - target: linux-arm64
+            os: ubuntu-22.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
+            shell: bash
+            fb: 'OFF'
+          - target: macos-arm64
+            os: macos-15
+            shell: bash
+            fb: 'ON'
+          - target: macos-x64
+            os: macos-15-intel
+            shell: bash
+            fb: 'ON'
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MinGW (UCRT64)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - if: matrix.fb == 'ON'
+        uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Build and test
+        run: |
+          cmake -S . -B build ${{ matrix.configure }} -DCMAKE_BUILD_TYPE=Debug -DFBL_FB_TESTS=${{ matrix.fb }}
+          cmake --build build --parallel 4
+          ctest --test-dir build --output-on-failure
+
+  format:
+    name: format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      # The .clang-format's keys need clang-format 19, which the runner's apt doesn't have; this is
+      # the version Visual Studio's is.
+      - name: clang-format, fb fmt, the bindings, and the docs
+        run: |
+          pipx install clang-format==19.1.5
+          git ls-files '*.h' '*.hpp' '*.c' '*.cpp' | xargs clang-format --dry-run -Werror
+          fb fmt --check luau
+          sh tools/bindgen.sh --check
+          fb doc --check luau

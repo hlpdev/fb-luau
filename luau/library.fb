@@ -1,0 +1,32 @@
+//! The package's library, luau_native: the versions it was built at, and what it says went wrong.
+
+Import "./c/fbl_core"
+
+/// The version of the luau package's library the program runs with, like "0.1.0", which is the
+/// package's.
+///
+/// # Examples
+///
+/// ```
+/// Print("luau {LuauLibraryVersion()}, Luau {LuauVersion()}")
+/// ```
+Public Function LuauLibraryVersion(): String
+    Unsafe
+        Return fbl_core_version().ToString()
+    End Unsafe
+End Function
+
+/// The release of Luau the package's library has in it, like "0.746", which says what scripts it
+/// runs.
+Public Function LuauVersion(): String
+    Unsafe
+        Return fbl_core_luau_version().ToString()
+    End Unsafe
+End Function
+
+/// What the last call to the package's library that failed on this thread said went wrong.
+Package Function LastError(): String
+    Unsafe
+        Return fbl_core_error().ToString()
+    End Unsafe
+End Function

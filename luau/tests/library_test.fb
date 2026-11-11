@@ -1,0 +1,18 @@
+Import std.test
+Import luau
+
+@Test
+Function TheLibraryIsThePackagesVersion()
+    Expect(LuauLibraryVersion() == "0.1.0")
+End Function
+
+@Test
+Function TheLibraryHasLuau0746()
+    Expect(LuauVersion() == "0.746")
+End Function
+
+@Test
+Function NoFailureSaysNothing()
+    // This test's thread has called nothing that fails.
+    Expect(LastError() == "")
+End Function

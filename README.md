@@ -31,8 +31,9 @@ first release, and [docs/decisions.md](docs/decisions.md) why.
 ## Building
 
 fb-luau needs fb 1.3.0, CMake 3.28, Ninja, Python 3, and a C++23 compiler: GCC or Clang on Linux
-and macOS, and MSYS2's UCRT64 GCC on Windows. The library is built into `luau/native/<target>/`,
-where the package finds it, and ctest runs the tests:
+and macOS, and on Windows a GCC built for the UCRT, as MSYS2's UCRT64 has, or winlibs' UCRT
+build. The library is built into `luau/native/<target>/`, where the package finds it, and ctest
+runs the tests:
 
 ```bash
 cmake -S . -B build -G Ninja

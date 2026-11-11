@@ -1,10 +1,10 @@
 # Version updates once a month, in one pull request, as each runs CI on every target; security
-# updates come as soon as there's an advisory. Luau itself is pinned in CMakeLists.txt and moved
+# updates come as soon as there's an advisory. Luau itself is pinned in cmake/luau.cmake and moved
 # by hand, with its conformance tests run again.
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directories: [/]
+    directories: [/, /.github/actions/install-fb]
     schedule:
       interval: monthly
     groups:

@@ -1,0 +1,135 @@
+# Runs only what a fix touches, as CI builds and runs it, without the rest of CI:
+#
+#   gh workflow run targeted.yml --ref <branch> -f tests='^core\.'
+#   gh workflow run targeted.yml --ref <branch> -f package=true
+#
+# `tests` is a ctest -R pattern, run on a Debug build on each of the five targets; one that names
+# nothing fails. `package` is native.yml and ci.yml's test job, `fb test luau` on each target's
+# Release library.
+name: Targeted
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: The tests to run on each target, a ctest -R pattern; none skips them
+        type: string
+        default: ''
+      package:
+        description: Build each target's library and run fb test luau on it
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  FB_VERSION: 1.3.0
+
+jobs:
+  native:
+    if: inputs.package
+    uses: ./.github/workflows/native.yml
+
+  package:
+    name: package ${{ matrix.target }}
+    if: inputs.package
+    needs: native
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-2025
+          - target: linux-x64
+            os: ubuntu-22.04
+          - target: linux-arm64
+            os: ubuntu-22.04-arm
+          - target: macos-arm64
+            os: macos-15
+          - target: macos-x64
+            os: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-${{ matrix.target }}
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Test
+        run: |
+          tar -xf native-${{ matrix.target }}.tar
+          fb test luau
+
+  tests:
+    name: tests ${{ matrix.target }}
+    if: inputs.tests != ''
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-2025
+            shell: msys2 {0}
+            configure: -G Ninja
+            fb: 'ON'
+          - target: linux-x64
+            os: ubuntu-22.04
+            container: quay.io/pypa/manylinux_2_28_x86_64
+            shell: bash
+            fb: 'OFF'
+          - target: linux-arm64
+            os: ubuntu-22.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
+            shell: bash
+            fb: 'OFF'
+          - target: macos-arm64
+            os: macos-15
+            shell: bash
+            fb: 'ON'
+          - target: macos-x64
+            os: macos-15-intel
+            shell: bash
+            fb: 'ON'
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MinGW (UCRT64)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - if: matrix.fb == 'ON'
+        uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Build and test
+        env:
+          TESTS: ${{ inputs.tests }}
+        run: |
+          cmake -S . -B build ${{ matrix.configure }} -DCMAKE_BUILD_TYPE=Debug -DFBL_FB_TESTS=${{ matrix.fb }}
+          cmake --build build --parallel 4
+          ctest --test-dir build --output-on-failure --no-tests=error -R "$TESTS"
