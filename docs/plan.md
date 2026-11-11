@@ -131,9 +131,8 @@ which keeps it alive in the VM until the handle goes.
 | `String` | string |
 | `LuauBytes` (a Struct of a `UInt8[]`) | string, as bytes |
 | `Vec3` (std.math) | vector |
-| `T[]` of any of these | a table of 1 to n |
-| `Map<K, V>` | a table |
-| a Struct that implements `LuauRecord` | a table of its Fields, by name, copied |
+| `Map<K, V>` of any of these | a table, copied |
+| a Struct or Class that implements `LuauRecord` | a table of its Fields, by name, copied |
 | a Class registered with `Register<T>` | userdata, the object itself |
 | `LuauTable`, `LuauFunction`, `LuauThread`, `LuauBuffer`, `LuauUserdata` | the value itself |
 | `LuauValue` | any value, its type known only as the program runs |
@@ -151,14 +150,25 @@ which keeps it alive in the VM until the handle goes.
 - A string that isn't well-formed UTF-8 reads as a `String` with U+FFFD for each byte that
   doesn't start well-formed UTF-8, as FutureBlitz's CStrings do, and as `LuauBytes` byte for
   byte.
-- `T[]` and `Map` copy: the table is read whole, or made whole. A table that holds itself, or
-  is more than 256 deep, is a `CONVERSION` error, as Load's 256 levels are.
-- `LuauRecord` is an Interface whose defaults read and write Self's Fields by reflection, so a
-  Struct gets its conversion by listing it: `Struct Stats Implements LuauRecord`. A Field
-  missing in the table is its default, or its zero, as Load has it.
+- A `Map` copies: the table is read whole, or made whole. A table that holds itself, or is more
+  than 256 deep, is a `CONVERSION` error, as Load's 256 levels are.
+- An array can't implement `LuauType`, as FutureBlitz gives an array type no Statics yet
+  ([What FutureBlitz can't do yet](#what-futureblitz-cant-do-yet)), so a `T[]` crosses through a
+  table, `lua.NewTable(items)` and `table.ToArray<T>()`, or as a record's Field.
+- `LuauRecord` is an Interface whose Static defaults convert through std's `Save` and `Load`, so
+  a Struct or Class gets its conversion by listing it, `Struct Stats Implements LuauRecord`, and
+  its Fields can be whatever Load takes: a `T?`, a `T[]`, a `Map`, an Enum by its name, another
+  record, with std's attributes (`@Rename`, `@Skip`, `@Strict`, ...). A Field the table hasn't is
+  its default, or its zero, as Load has it. A Luau table is an Array when its keys are 1 to its
+  length and an Object when they're strings; an empty one is whichever its Field is, which the
+  package finds by Load's error and its path. A record is data: a handle isn't a Field Load
+  takes.
+- `LuauValue` is any value, its `Kind` known as the program runs: a nil, boolean, number,
+  integer, or string copied, and anything else kept as a handle is, with `AsBool()`,
+  `AsNumber()`, `AsString()`, and the rest, and `Read<T>()`.
 - Nullables and tuples: `GetOrNull<T>` gives a `T?`, Null for nil, and `Call2<A, B>` and its
-  kin give results as tuples, since a `T?` and a tuple can't implement `LuauType` yet
-  ([What FutureBlitz can't do yet](#what-futureblitz-cant-do-yet)).
+  kin give results as tuples, since a `T?` and a tuple can't implement `LuauType` yet; a record's
+  Field can be a `T?`.
 
 ### Globals and tables
 
@@ -182,9 +192,10 @@ Local stats = Try lua.Get<Stats>("stats")         // a LuauRecord, read by its F
 - `lua.Get<T>(name)` and `lua.Set(name, value)` are the State's globals, or a script's own
   ([Sandboxing](#sandboxing-and-limits)); `Has(name)` says whether one isn't nil.
 - A `LuauTable` has `Get<T>(key)`, `Set(key, value)`, `GetOrNull<T>(key)`, `Has(key)`,
-  `Remove(key)`, `Length()` (Luau's `#`), `Entries<K, V>()` (each pair, as a `(K, V)[]`),
-  `ToArray<T>()`, `ToMap<K, V>()`, `Metatable` and `SetMetatable(table)`, and `Freeze()` and
-  `IsFrozen`. Its keys are Strings, integers, or any `LuauType`. `Get` and `Set` go through
+  `Remove(key)`, `Length()` (raw, as rawlen gives it), `Entries<K, V>()` (each pair, as a
+  `(K, V)[]`), `ToArray<T>()`, `ToMap<K, V>()`, `Metatable()` and `SetMetatable(table)`, and
+  `Freeze()` and `IsFrozen`. `lua.NewTable()`, `lua.NewTable(items)`, and `lua.NewTable(entries)`
+  make one. Its keys are Strings, integers, or any `LuauType`. `Get` and `Set` go through
   `__index` and `__newindex`, which can run code, so they throw; `RawGet` and `RawSet` don't
   run any, as Luau's rawget doesn't.
 - sol2 writes `lua["speed"] = 4.5`. FutureBlitz's `[]=` takes one type of value, and isn't
@@ -757,10 +768,12 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
    fail on the bindings, which a program mustn't see anyway. bindgen.sh makes them Package, and
    its check compares what it makes; an fb-bindgen option for the visibility would do it at the
    source.
-6. **To be proved at L1:** that a Callback's code can reach a ThreadLocal Global holding Classes
-   and Func values, and call them, which the spec allows (a ThreadLocal's type needn't be
-   Sendable), and which the package's whole calling path rests on. If fb 1.3.0 refuses it, that's
-   the first thing sent to the fb lane, and nothing that calls back lands until it's settled.
+6. **Proved at L1:** a Callback's code can reach a ThreadLocal Global holding Classes and Func
+   values, and call them, on fb 1.3.0, which the package's whole calling path rests on.
+7. **An array type has no Statics,** so `T[]` can't implement `LuauType`, whose members are
+   Static Methods, as `Extend T[] Implements LuauType Where T: LuauType` would; generic code that
+   converts by a type's Statics can't take arrays. Arrays cross through tables and records
+   meanwhile (fbengine-notes/luau/array_statics.fb shows it).
 
 ## Milestones
 
@@ -804,10 +817,10 @@ panics; the C tests cover every status of each function; nothing leaks.
 
 ### L2: values and tables
 
-- `LuauType` and its Extends: the numbers with their range checks, Bool, String with U+FFFD,
-  `LuauBytes`, `LuauInteger`, `LuauNil`, `LuauValue`.
-- `LuauTable` and globals: Get, Set, GetOrNull, Has, Remove, raw access, Length, Entries,
-  metatables, Freeze; `T[]`, `Map<K, V>`, and `LuauRecord` by reflection.
+- `LuauType` for `LuauBytes`, `LuauInteger`, `LuauNil`, `LuauValue`, `LuauTable`,
+  `LuauFunction`, and `Map<K, V>`; integers read by the number types.
+- `LuauTable`: Get, Set, GetOrNull, Has, Remove, raw access, Length, Entries, ToArray, ToMap,
+  metatables, Freeze; `NewTable` of items and entries; `LuauRecord` through Load and Save.
 
 Done means: every row of the values table crosses both ways, with a test of each conversion
 error; tables that hold themselves, or go too deep, are errors, not hangs.

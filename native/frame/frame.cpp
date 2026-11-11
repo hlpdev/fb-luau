@@ -185,6 +185,20 @@ int32_t fbl_frame_push_number(uint64_t state, int32_t frame, double value) try {
     return fbl::escaped();
 }
 
+int32_t fbl_frame_push_integer(uint64_t state, int32_t frame, int64_t value) try {
+    const found_t found = find(state, frame);
+    if (!found) {
+        return FBL_MISUSE;
+    }
+    const int32_t status = room(found);
+    if (status == FBL_OK) {
+        lua_pushinteger64(found.frame->thread, value);
+    }
+    return status;
+} catch (...) {
+    return fbl::escaped();
+}
+
 int32_t fbl_frame_push_string(uint64_t state, int32_t frame, const uint8_t* bytes,
                               int64_t length) try {
     const found_t found = find(state, frame);
@@ -244,6 +258,22 @@ bool fbl_frame_number(uint64_t state, int32_t frame, int32_t slot, double* value
         return fbl::fail(fbl::formatted("slot {} isn't a number", slot));
     }
     *value = lua_tonumber(found.frame->thread, index);
+    return true;
+} catch (...) {
+    fbl::escaped();
+    return false;
+}
+
+bool fbl_frame_integer(uint64_t state, int32_t frame, int32_t slot, int64_t* value) try {
+    const found_t found = find(state, frame);
+    const int index = found ? fbl::slot_index(*found.frame, slot) : 0;
+    if (index == 0 || value == nullptr) {
+        return false;
+    }
+    if (lua_type(found.frame->thread, index) != LUA_TINTEGER) {
+        return fbl::fail(fbl::formatted("slot {} isn't an integer", slot));
+    }
+    *value = lua_tointeger64(found.frame->thread, index, nullptr);
     return true;
 } catch (...) {
     fbl::escaped();

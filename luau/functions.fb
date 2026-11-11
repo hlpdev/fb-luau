@@ -1,9 +1,11 @@
 //! A Luau function, as a handle the program calls.
 
 Import "./c/fbl_call"
+Import "./c/fbl_frame"
 Import "./c/fbl_ref"
 Import "./errors"
 Import "./state"
+Import "./values"
 
 /// A Luau function the program holds, which keeps it, and its State, alive until it goes.
 ///
@@ -17,7 +19,7 @@ Import "./state"
 /// Try count.Invoke()
 /// Expect(Try lua.Get<Int>("calls") == 2)
 /// ```
-Public Class LuauFunction
+Public Class LuauFunction Implements LuauType
     /// The State it's in.
     Package ReadOnly Field Owner: LuauState
     /// The State's reference to it.
@@ -30,6 +32,19 @@ Public Class LuauFunction
 
     Method Destroy()
         If Owner.IsOpen Then fbl_ref_free(Owner.Handle, Ref)
+    End Method
+
+    /// Gives it to Luau: the function itself, which has to be of the State it's given to.
+    @PanicsAtCaller
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauFunction) Throws LuauError
+        If !RefEquals(value.Owner, slots.Owner) Then Panic("a LuauFunction of another Luau State")
+        Try slots.PushRef(value.Ref)
+    End Method
+
+    /// A handle of a function slot's function.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauFunction Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_FUNCTION Then Throw slots.Wrong("LuauFunction", index)
+        Return LuauFunction(slots.Owner, Try slots.RefAt(index))
     End Method
 
     /// A handle of the function in a frame's slot `index`.

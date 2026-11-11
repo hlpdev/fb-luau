@@ -1,0 +1,96 @@
+Import std.collections
+Import std.core
+Import std.test
+Import std.text
+Import luau
+
+Enum Kind
+    RAT, BAT
+End Enum
+
+Struct Drop Implements LuauRecord
+    Field Item: String
+    Field Chance: Float64 = 1.0
+End Struct
+
+Struct Spawn Implements LuauRecord
+    Field Name: String
+    Field Count: Int = 1
+    Field Kind: Kind
+    Field Tags: String[]
+    Field Boss: String?
+    Field Drops: Drop[]
+    Field Weights: Map<String, Int>
+End Struct
+
+@Strict
+Struct Exact Implements LuauRecord
+    Field Name: String
+End Struct
+
+@Test
+Function ARecordIsReadFromATableByItsFields() Throws LuauError
+    Local lua = LuauState()
+    Local spawn = Try lua.Evaluate<Spawn>(
+        r"return { Name = 'rat', Kind = 'BAT', Tags = { 'small', 'fast' }, " +
+        r"Drops = { { Item = 'tail', Chance = 0.5 } }, Weights = { day = 2 } }")
+    Expect(spawn.Name == "rat")
+    Expect(spawn.Count == 1)
+    Expect(spawn.Kind == Kind.BAT)
+    Expect(spawn.Tags == ["small", "fast"])
+    Expect(spawn.Boss == Null)
+    Expect(spawn.Drops.Count == 1 && spawn.Drops[0].Item == "tail" && spawn.Drops[0].Chance == 0.5)
+    Expect(spawn.Weights["day"] == 2)
+End Function
+
+@Test
+Function EmptyTablesAreWhateverTheirFieldsAre() Throws LuauError
+    Local lua = LuauState()
+    Local spawn = Try lua.Evaluate<Spawn>(
+        r"return { Name = 'rat', Kind = 'RAT', Tags = {}, Drops = {}, Weights = {} }")
+    Expect(spawn.Tags.Count == 0 && spawn.Drops.Count == 0 && spawn.Weights.Count == 0)
+End Function
+
+@Test
+Function ARecordIsGivenAsATable() Throws LuauError
+    Local lua = LuauState()
+    Local weights: Map<String, Int> = {"night": 4}
+    Try lua.Set("spawn",
+                Spawn("bat", 3, Kind.BAT, ["dark"], "vampire", [Drop("wing", 0.25)], weights))
+    Expect(Try lua.Evaluate<String>("return spawn.Boss .. spawn.Count .. spawn.Kind") ==
+           "vampire3BAT")
+    Expect(Try lua.Evaluate<String>("return spawn.Tags[1] .. spawn.Drops[1].Item") == "darkwing")
+    Expect(Try lua.Evaluate<Int>("return spawn.Weights.night") == 4)
+    // And back, as it was.
+    Local back = Try lua.Get<Spawn>("spawn")
+    Expect(back.Name == "bat" && back.Boss == "vampire" && back.Drops[0].Chance == 0.25)
+End Function
+
+@Test
+Function ATableThatIsntTheRecordSaysWhereAndWhy() Throws LuauError
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Evaluate<Spawn>(r"return { Name = 5, Kind = 'RAT' }"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.CONVERSION)
+    Expect(error.Message.Contains("Spawn") && error.Message.Contains("Name"), error.Message)
+    Expect(error.Cause Is ParseError)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Spawn>("return 5"))?.Message ==
+           "expected Spawn, got number")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Exact>(r"return { Name = 'a', Extra = 1 }")) !=
+           Null)
+    Expect(Try lua.Evaluate<Exact>(r"return { Name = 'a' }").Name == "a")
+    Expect(ExpectThrows<LuauError>(
+        lua.Evaluate<Spawn>(r"return { Name = 'a', Kind = 'RAT', Tags = { print } }")) != Null)
+    Expect(ExpectThrows<LuauError>(
+        lua.Evaluate<Spawn>(r"return { Name = 'a', Kind = 'RAT', Tags = { 1, x = 2 } }")) != Null)
+End Function
+
+@Test
+Function ATableThatHoldsItselfIsAnErrorNotAHang() Throws LuauError
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(
+        lua.Evaluate<Spawn>(r"local t = { Name = 'a' } t.Drops = { t } return t"))
+    If error == Null Then Return
+    Expect(error.Kind == LuauErrorKind.CONVERSION)
+    Expect(error.Message.Contains("256"), error.Message)
+End Function

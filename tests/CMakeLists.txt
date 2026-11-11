@@ -37,6 +37,7 @@ fbl_add_tests(core core/core_tests.cpp)
 fbl_add_tests(state state/state_tests.cpp)
 fbl_add_tests(frame frame/frame_tests.cpp)
 fbl_add_tests(call call/call_tests.cpp)
+fbl_add_tests(table table/table_tests.cpp)
 
 find_program(FBL_SH sh DOC "A POSIX shell, for the tools' scripts")
 find_program(FBL_PYTHON NAMES python3 python DOC "Python 3, for the tools' checks")

@@ -1,7 +1,9 @@
 //! What crosses between a program and Luau by its type: the LuauType Interface, and the types
 //! the package gives it, the numbers, Bool, and String.
 
+Import std.ffi
 Import "./c/fbl_frame"
+Import "./c/fbl_ref"
 Import "./errors"
 Import "./library"
 Import "./shim"
@@ -26,6 +28,80 @@ Public Struct LuauSlots
     Package Field Owner: LuauState
     /// Their frame's number.
     Package Field Frame: Int32
+    /// How many tables deep a conversion has gone, which stops past 256, as Load's does, so a
+    /// table that holds itself is an error, not a hang.
+    Package Field Depth: Int = 0
+
+    /// The same slots, a table deeper.
+    Package Method Deeper(): LuauSlots Throws LuauError
+        If Depth >= 256
+            Throw LuauError(LuauErrorKind.CONVERSION,
+                            "a table more than 256 deep, or one that holds itself")
+        End If
+        Return LuauSlots(Owner, Frame, Depth + 1)
+    End Method
+
+    /// How many values the frame has.
+    @PanicsAtCaller
+    Package Method Count(): Int32
+        Local count = fbl_frame_count(Owner.Live(), Frame)
+        If count < 0 Then Panic(LastError())
+        Return count
+    End Method
+
+    /// Takes the frame's values from `count` on away.
+    @PanicsAtCaller
+    Package Method Truncate(count: Int32)
+        If !fbl_frame_truncate(Owner.Live(), Frame, count) Then Panic(LastError())
+    End Method
+
+    /// Adds the value of a reference the State has to the frame.
+    @PanicsAtCaller
+    Package Method PushRef(ref: Int32) Throws LuauError
+        Try Owner.Check(fbl_ref_push(Owner.Live(), Frame, ref))
+    End Method
+
+    /// A new reference to slot `index`'s value.
+    @PanicsAtCaller
+    Package Method RefAt(index: Int32): Int32 Throws LuauError
+        Local ref: Int32 = 0
+        Local status: Int32
+        Unsafe
+            status = fbl_ref_new(Owner.Live(), Frame, index, AddressOf(ref))
+        End Unsafe
+        Try Owner.Check(status)
+        Return ref
+    End Method
+
+    /// Slot `index`'s Luau integer, which has to be one.
+    Package Method IntegerAt(index: Int32): Int64
+        Local value: Int64 = 0
+        Unsafe
+            fbl_frame_integer(Owner.Handle, Frame, index, AddressOf(value))
+        End Unsafe
+        Return value
+    End Method
+
+    /// Slot `index`'s string's bytes, which has to be one.
+    Package Method BytesAt(index: Int32): UInt8[]
+        Local length: Int64 = 0
+        Unsafe
+            Local bytes = fbl_frame_string(Owner.Handle, Frame, index, AddressOf(length))
+            If bytes == Null || length <= 0 Then Return []
+            Return Buffer<UInt8>.View(bytes, length).ToArray()
+        End Unsafe
+    End Method
+
+    /// Adds a string of `bytes` to the frame.
+    @PanicsAtCaller
+    Package Method PushBytes(bytes: UInt8[]) Throws LuauError
+        Local kept = bytes
+        Local status: Int32
+        Unsafe
+            status = fbl_frame_push_string(Owner.Live(), Frame, PointerOf(ByRef kept), kept.Count)
+        End Unsafe
+        Try Owner.Check(status)
+    End Method
 
     /// The type of slot `index`'s value, as the library numbers them.
     @PanicsAtCaller
@@ -41,9 +117,12 @@ Public Struct LuauSlots
                          "expected {expected}, got {LuauTypeName(TypeAt(index))}")
     End Method
 
-    /// Slot `index`'s number, which has to be one, as a value of the type `expected` names.
+    /// Slot `index`'s number, which has to be one, or a Luau integer, as a value of the type
+    /// `expected` names.
     Package Method NumberAt(index: Int32, expected: String): Float64 Throws LuauError
-        If TypeAt(index) != FBL_TYPE_NUMBER Then Throw Wrong(expected, index)
+        Local type = TypeAt(index)
+        If type == FBL_TYPE_INTEGER Then Return IntegerAt(index) As Float64
+        If type != FBL_TYPE_NUMBER Then Throw Wrong(expected, index)
         Local value: Float64 = 0
         Unsafe
             fbl_frame_number(Owner.Handle, Frame, index, AddressOf(value))
@@ -178,8 +257,9 @@ Extend Int64 Implements LuauType
         Try slots.PushNumber(value As Float64)
     End Method
 
-    /// A whole number slot's value, in an Int64's range.
+    /// A whole number slot's value, in an Int64's range, or a Luau integer's.
     Public Static Method FromLuau(slots: LuauSlots, index: Int32): Int64 Throws LuauError
+        If slots.TypeAt(index) == FBL_TYPE_INTEGER Then Return slots.IntegerAt(index)
         Return (Try slots.WholeAt(index, "Int64", -9223372036854775808.0,
                                   9223372036854774784.0)) As Int64
     End Method
@@ -223,8 +303,15 @@ Extend UInt64 Implements LuauType
         Try slots.PushNumber(value As Float64)
     End Method
 
-    /// A whole number slot's value, in a UInt64's range.
+    /// A whole number slot's value, in a UInt64's range, or a Luau integer's from 0 up.
     Public Static Method FromLuau(slots: LuauSlots, index: Int32): UInt64 Throws LuauError
+        If slots.TypeAt(index) == FBL_TYPE_INTEGER
+            Local value = slots.IntegerAt(index)
+            If value < 0
+                Throw LuauError(LuauErrorKind.CONVERSION, "expected UInt64, got {value}")
+            End If
+            Return value As UInt64
+        End If
         Return (Try slots.WholeAt(index, "UInt64", 0.0, 18446744073709549568.0)) As UInt64
     End Method
 End Extend
@@ -273,3 +360,73 @@ Function Inexact(value: String): LuauError
     Return LuauError(LuauErrorKind.CONVERSION,
                      "{value} is past what a Luau number holds exactly, 2^53 either way")
 End Function
+
+/// Luau's 64-bit integer, of its `integer` library and `1i` literals, which a number isn't: the
+/// two never compare equal in Luau, so a program says which it gives.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Try lua.Set("big", LuauInteger(9007199254740993))
+/// Expect(Try lua.Evaluate<String>("return typeof(big)") == "integer")
+/// Expect(Try lua.Get<Int64>("big") == 9007199254740993)
+/// ```
+Public Struct LuauInteger Implements LuauType
+    /// Its value.
+    Public Field Value: Int64
+
+    /// Gives it to Luau as an integer.
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauInteger) Throws LuauError
+        Try slots.Owner.Check(fbl_frame_push_integer(slots.Owner.Live(), slots.Frame, value.Value))
+    End Method
+
+    /// An integer slot's value; a number isn't one.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauInteger Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_INTEGER Then Throw slots.Wrong("LuauInteger", index)
+        Return LuauInteger(slots.IntegerAt(index))
+    End Method
+End Struct
+
+/// A Luau string as its bytes, which can be any, as a String's can't: binary data a script holds
+/// in a string, like what string.pack makes.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Local packed = Try lua.Evaluate<LuauBytes>("return string.pack('<I2', 513)")
+/// Expect(packed.Bytes == [1 As UInt8, 2])
+/// ```
+Public Struct LuauBytes Implements LuauType
+    /// Its bytes.
+    Public Field Bytes: UInt8[]
+
+    /// Gives it to Luau as a string of its bytes.
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauBytes) Throws LuauError
+        Try slots.PushBytes(value.Bytes)
+    End Method
+
+    /// A string slot's bytes, as they are.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauBytes Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_STRING Then Throw slots.Wrong("LuauBytes", index)
+        Return LuauBytes(slots.BytesAt(index))
+    End Method
+End Struct
+
+/// Luau's nil, as a value of its own: what a function that takes nothing takes, or a result
+/// that's only nil.
+Public Struct LuauNil Implements LuauType
+    /// Gives Luau a nil.
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauNil) Throws LuauError
+        Try slots.Owner.Check(fbl_frame_push_nil(slots.Owner.Live(), slots.Frame))
+    End Method
+
+    /// A nil slot's; anything else isn't one.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauNil Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_NIL Then Throw slots.Wrong("LuauNil", index)
+        Return LuauNil()
+    End Method
+End Struct

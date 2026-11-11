@@ -1,0 +1,212 @@
+//! Records: Structs and Classes that cross as tables of their Fields, copied, through std's Load
+//! and Save, so a record has what they have.
+
+Import std.core
+Import std.text
+Import "./c/fbl_frame"
+Import "./c/fbl_table"
+Import "./errors"
+Import "./library"
+Import "./shim"
+Import "./values"
+
+/// A type that crosses as a table of its Fields, by name, copied each way, through std's Load and
+/// Save: listing it is all a Struct or Class needs, and what Load and Save take, a T?, a T[], a
+/// Map, an Enum by its name, another record, and std's attributes, like `@Rename`, `@Skip`, and
+/// `@Strict`, its Fields can have. A Field the table hasn't is its default, or its zero, as Load
+/// has it. A record is data: a Field of a handle, like a LuauTable, isn't one Load takes.
+///
+/// A Luau table is an array when its keys are 1 to its length, an Object when they're strings,
+/// and an empty one is whichever its Field is.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Struct Spawn Implements LuauRecord
+///     Field Name: String
+///     Field Count: Int = 1
+///     Field Tags: String[]
+///     Field Boss: String?
+/// End Struct
+///
+/// Local lua = LuauState()
+/// Local spawn = Try lua.Evaluate<Spawn>(r"return { Name = 'rat', Tags = { 'small' } }")
+/// Expect(spawn.Name == "rat" && spawn.Count == 1 && spawn.Tags == ["small"] && spawn.Boss == Null)
+/// Try lua.Set("spawn", Spawn("bat", 3, [], "vampire"))
+/// Expect(Try lua.Evaluate<String>("return spawn.Boss .. spawn.Count") == "vampire3")
+/// ```
+Public Interface LuauRecord Extends LuauType
+    /// Gives it to Luau as a new table of its Fields, as Save writes them.
+    Static Method ToLuau(slots: LuauSlots, value: Self) Throws LuauError
+        Try PushValue(slots, Save(value))
+    End Method
+
+    /// A table slot's table, read into a new value, as Load reads it.
+    Static Method FromLuau(slots: LuauSlots, index: Int32): Self Throws LuauError
+        Local name = TypeName<Self>()
+        If slots.TypeAt(index) != FBL_TYPE_TABLE Then Throw slots.Wrong(name, index)
+        Local data = Try ValueAt(slots, index)
+        // An empty table was read as an empty array; where Load wanted an Object, it's one.
+        For swap = 0 To 10000
+            Try
+                Return Try Load<Self>(data)
+            Catch error As ParseError
+                If error.Kind != ParseErrorKind.WRONG_TYPE ||
+                   !SwappedEmpty(ByRef data, error.Path ?? "")
+                    Throw LuauError(LuauErrorKind.CONVERSION,
+                                    "a table isn't a {name}: {error.Message}",
+                                    "", error)
+                End If
+            End Try
+        End For
+        Throw LuauError(LuauErrorKind.CONVERSION, "a table isn't a {name}")
+    End Method
+End Interface
+
+/// A slot's value as a std Value, a table's as an Array or an Object, a table deeper each step.
+Package Function ValueAt(slots: LuauSlots, index: Int32): Value Throws LuauError
+    Select slots.TypeAt(index)
+        Case FBL_TYPE_NIL
+            Return Value()
+        Case FBL_TYPE_BOOLEAN
+            Return Value(Try Bool.FromLuau(slots, index))
+        Case FBL_TYPE_NUMBER
+            Local number = Try Float64.FromLuau(slots, index)
+            Local whole = number == (number As Int64) As Float64
+            If whole && number <= 9007199254740992.0 && number >= -9007199254740992.0
+                Return Value(number As Int64)
+            End If
+            Return Value(number)
+        Case FBL_TYPE_INTEGER
+            Return Value(slots.IntegerAt(index))
+        Case FBL_TYPE_STRING
+            Return Value(Try String.FromLuau(slots, index))
+        Case FBL_TYPE_TABLE
+            Return Try TableAt(Try slots.Deeper(), index)
+        Default
+            Throw LuauError(LuauErrorKind.CONVERSION,
+                            "a {LuauTypeName(slots.TypeAt(index))} isn't data a record holds")
+    End Select
+End Function
+
+/// A table slot's table as an Array of its items from 1, or an Object of its string keys.
+Function TableAt(slots: LuauSlots, index: Int32): Value Throws LuauError
+    Local handle = slots.Owner.Live()
+    Local length = fbl_table_length(handle, slots.Frame, index)
+    Local top = slots.Count()
+    Local count = 0
+    Local strings = True
+    Local iterator: Int32 = 0
+    While True
+        iterator = fbl_table_next(handle, slots.Frame, index, iterator)
+        If iterator == -1 Then Break
+        If iterator < -1 Then Panic(LastError())
+        count++
+        If slots.TypeAt(top) != FBL_TYPE_STRING Then strings = False
+        slots.Truncate(top)
+    End While
+    If count == 0 Then Return Value.Array()
+    If length > 0 && count == length
+        Local items = Value.Array()
+        For item = 1 To length
+            Try slots.Owner.Check(fbl_table_raw_get_index(handle, slots.Frame, index, item))
+            items.Add(Try ValueAt(slots, top))
+            slots.Truncate(top)
+        End For
+        Return items
+    End If
+    If !strings
+        Throw LuauError(LuauErrorKind.CONVERSION,
+                        "a table of keys that aren't strings, or of both keys and items, isn't data a record holds")
+    End If
+    Local entries = Value.Object()
+    iterator = 0
+    While True
+        iterator = fbl_table_next(handle, slots.Frame, index, iterator)
+        If iterator == -1 Then Break
+        entries[Try String.FromLuau(slots, top)] = Try ValueAt(slots, top + 1)
+        slots.Truncate(top)
+    End While
+    Return entries
+End Function
+
+/// Gives a std Value to Luau: an Array as a table of its items from 1, an Object as one of its
+/// keys.
+Package Function PushValue(slots: LuauSlots, data: Value) Throws LuauError
+    Local handle = slots.Owner.Live()
+    Select data.Kind
+        Case ValueKind.NULL
+            Try slots.Owner.Check(fbl_frame_push_nil(handle, slots.Frame))
+        Case ValueKind.BOOL
+            Try Bool.ToLuau(slots, data.AsBool() ?? False)
+        Case ValueKind.INT
+            Try Int64.ToLuau(slots, data.AsInt64() ?? 0)
+        Case ValueKind.UINT
+            Try UInt64.ToLuau(slots, data.AsUInt64() ?? 0)
+        Case ValueKind.DOUBLE
+            Try Float64.ToLuau(slots, data.AsDouble() ?? 0)
+        Case ValueKind.STRING
+            Try String.ToLuau(slots, data.AsString() ?? "")
+        Case ValueKind.BYTES
+            Try slots.PushBytes(data.AsBytes() ?? [])
+        Case ValueKind.ARRAY
+            Local deeper = Try slots.Deeper()
+            Local items = data.AsArray() ?? []
+            Try slots.Owner.Check(fbl_table_new(handle, slots.Frame, items.Count, 0))
+            Local table = slots.Count() - 1
+            For index = 0 Until items.Count
+                Try slots.Owner.Check(fbl_frame_push_number(handle, slots.Frame, index + 1))
+                Try PushValue(deeper, items[index])
+                Try slots.Owner.Check(fbl_table_raw_set(handle, slots.Frame, table, table + 1,
+                                                        table + 2))
+                slots.Truncate(table + 1)
+            End For
+        Case ValueKind.OBJECT
+            Local deeper = Try slots.Deeper()
+            Local keys = data.Keys()
+            Try slots.Owner.Check(fbl_table_new(handle, slots.Frame, 0, keys.Count))
+            Local table = slots.Count() - 1
+            For key In keys
+                Try String.ToLuau(slots, key)
+                Try PushValue(deeper, data[key] ?? Value())
+                Try slots.Owner.Check(fbl_table_raw_set(handle, slots.Frame, table, table + 1,
+                                                        table + 2))
+                slots.Truncate(table + 1)
+            End For
+    End Select
+End Function
+
+/// Makes the empty Array at Load's `path` in `data` an empty Object, where a Field wanted one;
+/// whether there was one there to make one.
+Function SwappedEmpty(ByRef data: Value, path: String): Bool
+    If path == ""
+        If !data.IsArray || data.Count != 0 Then Return False
+        data = Value.Object()
+        Return True
+    End If
+    Local found = data.Path(path)
+    If found == Null || !found.IsArray || found.Count != 0 Then Return False
+    // The step to it, after its parent's path: "[2]", "[\"a.b\"]", or ".name" or "name".
+    If path.EndsWith("]")
+        Local open = path.FindLast("[")
+        If open == Null Then Return False
+        Local step = path.Slice(open + 1, path.Length - 1)
+        Local parent = open == 0 ? data : data.Path(path.Slice(0, open))
+        If parent == Null Then Return False
+        If step.StartsWith("\"")
+            parent[step.Slice(1, step.Length - 1)] = Value.Object()
+            Return True
+        End If
+        Local at = Int.Parse(step)
+        If at == Null Then Return False
+        parent.RemoveAt(at)
+        parent.Insert(at, Value.Object())
+        Return True
+    End If
+    Local dot = path.FindLast(".")
+    Local parent = dot == Null ? data : data.Path(path.Slice(0, dot))
+    If parent == Null Then Return False
+    parent[dot == Null ? path : path.Slice(dot + 1, path.Length)] = Value.Object()
+    Return True
+End Function

@@ -1,0 +1,224 @@
+//! A Luau value of any type, known only as the program runs.
+
+Import std.core
+Import std.text
+Import "./c/fbl_frame"
+Import "./c/fbl_ref"
+Import "./errors"
+Import "./state"
+Import "./values"
+
+/// What type a [LuauValue] is, as Luau's `type()` names it.
+Public Enum LuauValueKind
+    /// nil.
+    NIL
+    /// A boolean.
+    BOOLEAN
+    /// A number.
+    NUMBER
+    /// A 64-bit integer.
+    INTEGER
+    /// A vector.
+    VECTOR
+    /// A string.
+    STRING
+    /// A table.
+    TABLE
+    /// A function.
+    FUNCTION
+    /// A userdata.
+    USERDATA
+    /// A thread.
+    THREAD
+    /// A buffer.
+    BUFFER
+    /// Anything else of Luau's own.
+    OTHER
+End Enum
+
+/// A Luau value of any type, as a script gives it: a nil, a boolean, a number, an integer, and a
+/// string are copied, and anything else is kept in its State, as a handle is, until the
+/// LuauValue goes.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Local value = Try lua.Evaluate<LuauValue>(r"return { 1, 2 }")
+/// Expect(value.Kind == LuauValueKind.TABLE)
+/// Expect(Try value.Read<LuauTable>().Length() == 2)
+/// Expect(Try lua.Evaluate<LuauValue>("return 'hi'").AsString() == "hi")
+/// ```
+Public Class LuauValue Implements LuauType, Printable
+    /// What type it is.
+    Public ReadOnly Field Kind: LuauValueKind
+    // Its State.
+    ReadOnly Field owner: LuauState
+    // A copied value: a boolean's, a number's, an integer's, or a string's bytes.
+    ReadOnly Field flag: Bool
+    ReadOnly Field number: Float64
+    ReadOnly Field integer: Int64
+    ReadOnly Field bytes: UInt8[] = []
+    // The State's reference to anything else, or 0.
+    ReadOnly Field ref: Int32
+
+    New(kind: LuauValueKind, owner: LuauState, flag: Bool, number: Float64, integer: Int64,
+        bytes: UInt8[], ref: Int32)
+        Kind = kind
+        Self.owner = owner
+        Self.flag = flag
+        Self.number = number
+        Self.integer = integer
+        Self.bytes = bytes
+        Self.ref = ref
+    End New
+
+    Method Destroy()
+        If ref != 0 && owner.IsOpen Then fbl_ref_free(owner.Handle, ref)
+    End Method
+
+    /// Gives it to Luau as it was, which has to be the State it came from for a value it keeps.
+    @PanicsAtCaller
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauValue) Throws LuauError
+        Local handle = slots.Owner.Live()
+        Select value.Kind
+            Case LuauValueKind.NIL
+                Try slots.Owner.Check(fbl_frame_push_nil(handle, slots.Frame))
+            Case LuauValueKind.BOOLEAN
+                Try slots.Owner.Check(fbl_frame_push_boolean(handle, slots.Frame, value.flag))
+            Case LuauValueKind.NUMBER
+                Try slots.Owner.Check(fbl_frame_push_number(handle, slots.Frame, value.number))
+            Case LuauValueKind.INTEGER
+                Try slots.Owner.Check(fbl_frame_push_integer(handle, slots.Frame, value.integer))
+            Case LuauValueKind.STRING
+                Try slots.PushBytes(value.bytes)
+            Default
+                If !RefEquals(value.owner, slots.Owner)
+                    Panic("a LuauValue of another Luau State")
+                End If
+                Try slots.PushRef(value.ref)
+        End Select
+    End Method
+
+    /// Any slot's value.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauValue Throws LuauError
+        Local type = slots.TypeAt(index)
+        Local kind = KindOf(type)
+        Select type
+            Case FBL_TYPE_NIL
+                Return LuauValue(kind, slots.Owner, False, 0, 0, [], 0)
+            Case FBL_TYPE_BOOLEAN
+                Return LuauValue(kind, slots.Owner, Try Bool.FromLuau(slots, index), 0, 0, [], 0)
+            Case FBL_TYPE_NUMBER
+                Return LuauValue(kind, slots.Owner, False, Try Float64.FromLuau(slots, index), 0,
+                                 [],
+                                 0)
+            Case FBL_TYPE_INTEGER
+                Return LuauValue(kind, slots.Owner, False, 0, slots.IntegerAt(index), [], 0)
+            Case FBL_TYPE_STRING
+                Return LuauValue(kind, slots.Owner, False, 0, 0, slots.BytesAt(index), 0)
+            Default
+                Return LuauValue(kind, slots.Owner, False, 0, 0, [], Try slots.RefAt(index))
+        End Select
+    End Method
+
+    /// Whether it's nil.
+    Public Property IsNil: Bool
+        Get => Kind == LuauValueKind.NIL
+    End Property
+
+    /// A boolean's value, or Null for any other.
+    Public Method AsBool(): Bool? => Kind == LuauValueKind.BOOLEAN ? flag : Null
+
+    /// A number's value, or Null for any other.
+    Public Method AsNumber(): Float64? => Kind == LuauValueKind.NUMBER ? number : Null
+
+    /// An integer's value, or Null for any other.
+    Public Method AsInteger(): Int64? => Kind == LuauValueKind.INTEGER ? integer : Null
+
+    /// A string's text, with U+FFFD for each byte that doesn't start well-formed UTF-8, or Null
+    /// for any other.
+    Public Method AsString(): String?
+        If Kind != LuauValueKind.STRING Then Return Null
+        Return String.FromUtf8Lossy(bytes)
+    End Method
+
+    /// A string's bytes, a copy, or Null for any other.
+    Public Method AsBytes(): UInt8[]? => Kind == LuauValueKind.STRING ? bytes.Clone() : Null
+
+    /// It as a T, as a slot of it would be read.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when it isn't a T.
+    @PanicsAtCaller
+    Public Method Read<T: LuauType>(): T Throws LuauError
+        Local frame = owner.Opened()
+        Defer owner.Closed(frame)
+        Local slots = LuauSlots(owner, frame)
+        Try ToLuau(slots, Self)
+        Return Try T.FromLuau(slots, 0)
+    End Method
+
+    /// Its text as Luau's tostring would give it for a nil, a boolean, a number, an integer, and a
+    /// string, and its type's name for anything else.
+    Public Method ToString(): String
+        Select Kind
+            Case LuauValueKind.NIL
+                Return "nil"
+            Case LuauValueKind.BOOLEAN
+                Return flag ? "true" : "false"
+            Case LuauValueKind.NUMBER
+                Return "{number}"
+            Case LuauValueKind.INTEGER
+                Return "{integer}"
+            Case LuauValueKind.STRING
+                Return String.FromUtf8Lossy(bytes)
+            Case LuauValueKind.VECTOR
+                Return "vector"
+            Case LuauValueKind.TABLE
+                Return "table"
+            Case LuauValueKind.FUNCTION
+                Return "function"
+            Case LuauValueKind.USERDATA
+                Return "userdata"
+            Case LuauValueKind.THREAD
+                Return "thread"
+            Case LuauValueKind.BUFFER
+                Return "buffer"
+            Default
+                Return "value"
+        End Select
+    End Method
+End Class
+
+/// The kind of value the library says is of `type`.
+Function KindOf(type: Int32): LuauValueKind
+    Select type
+        Case FBL_TYPE_NIL
+            Return LuauValueKind.NIL
+        Case FBL_TYPE_BOOLEAN
+            Return LuauValueKind.BOOLEAN
+        Case FBL_TYPE_NUMBER
+            Return LuauValueKind.NUMBER
+        Case FBL_TYPE_INTEGER
+            Return LuauValueKind.INTEGER
+        Case FBL_TYPE_VECTOR
+            Return LuauValueKind.VECTOR
+        Case FBL_TYPE_STRING
+            Return LuauValueKind.STRING
+        Case FBL_TYPE_TABLE
+            Return LuauValueKind.TABLE
+        Case FBL_TYPE_FUNCTION
+            Return LuauValueKind.FUNCTION
+        Case FBL_TYPE_USERDATA, FBL_TYPE_LIGHTUSERDATA
+            Return LuauValueKind.USERDATA
+        Case FBL_TYPE_THREAD
+            Return LuauValueKind.THREAD
+        Case FBL_TYPE_BUFFER
+            Return LuauValueKind.BUFFER
+        Default
+            Return LuauValueKind.OTHER
+    End Select
+End Function

@@ -47,6 +47,7 @@ FBL_API int32_t fbl_frame_type(uint64_t state, int32_t frame, int32_t slot);
 FBL_API int32_t fbl_frame_push_nil(uint64_t state, int32_t frame);
 FBL_API int32_t fbl_frame_push_boolean(uint64_t state, int32_t frame, bool value);
 FBL_API int32_t fbl_frame_push_number(uint64_t state, int32_t frame, double value);
+FBL_API int32_t fbl_frame_push_integer(uint64_t state, int32_t frame, int64_t value);
 FBL_API int32_t fbl_frame_push_string(uint64_t state, int32_t frame, const uint8_t* bytes,
                                       int64_t length);
 
@@ -56,6 +57,7 @@ FBL_API int32_t fbl_frame_push_copy(uint64_t state, int32_t frame, int32_t slot)
 // A slot's value, of the type its function names, into `value`; false for one of another type.
 FBL_API bool fbl_frame_boolean(uint64_t state, int32_t frame, int32_t slot, bool* value);
 FBL_API bool fbl_frame_number(uint64_t state, int32_t frame, int32_t slot, double* value);
+FBL_API bool fbl_frame_integer(uint64_t state, int32_t frame, int32_t slot, int64_t* value);
 
 // A string slot's bytes, `length` of them, which stay while the slot does; NULL for a slot that
 // isn't a string.

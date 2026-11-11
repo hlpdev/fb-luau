@@ -1,0 +1,326 @@
+//! Luau's tables, as handles the program reads and writes, and arrays and Maps through them.
+
+Import std.collections
+Import std.core
+Import "./c/fbl_frame"
+Import "./c/fbl_ref"
+Import "./c/fbl_table"
+Import "./errors"
+Import "./library"
+Import "./state"
+Import "./values"
+
+/// A Luau table the program holds, which keeps it, and its State, alive until it goes. Its keys
+/// and values are any [LuauType]: Get and Set read and write it as a script does, through its
+/// metatable, and RawGet and RawSet without it, as rawget and rawset do.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local lua = LuauState()
+/// Local player = Try lua.NewTable()
+/// Try player.Set("name", "ada")
+/// Try player.Set("lives", 3)
+/// Try lua.Set("player", player)
+/// Expect(Try lua.Evaluate<String>("return player.name .. ' has ' .. player.lives") == "ada has 3")
+/// Expect(Try player.Get<Int>("lives") == 3)
+/// ```
+Public Class LuauTable Implements LuauType
+    /// The State it's in.
+    Package ReadOnly Field Owner: LuauState
+    /// The State's reference to it.
+    Package ReadOnly Field Ref: Int32
+
+    Package New(owner: LuauState, ref: Int32)
+        Owner = owner
+        Ref = ref
+    End New
+
+    Method Destroy()
+        If Owner.IsOpen Then fbl_ref_free(Owner.Handle, Ref)
+    End Method
+
+    /// Gives it to Luau: the table itself, which has to be of the State it's given to.
+    @PanicsAtCaller
+    Public Static Method ToLuau(slots: LuauSlots, value: LuauTable) Throws LuauError
+        If !RefEquals(value.Owner, slots.Owner) Then Panic("a LuauTable of another Luau State")
+        Try slots.PushRef(value.Ref)
+    End Method
+
+    /// A handle of a table slot's table.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauTable Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_TABLE Then Throw slots.Wrong("LuauTable", index)
+        Return LuauTable(slots.Owner, Try slots.RefAt(index))
+    End Method
+
+    /// The value at `key`, as a T, read as `table[key]` reads it, through its metatable's
+    /// __index.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when it isn't a T, or what __index raises.
+    @PanicsAtCaller
+    Public Method Get<T, K>(key: K): T Throws LuauError
+        Where T: LuauType
+        Where K: LuauType
+        Local slots = Try Pushed(key)
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_table_get(Owner.Handle, slots.Frame, 0, 1))
+        Return Try T.FromLuau(slots, 2)
+    End Method
+
+    /// The value at `key`, as a T, or Null for nil.
+    ///
+    /// # Errors
+    ///
+    /// What Get throws, but for nil.
+    @PanicsAtCaller
+    Public Method GetOrNull<T, K>(key: K): T? Throws LuauError
+        Where T: LuauType
+        Where K: LuauType
+        Local slots = Try Pushed(key)
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_table_get(Owner.Handle, slots.Frame, 0, 1))
+        If slots.TypeAt(2) == FBL_TYPE_NIL Then Return Null
+        Return Try T.FromLuau(slots, 2)
+    End Method
+
+    /// Whether `key`'s value isn't nil, read as Get reads it.
+    @PanicsAtCaller
+    Public Method Has<K: LuauType>(key: K): Bool Throws LuauError
+        Local slots = Try Pushed(key)
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_table_get(Owner.Handle, slots.Frame, 0, 1))
+        Return slots.TypeAt(2) != FBL_TYPE_NIL
+    End Method
+
+    /// Sets `key` to `value`, as `table[key] = value` does, through __newindex.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for a nil or NaN key, a frozen table, or what __newindex raises.
+    @PanicsAtCaller
+    Public Method Set<K, V>(key: K, value: V) Throws LuauError
+        Where K: LuauType
+        Where V: LuauType
+        Local slots = Try Pushed(key)
+        Defer Owner.Closed(slots.Frame)
+        Try V.ToLuau(slots, value)
+        Try Owner.Check(fbl_table_set(Owner.Handle, slots.Frame, 0, 1, 2))
+    End Method
+
+    /// Sets `key` to nil, as `table[key] = nil` does.
+    @PanicsAtCaller
+    Public Method Remove<K: LuauType>(key: K) Throws LuauError
+        Try Set(key, LuauNil())
+    End Method
+
+    /// The value at `key`, as a T, without the metatable, as rawget reads it.
+    @PanicsAtCaller
+    Public Method RawGet<T, K>(key: K): T Throws LuauError
+        Where T: LuauType
+        Where K: LuauType
+        Local slots = Try Pushed(key)
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_table_raw_get(Owner.Handle, slots.Frame, 0, 1))
+        Return Try T.FromLuau(slots, 2)
+    End Method
+
+    /// Sets `key` to `value`, without the metatable, as rawset does.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for a nil or NaN key, or a frozen table.
+    @PanicsAtCaller
+    Public Method RawSet<K, V>(key: K, value: V) Throws LuauError
+        Where K: LuauType
+        Where V: LuauType
+        Local slots = Try Pushed(key)
+        Defer Owner.Closed(slots.Frame)
+        Try V.ToLuau(slots, value)
+        Try Owner.Check(fbl_table_raw_set(Owner.Handle, slots.Frame, 0, 1, 2))
+    End Method
+
+    /// Its length, raw, as rawlen gives it: the border of its items from 1.
+    @PanicsAtCaller
+    Public Method Length(): Int
+        Local frame = Owner.Opened()
+        Defer Owner.Closed(frame)
+        Try? LuauSlots(Owner, frame).PushRef(Ref)
+        Local length = fbl_table_length(Owner.Handle, frame, 0)
+        If length < 0 Then Panic(LastError())
+        Return length
+    End Method
+
+    /// Each of its entries, raw, as a key K and a value V, in no order.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION for a key that isn't a K, or a value that isn't a V.
+    @PanicsAtCaller
+    Public Method Entries<K, V>(): (K, V)[] Throws LuauError
+        Where K: LuauType
+        Where V: LuauType
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Local entries: (K, V)[] = []
+        Local iterator: Int32 = 0
+        While True
+            iterator = fbl_table_next(Owner.Handle, slots.Frame, 0, iterator)
+            If iterator == -1 Then Break
+            If iterator < -1 Then Panic(LastError())
+            entries.Add((Try K.FromLuau(slots, 1), Try V.FromLuau(slots, 2)))
+            slots.Truncate(1)
+        End While
+        Return entries
+    End Method
+
+    /// Its items from 1 to its Length, raw, as an array of T.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION for an item that isn't a T, as a nil in it isn't, unless T is.
+    @PanicsAtCaller
+    Public Method ToArray<T: LuauType>(): T[] Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Local length = fbl_table_length(Owner.Handle, slots.Frame, 0)
+        Local items: T[] = []
+        For index = 1 To length
+            Try Owner.Check(fbl_table_raw_get_index(Owner.Handle, slots.Frame, 0, index))
+            items.Add(Try T.FromLuau(slots, 1))
+            slots.Truncate(1)
+        End For
+        Return items
+    End Method
+
+    /// Its entries, raw, as a Map of K to V.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION for a key that isn't a K, or a value that isn't a V.
+    @PanicsAtCaller
+    Public Method ToMap<K, V>(): Map<K, V> Throws LuauError
+        Where K: LuauType & Hashable
+        Where V: LuauType
+        Local map = Map<K, V>()
+        For entry In Try Entries<K, V>()
+            map[entry.0] = entry.1
+        End For
+        Return map
+    End Method
+
+    /// Its metatable, or Null when it has none.
+    @PanicsAtCaller
+    Public Method Metatable(): LuauTable? Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_table_get_metatable(Owner.Handle, slots.Frame, 0))
+        If slots.TypeAt(1) == FBL_TYPE_NIL Then Return Null
+        Return Try LuauTable.FromLuau(slots, 1)
+    End Method
+
+    /// Sets its metatable, or takes it away with Null.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for a frozen table.
+    @PanicsAtCaller
+    Public Method SetMetatable(metatable: LuauTable?) Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        If metatable == Null
+            Try LuauNil.ToLuau(slots, LuauNil())
+        Else
+            Try LuauTable.ToLuau(slots, metatable)
+        End If
+        Try Owner.Check(fbl_table_set_metatable(Owner.Handle, slots.Frame, 0, 1))
+    End Method
+
+    /// Freezes it, as table.freeze does: from then on nothing changes it, a script or the program.
+    @PanicsAtCaller
+    Public Method Freeze() Throws LuauError
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try Owner.Check(fbl_table_freeze(Owner.Handle, slots.Frame, 0))
+    End Method
+
+    /// Whether it's frozen.
+    @PanicsAtCaller
+    Public Property IsFrozen: Bool
+        Get
+            Local frame = Owner.Opened()
+            Defer Owner.Closed(frame)
+            Try? LuauSlots(Owner, frame).PushRef(Ref)
+            Local frozen = fbl_table_is_frozen(Owner.Handle, frame, 0)
+            If frozen < 0 Then Panic(LastError())
+            Return frozen == 1
+        End Get
+    End Property
+
+    /// A frame with the table in slot 0, which the caller closes with Owner.Closed.
+    @PanicsAtCaller
+    Package Method Opened(): LuauSlots Throws LuauError
+        Local slots = LuauSlots(Owner, Owner.Opened())
+        Try
+            Try slots.PushRef(Ref)
+        Catch error As LuauError
+            Owner.Closed(slots.Frame)
+            Throw error
+        End Try
+        Return slots
+    End Method
+
+    /// A frame with the table in slot 0 and `key` in slot 1, which the caller closes.
+    @PanicsAtCaller
+    Package Method Pushed<K: LuauType>(key: K): LuauSlots Throws LuauError
+        Local slots = Try Opened()
+        Try
+            Try K.ToLuau(slots, key)
+        Catch error As LuauError
+            Owner.Closed(slots.Frame)
+            Throw error
+        End Try
+        Return slots
+    End Method
+End Class
+
+/// A Map, which crosses as a table of its entries, copied each way: its keys and values are any
+/// [LuauType].
+Extend Map<K, V> Implements LuauType
+    Where K: LuauType & Hashable
+    Where V: LuauType
+
+    /// Gives it to Luau as a new table of its entries.
+    Public Static Method ToLuau(slots: LuauSlots, value: Map<K, V>) Throws LuauError
+        Local handle = slots.Owner.Live()
+        Try slots.Owner.Check(fbl_table_new(handle, slots.Frame, 0, value.Count))
+        Local table = slots.Count() - 1
+        For entry In value
+            Try K.ToLuau(slots, entry.0)
+            Try V.ToLuau(slots, entry.1)
+            Try slots.Owner.Check(fbl_table_raw_set(handle, slots.Frame, table, table + 1,
+                                                    table + 2))
+            slots.Truncate(table + 1)
+        End For
+    End Method
+
+    /// A table slot's entries, raw, as a new Map.
+    Public Static Method FromLuau(slots: LuauSlots, index: Int32): Map<K, V> Throws LuauError
+        If slots.TypeAt(index) != FBL_TYPE_TABLE Then Throw slots.Wrong(TypeName<Map<K, V>>(),
+                                                                        index)
+        Local handle = slots.Owner.Live()
+        Local top = slots.Count()
+        Local map = Map<K, V>()
+        Local iterator: Int32 = 0
+        While True
+            iterator = fbl_table_next(handle, slots.Frame, index, iterator)
+            If iterator == -1 Then Break
+            If iterator < -1 Then Panic(LastError())
+            map[Try K.FromLuau(slots, top)] = Try V.FromLuau(slots, top + 1)
+            slots.Truncate(top)
+        End While
+        Return map
+    End Method
+End Extend

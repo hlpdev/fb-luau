@@ -1,15 +1,20 @@
 //! A State, a Luau VM of the program's own: making one, running and loading code in it, its
 //! globals, and its memory.
 
+Import std.collections
+Import std.core
+
 Import "./c/fbl_call"
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_load"
 Import "./c/fbl_state"
+Import "./c/fbl_table"
 Import "./errors"
 Import "./functions"
 Import "./library"
 Import "./shim"
+Import "./tables"
 Import "./values"
 
 /// How a State's code is compiled, as Luau's compiler takes it.
@@ -198,6 +203,62 @@ Public Class LuauState
         Unsafe
             Try Check(fbl_frame_set_global(Handle, frame, PointerOf(ByRef bytes), bytes.Count, 0))
         End Unsafe
+    End Method
+
+    /// A new, empty table.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method NewTable(): LuauTable Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(fbl_table_new(Handle, frame, 0, 0))
+        Return Try LuauTable.FromLuau(LuauSlots(Self, frame), 0)
+    End Method
+
+    /// A new table of `items`, from 1, as a script writes `{ a, b, c }`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY, or CONVERSION for an item that can't be given to Luau.
+    @PanicsAtCaller
+    Public Method NewTable<T: LuauType>(items: T[]): LuauTable Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Local slots = LuauSlots(Self, frame)
+        Try Check(fbl_table_new(Handle, frame, items.Count, 0))
+        For index = 0 Until items.Count
+            Try Check(fbl_frame_push_number(Handle, frame, index + 1))
+            Try T.ToLuau(slots, items[index])
+            Try Check(fbl_table_raw_set(Handle, frame, 0, 1, 2))
+            slots.Truncate(1)
+        End For
+        Return Try LuauTable.FromLuau(slots, 0)
+    End Method
+
+    /// A new table of `entries`, as a script writes `{ [key] = value }`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY, or CONVERSION for a key or value that can't be given to Luau, or a
+    /// key Luau's tables can't hold, like NaN.
+    @PanicsAtCaller
+    Public Method NewTable<K, V>(entries: Map<K, V>): LuauTable Throws LuauError
+        Where K: LuauType & Hashable
+        Where V: LuauType
+        Local frame = Opened()
+        Defer Closed(frame)
+        Local slots = LuauSlots(Self, frame)
+        Try Check(fbl_table_new(Handle, frame, 0, entries.Count))
+        For entry In entries
+            Try K.ToLuau(slots, entry.0)
+            Try V.ToLuau(slots, entry.1)
+            Try Check(fbl_table_raw_set(Handle, frame, 0, 1, 2))
+            slots.Truncate(1)
+        End For
+        Return Try LuauTable.FromLuau(slots, 0)
     End Method
 
     /// Its handle, panicking at the caller once it's closed.

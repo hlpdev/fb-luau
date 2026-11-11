@@ -1,0 +1,59 @@
+Import std.collections
+Import std.test
+Import luau
+
+@Test
+Function AnIntegerIsLuausOwnAndNoNumber() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("big", LuauInteger(9007199254740993))
+    Expect(Try lua.Evaluate<String>("return typeof(big)") == "integer")
+    Expect(Try lua.Evaluate<Bool>("return big ~= 9007199254740993"))
+    Expect(Try lua.Get<LuauInteger>("big") == LuauInteger(9007199254740993))
+    Expect(Try lua.Get<Int64>("big") == 9007199254740993)
+    Expect(Try lua.Evaluate<Int64>("return integer.create(-5)") == -5)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<UInt64>("return integer.create(-5)")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<LuauInteger>("return 5")) != Null)
+    // A number read from an integer, as each number type takes one.
+    Expect(Try lua.Evaluate<Int>("return integer.create(7)") == 7)
+    Expect(Try lua.Evaluate<Float64>("return integer.create(7)") == 7.0)
+End Function
+
+@Test
+Function BytesCrossAsTheyAre() Throws LuauError
+    Local lua = LuauState()
+    Local packed = Try lua.Evaluate<LuauBytes>("return string.pack('<I2', 513)")
+    Expect(packed.Bytes == [1 As UInt8, 2])
+    Try lua.Set("raw", LuauBytes([0 As UInt8, 255, 128]))
+    Expect(Try lua.Evaluate<Int>("return #raw") == 3)
+    Expect(Try lua.Evaluate<Int>("return string.byte(raw, 2)") == 255)
+End Function
+
+@Test
+Function NilIsAValueOfItsOwn() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("x", 5)
+    Try lua.Set("x", LuauNil())
+    Expect(Try lua.Evaluate<Bool>("return x == nil"))
+    Expect(Try lua.Get<LuauNil>("x") == LuauNil())
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<LuauNil>("return false")) != Null)
+End Function
+
+@Test
+Function AValueOfAnyTypeIsReadAndGivenBack() Throws LuauError
+    Local lua = LuauState()
+    Local values = Try (Try lua.Evaluate<LuauTable>(
+        r"return { 1.5, 'two', true, {}, print, integer.create(3) }")).ToArray<LuauValue>()
+    Expect(values.Count == 6)
+    Expect(values[0].Kind == LuauValueKind.NUMBER && values[0].AsNumber() == 1.5)
+    Expect(values[1].AsString() == "two" && values[1].AsNumber() == Null)
+    Expect(values[2].AsBool() == True)
+    Expect(values[3].Kind == LuauValueKind.TABLE)
+    Expect(values[4].Kind == LuauValueKind.FUNCTION)
+    Expect(values[5].AsInteger() == 3)
+    Expect("{values[0]} {values[1]} {values[2]} {values[3]}" == "1.5 two true table")
+    Try lua.Set("again", values[3])
+    Expect(Try lua.Evaluate<String>("return type(again)") == "table")
+    Expect(ExpectThrows<LuauError>(values[0].Read<Int>()) != Null)
+    Expect(Try values[3].Read<LuauTable>().Length() == 0)
+    Expect((Try lua.Evaluate<LuauValue>("return nil")).IsNil)
+End Function

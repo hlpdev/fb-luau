@@ -1,0 +1,113 @@
+Import std.collections
+Import std.test
+Import luau
+
+@Test
+Function ATableIsReadAndWrittenByAnyKeyType() Throws LuauError
+    Local lua = LuauState()
+    Local table = Try lua.NewTable()
+    Try table.Set("name", "ada")
+    Try table.Set(1, "first")
+    Try table.Set(True, 2.5)
+    Expect(Try table.Get<String>("name") == "ada")
+    Expect(Try table.Get<String>(1) == "first")
+    Expect(Try table.Get<Float64>(True) == 2.5)
+    Expect(Try table.Has("name"))
+    Expect(!(Try table.Has("missing")))
+    Expect(Try table.GetOrNull<String>("missing") == Null)
+    Try table.Remove("name")
+    Expect(!(Try table.Has("name")))
+    Expect(table.Length() == 1)
+End Function
+
+@Test
+Function ATableCrossesAsItself() Throws LuauError
+    Local lua = LuauState()
+    Local table = Try lua.NewTable()
+    Try lua.Set("t", table)
+    Try lua.Run("t.x = 5")
+    Expect(Try table.Get<Int>("x") == 5)
+    Local back = Try lua.Get<LuauTable>("t")
+    Try back.Set("y", 6)
+    Expect(Try lua.Evaluate<Int>("return t.y") == 6)
+End Function
+
+@Test
+Function GetAndSetGoThroughTheMetatableAndRawOnesDont() Throws LuauError
+    Local lua = LuauState()
+    Local table = Try lua.Evaluate<LuauTable>(
+        r"return setmetatable({}, { __index = function(_, k) return k .. '!' end })")
+    Expect(Try table.Get<String>("door") == "door!")
+    Expect(Try table.GetOrNull<String>("door") == "door!")
+    Expect(ExpectThrows<LuauError>(table.RawGet<String>("door"))?.Kind == LuauErrorKind.CONVERSION)
+    Try table.RawSet("door", "open")
+    Expect(Try table.Get<String>("door") == "open")
+    Expect(Try table.Metatable() != Null)
+    Try table.SetMetatable(Null)
+    Expect(Try table.Metatable() == Null)
+End Function
+
+@Test
+Function AnArrayAndAMapCrossThroughATable() Throws LuauError
+    Local lua = LuauState()
+    Local items = Try lua.NewTable(["a", "b", "c"])
+    Expect(items.Length() == 3)
+    Try lua.Set("items", items)
+    Expect(Try lua.Evaluate<String>("return table.concat(items, ',')") == "a,b,c")
+    Expect(Try (Try lua.Evaluate<LuauTable>(r"return { 1, 2, 3 }")).ToArray<Int>() == [1, 2, 3])
+    Local scores: Map<String, Int> = {"ada": 3, "bob": 5}
+    Try lua.Set("scores", Try lua.NewTable(scores))
+    Expect(Try lua.Evaluate<Int>("return scores.ada + scores.bob") == 8)
+    Local back = Try (Try lua.Get<LuauTable>("scores")).ToMap<String, Int>()
+    Expect(back.Count == 2 && back["ada"] == 3 && back["bob"] == 5)
+    Local entries = Try (Try lua.Get<LuauTable>("scores")).Entries<String, Int>()
+    Expect(entries.Count == 2)
+End Function
+
+@Test
+Function AnItemOfAnotherTypeIsAConversionError() Throws LuauError
+    Local lua = LuauState()
+    Local mixed = Try lua.Evaluate<LuauTable>(r"return { 1, 'two', 3 }")
+    Local error = ExpectThrows<LuauError>(mixed.ToArray<Int>())
+    Expect(error?.Kind == LuauErrorKind.CONVERSION)
+    Expect(error?.Message == "expected Int32, got string")
+    Expect(Try mixed.ToArray<LuauValue>().Count == 3)
+End Function
+
+@Test
+Function AFrozenTableRefusesChanges() Throws LuauError
+    Local lua = LuauState()
+    Local table = Try lua.NewTable()
+    Expect(!table.IsFrozen)
+    Try table.Freeze()
+    Expect(table.IsFrozen)
+    Local error = ExpectThrows<LuauError>(table.Set("x", 1))
+    Expect(error?.Kind == LuauErrorKind.RUNTIME)
+    Expect(ExpectThrows<LuauError>(table.RawSet("x", 1)) != Null)
+    Expect(ExpectThrows<LuauError>(table.SetMetatable(Try lua.NewTable())) != Null)
+    Try lua.Set("frozen", table)
+    Expect(ExpectThrows<LuauError>(lua.Run("frozen.x = 1")) != Null)
+End Function
+
+@Test
+Function ANilOrNaNKeyIsAnError() Throws LuauError
+    Local lua = LuauState()
+    Local table = Try lua.NewTable()
+    Expect(ExpectThrows<LuauError>(table.Set(LuauNil(), 1)) != Null)
+    Local zero = 0.0
+    Expect(ExpectThrows<LuauError>(table.Set(zero / zero, 1)) != Null)
+    Expect(ExpectThrows<LuauError>(table.RawSet(LuauNil(), 1)) != Null)
+End Function
+
+@Test
+Function AMapCrossesAsAValueOfItsOwn() Throws LuauError
+    Local lua = LuauState()
+    Local scores: Map<String, Int> = {"ada": 3, "bob": 5}
+    Try lua.Set("scores", scores)
+    Expect(Try lua.Evaluate<Int>("return scores.ada * scores.bob") == 15)
+    Local back = Try lua.Get<Map<String, Int>>("scores")
+    Expect(back.Count == 2 && back["bob"] == 5)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Map<String, Int>>(r"return { a = 'x' }")) != Null)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Map<String, Int>>("return 5"))?.Message ==
+           "expected Map<String, Int32>, got number")
+End Function
