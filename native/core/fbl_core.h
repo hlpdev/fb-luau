@@ -41,7 +41,8 @@ extern "C" {
 #define FBL_CONVERSION 5
 // A yield where nothing can wait for it.
 #define FBL_YIELD 6
-// A State closed while it ran.
+// A State closed while its thread waited: the package's, for a thread it ran on the scheduler,
+// which the library doesn't give.
 #define FBL_CLOSED 7
 // Anything else.
 #define FBL_OTHER 8

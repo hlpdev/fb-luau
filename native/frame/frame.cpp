@@ -66,7 +66,8 @@ int32_t fbl_frame_open(uint64_t state) try {
     }
     return static_cast<int32_t>(found->frames.size() - 1);
 } catch (...) {
-    return fbl::escaped();
+    fbl::escaped();
+    return -1;
 }
 
 bool fbl_frame_close(uint64_t state, int32_t frame) try {
@@ -86,7 +87,8 @@ int32_t fbl_frame_count(uint64_t state, int32_t frame) try {
     const found_t found = find(state, frame);
     return found ? lua_gettop(found.frame->thread) - found.frame->base : -1;
 } catch (...) {
-    return fbl::escaped();
+    fbl::escaped();
+    return -1;
 }
 
 bool fbl_frame_truncate(uint64_t state, int32_t frame, int32_t count) try {
@@ -166,7 +168,8 @@ int32_t fbl_frame_type(uint64_t state, int32_t frame, int32_t slot) try {
         return FBL_TYPE_OTHER;
     }
 } catch (...) {
-    return fbl::escaped();
+    fbl::escaped();
+    return -1;
 }
 
 int32_t fbl_frame_push_nil(uint64_t state, int32_t frame) try {

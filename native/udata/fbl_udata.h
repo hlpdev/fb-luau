@@ -26,7 +26,8 @@ FBL_API int32_t fbl_udata_type_set(uint64_t state, int32_t frame, int32_t type, 
                                    int32_t value_slot);
 
 // Adds the userdata of `object` to the frame, if Luau still has it: FBL_OK, or FBL_OTHER,
-// adding nothing, when it hasn't, and the program makes a new one.
+// adding nothing, when it hasn't, and the program makes a new one. An object's number is from
+// -2^53 to 2^53, as Luau's numbers tell those apart; another is misuse.
 FBL_API int32_t fbl_udata_push(uint64_t state, int32_t frame, int64_t object);
 
 // Adds a new userdata of `object` to the frame, of a registered type. A status.

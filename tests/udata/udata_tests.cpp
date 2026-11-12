@@ -202,3 +202,31 @@ TEST_CASE("an object whose making fails at any allocation is nothing to the prog
     set_object(lua, "late", 1000);
     CHECK(lua.run("assert(late.x == 2)") == FBL_OK);
 }
+
+TEST_CASE("an object's number past what Luau's numbers tell apart is refused") {
+    const test_state_t lua;
+    register_thing(lua);
+    const int32_t frame = fbl_frame_open(lua.handle);
+    constexpr int64_t most = int64_t{ 1 } << 53;
+    CHECK(fbl_udata_new(lua.handle, frame, most + 1, 1) == FBL_MISUSE);
+    CHECK(fbl_udata_push(lua.handle, frame, -most - 1) == FBL_MISUSE);
+    CHECK(fbl_udata_new(lua.handle, frame, most, 1) == FBL_OK);
+    CHECK(fbl_frame_count(lua.handle, frame) == 1);
+    CHECK(fbl_frame_close(lua.handle, frame));
+}
+
+TEST_CASE("a type's metatable is frozen again when a set of it fails") {
+    const test_state_t lua;
+    register_thing(lua);
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    const int32_t frame = fbl_frame_open(lua.handle);
+    REQUIRE(fbl_frame_push_number(lua.handle, frame, 1) == FBL_OK);
+    state->failing_point = 0;
+    CHECK(fbl_udata_type_set(lua.handle, frame, 1, "__add", 0) != FBL_OK);
+    state->failing_point = -1;
+    CHECK(fbl_frame_close(lua.handle, frame));
+    lua_getref(state->main, state->type_refs.at(0));
+    CHECK(lua_getreadonly(state->main, -1) != 0);
+    lua_pop(state->main, 1);
+}

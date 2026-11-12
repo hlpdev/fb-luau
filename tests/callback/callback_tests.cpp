@@ -20,6 +20,7 @@ constexpr int64_t where = 4;
 constexpr int64_t silent = 5;
 constexpr int64_t deep = 6;
 constexpr int64_t make = 7;
+constexpr int64_t other = 8;
 
 // What the test's callback has called, for the nesting test.
 int depth_reached = 0;
@@ -68,6 +69,9 @@ int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
     case silent:
         fbl_frame_truncate(state, frame, 0);
         return FBL_OK;
+    case other:
+        // Fails without an error, its arguments left in its frame.
+        return FBL_OTHER;
     case make:
         // Makes a function of the program's, which it lets go at once.
         fbl_frame_truncate(state, frame, 0);
@@ -274,4 +278,13 @@ TEST_CASE("a function whose making fails at any allocation is nothing to the pro
     CHECK(state->released.empty());
     set_function(lua, "late", add);
     CHECK(lua.run("assert(late(1, 2) == 3)") == FBL_OK);
+}
+
+TEST_CASE("a function that fails without an error raises none of its arguments") {
+    const test_state_t lua;
+    REQUIRE(fbl_callback_set(test_callback));
+    set_function(lua, "other", other);
+    CHECK(lua.run("local ok, e = pcall(other, 'secret', 'arguments') "
+                  "assert(not ok and e == \"the program's function failed, and gave no error\", e)") ==
+          FBL_OK);
 }

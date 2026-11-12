@@ -51,6 +51,13 @@ struct found_t {
     }
 };
 
+// Whether an object's number is one the weak table, keyed by Luau's numbers, tells apart from every
+// other: from -2^53 to 2^53.
+bool keyable(int64_t object) noexcept {
+    constexpr int64_t most = int64_t{ 1 } << 53;
+    return object >= -most && object <= most;
+}
+
 found_t find(uint64_t state, int32_t frame) noexcept {
     fbl::state_t* found = fbl::find_state(state);
     return { .state = found, .frame = found == nullptr ? nullptr : fbl::find_frame(*found, frame) };
@@ -170,13 +177,16 @@ int32_t fbl_udata_type_set(uint64_t state, int32_t frame, int32_t type, const ch
         }
     }
     lua_State* thread = found.frame->thread;
-    if (lua_checkstack(thread, 1) == 0) {
+    // Room for the value, and the metatable or the error after.
+    if (lua_checkstack(thread, 2) == 0) {
         return fbl::record_error(*found.state, FBL_MEMORY, "not enough memory");
     }
     lua_pushvalue(thread, index);
-    auto work = [ref, field](lua_State* stack) {
+    const fbl::state_t* const setting = found.state;
+    auto work = [ref, field, setting](lua_State* stack) {
         lua_getref(stack, ref);
         lua_setreadonly(stack, -1, 0);
+        fbl::failure_point(stack, *setting);
         lua_pushvalue(stack, 1);
         lua_setfield(stack, -2, field);
         lua_setreadonly(stack, -1, 1);
@@ -186,6 +196,10 @@ int32_t fbl_udata_type_set(uint64_t state, int32_t frame, int32_t type, const ch
     if (status == fbl::no_room) {
         lua_pop(thread, 1);
     }
+    // Frozen again however the set ended, as a failed one leaves it as it was.
+    lua_getref(thread, ref);
+    lua_setreadonly(thread, -1, 1);
+    lua_pop(thread, 1);
     return fbl::settle(*found.state, thread, status);
 } catch (...) {
     return fbl::escaped();
@@ -195,6 +209,9 @@ int32_t fbl_udata_push(uint64_t state, int32_t frame, int64_t object) try {
     const found_t found = find(state, frame);
     if (!found) {
         return FBL_MISUSE;
+    }
+    if (!keyable(object)) {
+        return fbl::misuse(fbl::formatted("object {} is past what Luau's numbers hold", object));
     }
     lua_State* thread = found.frame->thread;
     // Reading a table raw, by a number, needs no memory.
@@ -218,6 +235,9 @@ int32_t fbl_udata_new(uint64_t state, int32_t frame, int64_t object, int32_t typ
     const found_t found = find(state, frame);
     if (!found) {
         return FBL_MISUSE;
+    }
+    if (!keyable(object)) {
+        return fbl::misuse(fbl::formatted("object {} is past what Luau's numbers hold", object));
     }
     const int ref = type_ref(*found.state, type);
     if (ref == LUA_NOREF) {

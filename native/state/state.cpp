@@ -32,7 +32,12 @@ constexpr uint64_t state_kind = 1;
 struct slot_t {
     fbl::state_t* state = nullptr;
     uint32_t generation = 0;
+    std::thread::id owner;
 };
+
+// The most generations a slot's handle tells apart, its 24 bits: a slot that's held this many
+// States is retired, so no handle ever names two.
+constexpr uint32_t most_generations = 0xFFFFFFU;
 
 std::atomic<int64_t> all_memory{ 0 };
 
@@ -345,6 +350,16 @@ entered_t::~entered_t() {
     }
 }
 
+void set_generation(uint64_t handle, uint32_t generation) noexcept {
+    const std::scoped_lock lock(slots_mutex);
+    const auto slot = static_cast<uint32_t>(handle >> 32U);
+    if (slot >= slots.size() || slots[slot].state == nullptr) {
+        return;
+    }
+    slots[slot].generation = generation;
+    slots[slot].state->handle = handle_of(slot, generation);
+}
+
 void failure_point(lua_State* stack, const state_t& state) {
     if (state.failing_point >= 0 && state.failing_point-- == 0) {
         luaL_error(stack, "not enough memory");
@@ -373,18 +388,21 @@ state_t* find_state(uint64_t handle) noexcept {
     }
     const auto slot = static_cast<uint32_t>(handle >> 32U);
     state_t* state = nullptr;
+    bool owned = false;
     {
+        // Its owner is read under the lock, as the owner can close it, and free it, meanwhile.
         const std::scoped_lock lock(slots_mutex);
         if (slot < slots.size() && slots[slot].state != nullptr &&
             handle_of(slot, slots[slot].generation) == handle) {
             state = slots[slot].state;
+            owned = slots[slot].owner == std::this_thread::get_id();
         }
     }
     if (state == nullptr) {
         misuse("the State is closed");
         return nullptr;
     }
-    if (state->owner != std::this_thread::get_id()) {
+    if (!owned) {
         misuse("the State is another thread's; only the thread that made it uses it");
         return nullptr;
     }
@@ -420,9 +438,12 @@ int32_t misuse(std::string_view why) noexcept {
 int32_t record_error(state_t& state, int32_t kind, std::string_view message,
                      std::string_view traceback) noexcept {
     state.error_kind = kind;
-    // An error that isn't a value of Luau's has none.
+    // An error that isn't a value of Luau's has none. The slot holds false then, never nil,
+    // which would make it a border lua_ref could give another, and a dead key a set could need
+    // memory for.
+    state.error_has_value = false;
     if (state.error_ref != LUA_NOREF && lua_checkstack(state.main, 1) != 0) {
-        lua_pushnil(state.main);
+        lua_pushboolean(state.main, 0);
         lua_rawseti(state.main, LUA_REGISTRYINDEX, state.error_ref);
     }
     try {
@@ -493,7 +514,13 @@ int32_t take_error(state_t& state, lua_State* thread, int32_t kind,
         record_error(state, kind, "", traceback);
     }
     // The value itself, in the registry's slot for it, which the slot's being there already lets
-    // change without memory.
+    // change without memory; error(nil)'s is none, as false is kept for it.
+    if (lua_isnil(thread, -1)) {
+        lua_pop(thread, 1);
+        lua_pushboolean(thread, 0);
+    } else {
+        state.error_has_value = true;
+    }
     lua_rawseti(thread, LUA_REGISTRYINDEX, state.error_ref);
     return kind;
 }
@@ -565,6 +592,10 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
         state->current = state->main;
         try {
             const std::scoped_lock lock(slots_mutex);
+            // Room first, so nothing's taken when it can't be had: a new slot, and a free one for
+            // each, so closing it never needs memory to free its slot.
+            slots.reserve(slots.size() + 1);
+            free_slots.reserve(slots.size() + 1);
             uint32_t slot = 0;
             if (free_slots.empty()) {
                 slot = static_cast<uint32_t>(slots.size());
@@ -573,10 +604,9 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
                 slot = free_slots.back();
                 free_slots.pop_back();
             }
-            // So closing it never needs memory to free its slot.
-            free_slots.reserve(slots.size());
             slots[slot].generation++;
             slots[slot].state = state.get();
+            slots[slot].owner = state->owner;
             state->handle = handle_of(slot, slots[slot].generation);
         } catch (const std::exception&) {
             said = FBL_MEMORY;
@@ -600,17 +630,22 @@ bool fbl_state_close(uint64_t state) try {
     if (found == nullptr) {
         return false;
     }
-    if (found->depth > 0 || !found->frames.empty()) {
+    // A frame the program left open goes with it; a call running, or a function of the program's
+    // that Luau called, doesn't.
+    if (found->depth > 0 || found->current != found->main) {
         fbl::fail("a State can't be closed while it runs a call");
         return false;
     }
+    found->frames.clear();
     {
         const std::scoped_lock lock(slots_mutex);
         const auto slot = static_cast<uint32_t>(state >> 32U);
         slots[slot].state = nullptr;
-        // Its slot is free for another State, whose handle its generation tells apart; there's
-        // room for it, which making the State reserved.
-        free_slots.push_back(slot);
+        // Its slot is free for another State, whose handle its generation tells apart, unless its
+        // generations are spent; there's room for it, which making the State reserved.
+        if (slots[slot].generation < most_generations) {
+            free_slots.push_back(slot);
+        }
     }
     close_state(found);
     return true;
@@ -667,7 +702,11 @@ int32_t fbl_state_error_value(uint64_t state, int32_t frame) try {
     if (lua_checkstack(in->thread, 1) == 0) {
         return fbl::record_error(*found, FBL_MEMORY, "not enough memory");
     }
-    lua_getref(in->thread, found->error_ref);
+    if (found->error_has_value) {
+        lua_getref(in->thread, found->error_ref);
+    } else {
+        lua_pushnil(in->thread);
+    }
     return FBL_OK;
 } catch (...) {
     return fbl::escaped();

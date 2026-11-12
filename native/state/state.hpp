@@ -97,6 +97,7 @@ struct state_t {
     std::unordered_map<std::string, std::optional<std::string>> module_files;
     // The last error a call met, its value kept by the registry at error_ref.
     int error_ref = LUA_NOREF;
+    bool error_has_value = false;
     int32_t error_kind = FBL_OK;
     std::string error_message;
     std::string error_traceback;
@@ -222,6 +223,10 @@ int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, boo
 // itself, and whose metatable, frozen and locked, reads what it hasn't from the main thread's
 // globals, which `main` has room on its stack to give. It raises when there's no memory.
 void push_environment(lua_State* stack, lua_State* main);
+
+// For the tests: sets the generation of the slot a State's handle names, which gives it a new
+// handle, so a test reaches a slot's last generations.
+void set_generation(uint64_t handle, uint32_t generation) noexcept;
 
 // For the tests: raises "not enough memory" when it's the State's failing_point, in a work that
 // makes something in steps, between them.

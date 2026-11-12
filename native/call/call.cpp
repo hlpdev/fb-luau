@@ -20,6 +20,10 @@ int runner_mark = 0;
 // registry; or null, with the State's error.
 lua_State* runner(fbl::state_t& state, lua_State* thread, int depth) {
     if (std::cmp_less(depth, state.runner_refs.size())) {
+        if (lua_checkstack(thread, 1) == 0) {
+            fbl::record_error(state, FBL_MEMORY, "not enough memory");
+            return nullptr;
+        }
         lua_getref(thread, state.runner_refs[static_cast<size_t>(depth)]);
         lua_State* found = lua_tothread(thread, -1);
         lua_pop(thread, 1);

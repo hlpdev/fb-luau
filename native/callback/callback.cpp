@@ -122,6 +122,11 @@ int call_back(lua_State* thread) {
         }
         return lua_yield(thread, lua_gettop(thread));
     }
+    // Only FBL_RUNTIME leaves the error to raise; any other failure leaves whatever's there, which
+    // isn't the script's to see.
+    if (status != FBL_RUNTIME) {
+        lua_settop(thread, 0);
+    }
     if (lua_gettop(thread) == 0) {
         lua_pushliteral(thread, "the program's function failed, and gave no error");
     }
