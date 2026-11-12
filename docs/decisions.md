@@ -375,13 +375,22 @@ Written while the PC was kept free for the user: none of it built or run until t
   (fbl_thread_waits_in), and is dropped at its turn when the thread isn't suspended in it, as when
   a script resumed or closed it; a thread that waits again while its old entry is kept replaces
   it.
-- **The two tests (99):** the wrong-self test is back, reaching the handler through the script's
-  own levels, which debug.info still gives; escape_test's walker stays at `found >= 1`, as review-2
-  refused another call's thread's levels, which most of its finds were. 54's finalizer test now
-  fails without its fix, a failing call resetting the runner. 61 has no test yet: one wants 200
-  nested C calls ending in a program function that resumes, which I'll write once it can run.
-- **Objects by identity (2),** with std.collections' `Identity<T>` (fb 1.3.1): `LuauObject` is a
-  Class's (`T: LuauObject & Class`), and no longer Hashable.
+- **The two tests (99) can't stand as they were:** the wrong-self test took a type's handler from
+  the stack of the thread that called the Method, and the Method's call back into Luau runs on a
+  runner of its own, whose levels don't reach that thread, and review-2 refused another call's
+  thread to debug.info: the handler is on no stack a script can read, which is the fix. For the
+  same reason escape_test's walker stays at `found >= 1`. 54's finalizer test now fails without
+  its fix, a failing call resetting the runner. 61 has no test yet: it wants 200 nested C calls
+  ending in a program function that resumes.
+- **Objects by identity (2) still waits on fb:** fb 1.3.1's `Identity<T>` needs `T: Class`, and
+  LuauObject's Static defaults, an Interface's, can't say Self is one, convert their value to an
+  Object, or key by `Identity<Object>` (fbengine-notes/luau/interface_identity.fb, for the fb
+  lane). Written with `T: LuauObject & Class`, it didn't compile there; it's backed out, and the
+  Map is by the Class's own `==` and Hash meanwhile.
+- **Only the driver reads its scheduler's time:** `Scheduler.Current` is the main thread's, and a
+  State on a worker thread would reach it through a wait's call, so a wait made in a turn is due
+  from the turn's time plus the real time the turn's taken since, which is exact on the main
+  scheduler and late by that much on a hand-ticked one.
 - **fb 1.3.2,** in project.toml and every workflow. The workarounds fb 1.3.1's fixes made needless
   are out: the Throws Error lambda, the Dog that couldn't list LuauObject, the drivers' array
   instead of a Map of Weak, and the compile test, now a run that Register's panic names.

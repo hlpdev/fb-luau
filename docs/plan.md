@@ -909,10 +909,11 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
 13. **Fixed in fb 1.3.1:** a Scheduler's `Run(task)` moved only the task's own coroutine. The
     waits' driver no longer rests on it either way: it reads its scheduler's time each tick, by
     fb 1.3.2's `Scheduler.Current.Time()` (fbengine-notes/luau/scheduler_run_nested.fb).
-14. **Fixed in fb 1.3.1:** nothing keyed by identity. An object's userdata is found by
-    std.collections' `Identity<T>`, RefHash and RefEquals, never its Class's own `==` or Hash, so
-    `LuauObject` is a Class's, and no longer Hashable (review finding 2;
-    fbengine-notes/luau/identity_key.fb).
+14. **Nothing keys an Interface's implementer by identity:** fb 1.3.1 has `Identity<T>`, which
+    needs `T: Class`, and LuauObject's Static defaults, an Interface's, can't say Self is a Class
+    (gap 11), convert it to an Object, or key by `Identity<Object>`. So two equal objects of a
+    Class with an `==` of its own share one userdata, and one whose Hash changes while Luau has it
+    gets a second (review finding 2, open; fbengine-notes/luau/interface_identity.fb).
 15. **Fixed in fb 1.3.1:** a derived Class got its base's Static defaults, so a Class extending a
     registered one couldn't list LuauObject. It can now, and is a type of its own; an object still
     reads back only as the type it crossed as, by gap 11 (fbengine-notes/luau/derived_static_default.fb).
