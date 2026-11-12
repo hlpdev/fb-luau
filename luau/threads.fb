@@ -20,11 +20,6 @@ Import "./tables"
 Import "./value"
 Import "./values"
 
-/// The most of a scheduler's time a driver's timer waits at once, in seconds: a closed State's
-/// driver ends within it, and a wait is late by at most what one of the scheduler's ticks
-/// overshoots, each time it waits this long, as a timer started in a tick counts from its end.
-Const LongestWait: Float64 = 1.0
-
 /// What a [LuauThread] is now, as `coroutine.status` says it, and whether the scheduler has it.
 Public Enum LuauThreadStatus
     /// Made, or yielded: a resume goes on with it.
@@ -134,6 +129,9 @@ Public Class LuauThread Implements LuauType
     /// program's own, whose pause and time scale its waits follow. Its Task is done when the
     /// thread ends.
     ///
+    /// When the thread ends, what the threads it started still wait for goes to the State's own
+    /// driver, `lua.Start()`'s, or, with none running, to ThreadError, as nothing would run it.
+    ///
     /// # Errors
     ///
     /// The Task throws a LuauError for what the thread raises or meets as it runs; of CLOSED when
@@ -141,12 +139,16 @@ Public Class LuauThread Implements LuauType
     /// that waits already, or isn't suspended.
     Public Async Method Start() Throws LuauError
         Local driver = Try LuauDriver.Started(Self)
-        // Its timer starts after its first tick, so a Scheduler's Run of its Task has moved it.
-        While True
-            Await NextTick()
-            If !(Try driver.Turned()) Then Return
-            If driver.WantsTimer() Then Timed(driver)
-        End While
+        Try
+            While True
+                Await NextTick()
+                If !(Try driver.Turned()) Then Break
+            End While
+        Catch error As LuauError
+            driver.HandedOver()
+            Throw error
+        End Try
+        driver.HandedOver()
     End Method
 
     /// Closes it, as `coroutine.close` does: it's finished, and lets go of what it held, so
@@ -265,9 +267,12 @@ Package Class LuauWaiting
     Package ReadOnly Field Task: Task<LuauResumed>?
     /// Where it waited, which a Task's error is raised as from.
     Package ReadOnly Field Origin: String
-    /// The driver that resumes it, by its number, and the time in that driver's when it's due.
+    /// The driver that resumes it, by its number, and the time of that driver's scheduler when
+    /// it's due; or, while Pending, the seconds from the driver's next turn, as a wait made
+    /// outside a turn, or handed on, counts from it.
     Package Field Driver: Int = 0
     Package Field Due: Float64 = 0.0
+    Package Field Pending: Bool = False
 
     /// A wait of `seconds`, or for the next tick, after which it's resumed with `given`.
     Package New(thread: LuauThread, seconds: Float64, given: LuauResumed)
@@ -297,9 +302,10 @@ End Class
 
 /// What resumes a State's threads that wait, on the scheduler its coroutine is on: the State's own,
 /// `lua.Start()`, for what no thread's Start runs, or a thread's Start, for its thread and what
-/// the threads it starts wait for. No wait is a timer of its own: at each of the scheduler's ticks,
-/// it resumes what's due, with one time budget for all of it, and its time is what its timer, a
-/// wait of at most a quantum at a time, has seen pass.
+/// the threads it starts wait for. No wait is a timer: at each of its scheduler's ticks, it reads
+/// the scheduler's time and resumes what's due, so a wait is never early, and at most a tick
+/// late; the State's time budget decides only whether another thread is resumed in a tick, and
+/// each resume has the budget of its own.
 Package Class LuauDriver
     /// Its number in its State.
     Package ReadOnly Field Number: Int
@@ -307,10 +313,10 @@ Package Class LuauDriver
     ReadOnly Field owner: Weak<LuauState>
     /// The thread whose Start it is, or Null for the State's own.
     Package ReadOnly Field Own: LuauThread?
-    /// Its time, in seconds of its scheduler's, which its timer moves on.
+    /// Its scheduler's time at its last turn, in seconds.
     Package Field Now: Float64 = 0.0
-    /// Whether its timer runs.
-    Package Field Timing: Bool = False
+    /// Whether it's in its turn, when the scheduler running the code is its own.
+    Package Field InTurn: Bool = False
 
     Package New(owner: LuauState, number: Int, own: LuauThread?)
         Self.owner = owner
@@ -336,10 +342,43 @@ Package Class LuauDriver
             If heir == Null
                 held.Waits.Remove(id)
             Else
-                waiting.Due = heir.Now + Max(waiting.Due - Now, 0.0)
-                waiting.Driver = heir.Number
+                HandTo(waiting, heir)
             End If
         End For
+    End Method
+
+    /// Gives `waiting` to `heir`, due as much later from heir's next turn as it had left.
+    Method HandTo(waiting: LuauWaiting, heir: LuauDriver)
+        If !waiting.Pending
+            waiting.Due = Max(waiting.Due - Now, 0.0)
+            waiting.Pending = True
+        End If
+        waiting.Driver = heir.Number
+    End Method
+
+    /// As a thread's Start ends: what it still drives goes to the State's own driver, or, with
+    /// none running, ends as an error to ThreadError, since nothing would ever resume it.
+    Package Method HandedOver()
+        Local held: LuauState? = owner
+        If held == Null || !held.IsOpen Then Return
+        Local heir = held.DriverOf(held.StateDriver)
+        Local mine: UInt64[] = []
+        For entry In held.Waits
+            If entry.1.Driver == Number Then mine.Add(entry.0)
+        End For
+        For id In mine
+            Local waiting = held.Waits.Get(id)
+            If waiting == Null Then Continue
+            If heir != Null
+                HandTo(waiting, heir)
+            Else
+                held.Waits.Remove(id)
+                held.Failed(LuauError(LuauErrorKind.YIELD,
+                                      "a thread waited with nothing to resume it once the Start " +
+                                      "that ran it ended; lua.Start() runs the State's waits"))
+            End If
+        End For
+        held.Report()
     End Method
 
     /// The State's own driver, for `lua.Start()`.
@@ -372,51 +411,44 @@ Package Class LuauDriver
         Return driver
     End Method
 
-    /// Whether its timer should start: it has a time to wait for, and no timer.
-    Package Method WantsTimer(): Bool
-        If Timing || Quantum() <= 0.0 Then Return False
-        Timing = True
-        Return True
-    End Method
-
-    /// How long its timer waits next: to its soonest time, at most a quantum; or 0 when it waits
-    /// for none, or its State is closed.
-    Package Method Quantum(): Float64
-        Local held: LuauState? = owner
-        If held == Null || !held.IsOpen Then Return 0.0
-        Local soonest: Float64 = -1.0
-        For entry In held.Waits
-            Local waiting = entry.1
-            If waiting.Driver != Number || waiting.Task != Null || waiting.Seconds <= 0.0 Then Continue
-            If soonest < 0.0 || waiting.Due < soonest Then soonest = waiting.Due
-        End For
-        If soonest < 0.0 Then Return 0.0
-        Return Min(Max(soonest - Now, 0.001), LongestWait)
-    End Method
-
-    /// Its turn at a tick of its scheduler's: resumes what's due, as much as one time budget
-    /// runs, the rest going first next tick; then whether it goes on: False once its own thread
-    /// has ended.
+    /// Its turn at a tick of its scheduler's: reads the scheduler's time, and resumes what's due
+    /// while the tick's budget lasts, the rest going first next tick; then whether it goes on:
+    /// False once its own thread has ended. A tick inside a call of the program's into the State,
+    /// as when the program waits on a Task in a function a script called, is no turn.
     ///
     /// # Errors
     ///
     /// For a thread's Start, what its thread met; for every driver, a LuauError of CLOSED once
-    /// its State is.
+    /// its State is, as ThreadError can close it.
     Package Method Turned(): Bool Throws LuauError
         Local held: LuauState? = owner
         If held == Null || !held.IsOpen
             Throw LuauError(LuauErrorKind.CLOSED, "the Luau State closed while its threads waited")
         End If
+        If fbl_state_turn(held.Handle, 3) == 1 Then Return True
+        Now = Scheduler.Current.Time().TotalSeconds
         Local due: LuauWaiting[] = []
         For entry In held.Waits
-            If entry.1.Driver == Number && entry.1.IsDue(Now) Then due.Add(entry.1)
+            Local waiting = entry.1
+            If waiting.Driver != Number Then Continue
+            If waiting.Pending
+                waiting.Due = Now + waiting.Due
+                waiting.Pending = False
+            End If
+            If waiting.IsDue(Now) Then due.Add(waiting)
         End For
         Local failed: LuauError? = Null
         If due.Count > 0
-            Try held.Check(fbl_state_turn(held.Handle, 1))
+            Local clock = Stopwatch.StartNew()
+            Local budget = held.TickBudget
             held.Turning = True
+            InTurn = True
             For waiting In due
-                If fbl_state_turn(held.Handle, 2) == 1 Then Break
+                If !held.IsOpen Then Break
+                // The tick's budget decides only whether another thread starts; each resume has
+                // the State's budget of its own, so only what spins is ended.
+                If budget > 0.Seconds && clock.Elapsed >= budget Then Break
+                If !held.Waits.Contains(waiting.Thread.Id) Then Continue
                 held.Waits.Remove(waiting.Thread.Id)
                 Local resumed = waiting.Given
                 Local task = waiting.Task
@@ -427,11 +459,14 @@ Package Class LuauDriver
                     If IsOwn(waiting.Thread) Then failed = error Else waiting.Thread.Failed(error)
                 End Try
             End For
+            InTurn = False
             held.Turning = False
-            fbl_state_turn(held.Handle, 0)
         End If
-        held.Report()
+        If held.IsOpen Then held.Report()
         If failed != Null Then Throw failed
+        If !held.IsOpen
+            Throw LuauError(LuauErrorKind.CLOSED, "the Luau State closed while its threads waited")
+        End If
         Local own = Own
         If own == Null Then Return True
         Return held.Waits.Contains(own.Id) || own.Luaus() == LuauThreadStatus.SUSPENDED
@@ -448,7 +483,7 @@ Package Class LuauDriver
     Package Method Stepped(thread: LuauThread, resumed: LuauResumed?,
                            where: String) Throws LuauError
         Local held = thread.Owner
-        If thread.Luaus() != LuauThreadStatus.SUSPENDED Then Return
+        If !held.IsOpen || thread.Luaus() != LuauThreadStatus.SUSPENDED Then Return
         Local before = held.CurrentDriver
         held.CurrentDriver = Number
         Try
@@ -461,6 +496,7 @@ Package Class LuauDriver
             Throw error
         End Try
         held.CurrentDriver = before
+        If !held.IsOpen Then Return
         If !held.Waits.Contains(thread.Id) && thread.Luaus() == LuauThreadStatus.SUSPENDED
             Local tick = LuauWaiting(thread, 0.0, LuauResumed.Nothing())
             tick.Driver = Number
@@ -469,27 +505,12 @@ Package Class LuauDriver
     End Method
 End Class
 
-/// A driver's timer: waits on its scheduler at most a quantum at a time, moving the driver's time
-/// on by what it waited, until the driver waits for no time.
-Async Function Timed(driver: LuauDriver)
-    While True
-        Local quantum = driver.Quantum()
-        If quantum <= 0.0
-            driver.Timing = False
-            Return
-        End If
-        Await Wait(quantum.Seconds)
-        driver.Now += quantum
-    End While
-End Function
-
-/// The State's driver: resumes what its threads wait for that no thread's Start runs, until the
-/// State closes.
+/// The State's driver: resumes what its threads wait for that no thread's Start runs, at each of
+/// its scheduler's ticks, until the State closes, so a Scheduler it runs on isn't idle meanwhile.
 Package Async Function Drove(driver: LuauDriver) Throws LuauError
     While True
         Await NextTick()
         If !(Try driver.Turned()) Then Return
-        If driver.WantsTimer() Then Timed(driver)
     End While
 End Function
 

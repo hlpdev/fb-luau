@@ -172,6 +172,8 @@ Public Class LuauState
     Package Field StateDriver: Int = 0
     Package Field Turning: Bool = False
     Package Field MostWaiting: Int = 10000
+    /// How long a driver's tick may resume threads for: the State's time budget, or none for 0.
+    Package Field TickBudget: Duration = Duration.FromNanoseconds(0)
     /// The errors that ended threads nothing waits for, which go to ThreadError once no call runs.
     Package Field Failures: LuauError[]
     /// What gets an error that ends a thread nothing waits for.
@@ -243,6 +245,7 @@ Public Class LuauState
         If options.MostWaiting < 0 Then Panic("{options.MostWaiting} threads can't wait at most")
         If options.NativeMemory < 0 Then Panic("a native code cap of {options.NativeMemory} bytes is below 0")
         MostWaiting = options.MostWaiting
+        TickBudget = options.TimeBudget
         Local made = Made(options)
         If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
         If made.0 == 0 Then Panic(made.2)
@@ -616,7 +619,10 @@ Public Class LuauState
     /// program's, at the scheduler's ticks. Without it, or a thread's Start under the call, a
     /// script's wait is an error of YIELD. `s.Run(lua.Start())` puts it on a Scheduler of the
     /// program's own. It's the main thread's, as Async code is; a State on another thread has no
-    /// driver, and its scripts don't wait.
+    /// driver, and its scripts don't wait. Call it once, before a script's first wait.
+    ///
+    /// It runs until the State closes, waiting or not, so a Scheduler it runs on isn't idle, and
+    /// a program whose top-level code ends goes on, until the program closes the State.
     ///
     /// # Errors
     ///
@@ -827,7 +833,15 @@ Public Class LuauState
                             "State's waits; lua.Start() runs them, or a thread's Start")
         End If
         waiting.Driver = driver.Number
-        waiting.Due = driver.Now + waiting.Seconds
+        // A wait made in the driver's turn counts from its scheduler's time now; one made outside
+        // it, as in a call of the program's or a thread's first resume, from the driver's next
+        // turn, on its own scheduler.
+        If driver.InTurn
+            waiting.Due = Scheduler.Current.Time().TotalSeconds + waiting.Seconds
+        Else
+            waiting.Due = waiting.Seconds
+            waiting.Pending = True
+        End If
         Waits[id] = waiting
     End Method
 

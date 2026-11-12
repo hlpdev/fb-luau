@@ -457,3 +457,101 @@ Function ATasksArgumentsStayInTheState() Throws LuauError
     lua.Close()
     ExpectThrows<LuauError>(waits.Wait())
 End Function
+
+@Test
+Function AStartsDelaysGoToTheStatesDriverWhenItsThreadEnds() Throws LuauError
+    Local lua = LuauState()
+    Local world = Scheduler()
+    Local waits = lua.Start()
+    world.Run(waits)
+    Try lua.Run("function main() task.delay(2, function() ran = true end) task.wait(0.5) end")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    world.Run(done)
+    Local time: Float64 = 0.0
+    While time < 3.0
+        world.Tick(0.1)
+        time += 0.1
+    End While
+    Expect(done.IsDone())
+    Expect(Try lua.Get<Bool>("ran"))
+    lua.Close()
+    world.Tick(0.1)
+    Expect(world.IsIdle())
+End Function
+
+@Test
+Function AWaitMadeMidTickIsNeverEarlyNorMoreThanATickLate() Throws LuauError
+    Local lua = LuauState()
+    Local world = Scheduler()
+    Try lua.SetFunction("now", Function(): Float64 => world.Time().TotalSeconds)
+    Local waits = lua.Start()
+    world.Run(waits)
+    Try lua.Run("function main() task.wait(0.25) local a = now() task.wait(0.3) waited = now() - a end")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    world.Run(done)
+    For tick = 1 To 20
+        world.Tick(0.25)
+    End For
+    Local waited = Try lua.Get<Float64>("waited")
+    Expect(waited >= 0.3 && waited <= 0.55, "{waited}")
+    lua.Close()
+End Function
+
+@Test
+Function AStartWhoseThreadErrorClosesTheStateEndsClosed() Throws LuauError
+    Local options = LuauOptions()
+    Local closers: Weak<LuauState>[] = []
+    options.ThreadError = Function(error: LuauError)
+        For closer In closers
+            Local held: LuauState? = closer
+            held?.Close()
+        End For
+    End Function
+    Local lua = Try LuauState(options)
+    closers.Add(lua)
+    Try lua.Run("function main() task.spawn(function() error('x') end) coroutine.yield() end")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    For step = 1 To 5
+        Scheduler.Main.Step()
+    End For
+    Local error = ExpectThrows<LuauError>(done.Wait())
+    Expect(error != Null && error.Kind == LuauErrorKind.CLOSED)
+End Function
+
+@Test
+Function AHogEndsOnlyItselfAndTheOthersFinish() Throws LuauError
+    Local options = LuauOptions()
+    options.TimeBudget = 30.Milliseconds
+    Local lua = Try LuauState(options)
+    Local world = Scheduler()
+    world.Run(lua.Start())
+    // The hog spins just short of the budget, then waits, each tick; the bystanders each wait
+    // ten ticks.
+    Try lua.Run("finished = 0 " +
+                "task.spawn(function() while true do local t = os.clock() " +
+                "while os.clock() - t < 0.025 do end task.wait() end end) " +
+                "for i = 1, 5 do task.spawn(function() for j = 1, 10 do task.wait() end " +
+                "finished += 1 end) end")
+    For tick = 1 To 40
+        world.Tick(0.1)
+    End For
+    Expect(Try lua.Get<Int>("finished") == 5)
+    lua.Close()
+End Function
+
+@Test
+Function ATickInsideACallIsNoTurn() Throws LuauError
+    // The program's function steps the main scheduler while a script's call runs: the driver's
+    // turn then does nothing, rather than panic, and what's due goes the next tick.
+    Local lua = LuauState()
+    Local waits = lua.Start()
+    Try lua.SetFunction("step", Function()
+        Scheduler.Main.Step()
+    End Function)
+    Try lua.Run("task.defer(function() deferred = true end) step()")
+    Scheduler.Main.Step()
+    Scheduler.Main.Step()
+    Expect(Try lua.Get<Bool>("deferred"))
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function

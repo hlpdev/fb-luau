@@ -896,6 +896,8 @@ int32_t fbl_state_turn(uint64_t state, int32_t what) try {
         found->depth--;
         found->deadline = {};
         return FBL_OK;
+    case 3:
+        return found->depth != 0 ? 1 : 0;
     case 2:
         return found->turn_open && found->deadline != std::chrono::steady_clock::time_point{} &&
                        std::chrono::steady_clock::now() >= found->deadline
