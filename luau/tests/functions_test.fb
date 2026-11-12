@@ -2,6 +2,7 @@ Import std.core
 Import std.io
 Import std.test
 Import std.text
+Import std.time
 Import luau
 
 Function Length(text: String): Int => text.Length
@@ -151,7 +152,10 @@ End Function
 
 @Test
 Function FunctionsMadeAndCollectedInOneCallAreLetGo() Throws LuauError
-    Local lua = LuauState()
+    // A volume test, which takes as long as the machine takes: no time budget.
+    Local options = LuauOptions()
+    options.TimeBudget = 0.Seconds
+    Local lua = Try LuauState(options)
     Local before = lua.Functions.Count
     Local weak: Weak<LuauState> = lua
     Try lua.SetFunction("make", Function() Throws Error

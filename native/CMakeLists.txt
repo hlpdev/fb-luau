@@ -10,6 +10,12 @@ target_compile_definitions(fbl_objects PUBLIC FBL_BUILDING
                            PRIVATE FBL_VERSION="${FBL_VERSION}"
                                    FBL_LUAU_VERSION="${FBL_LUAU_VERSION}")
 target_link_libraries(fbl_objects PUBLIC ${fbl_luau_libraries})
+# The stack guard asks pthreads where a thread's stack ends, which glibc before 2.34 has in
+# libpthread: whatever links the shim, the library, its tests, or the fuzzers, links it too.
+if(CMAKE_SYSTEM_NAME MATCHES "Linux|Darwin")
+  find_package(Threads REQUIRED)
+  target_link_libraries(fbl_objects PUBLIC Threads::Threads)
+endif()
 set_target_properties(fbl_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(NOT WIN32)
   set_target_properties(fbl_objects PROPERTIES CXX_VISIBILITY_PRESET hidden
@@ -20,7 +26,6 @@ fbl_add_shared(luau_native fbl_ "${PROJECT_SOURCE_DIR}/luau/native/${FBL_TARGET}
                $<TARGET_OBJECTS:fbl_objects>)
 target_link_libraries(luau_native PRIVATE ${fbl_luau_libraries})
 if(CMAKE_SYSTEM_NAME MATCHES "Linux|Darwin")
-  find_package(Threads REQUIRED)
   target_link_libraries(luau_native PRIVATE Threads::Threads)
 endif()
 

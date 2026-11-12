@@ -3,6 +3,7 @@ Import std.test
 Import std.text
 Import std.time
 Import luau
+Import "./support/slack"
 
 /// Twice `n`, a tick later, as an Async Function the program gives scripts.
 Async Function Doubled(n: Int): Int
@@ -315,16 +316,20 @@ End Function
 
 @Test
 Function ATickHasOneTimeBudgetForAllItResumes() Throws LuauError
+    // A hundred threads each spin 4 ms of the real clock a resume: a tick's 20 ms budget starts
+    // at most six of them, however fast the machine, where a budget for each would start all.
     Local options = LuauOptions()
     options.TimeBudget = 20.Milliseconds
     Local lua = Try LuauState(options)
     Local driving = lua.Start()
-    Try lua.Run("for i = 1, 100 do task.defer(function() while true do " +
-                "local t = os.clock() while os.clock() - t < 0.004 do end task.wait() end end) end")
+    Try lua.Run("started = 0 for i = 1, 100 do task.defer(function() while true do " +
+                "started += 1 local t = os.clock() while os.clock() - t < 0.004 do end " +
+                "task.wait() end end) end")
     For tick = 0 Until 3
-        Local started = Instant.Now()
+        Local before = Try lua.Get<Int>("started")
         Scheduler.Main.Step()
-        Expect(started.Elapsed < 40.Milliseconds, "{started.Elapsed.TotalMilliseconds} ms")
+        Local count = (Try lua.Get<Int>("started")) - before
+        Expect(count >= 1 && count <= 6, "{count} started in a tick")
     End For
     Stopped(lua, driving)
 End Function
@@ -522,24 +527,30 @@ End Function
 
 @Test
 Function AHogEndsOnlyItselfAndTheOthersFinish() Throws LuauError
+    // Each resume has the budget: the hog, resumed first each tick, never lets go and is ended
+    // at it; the two bystanders after it spin half of it each, which one deadline shared with
+    // the hog would end. The margins are half the budget, held through Slack.
+    Local budget = Slack(250.Milliseconds)
     Local options = LuauOptions()
-    options.TimeBudget = 30.Milliseconds
+    options.TimeBudget = budget
+    Local failed = 0
+    options.ThreadError = Function(error: LuauError)
+        failed++
+    End Function
     Local lua = Try LuauState(options)
     Local world = Scheduler()
     world.Run(lua.Start())
-    // The hog spins just short of the budget, then waits, each tick; the bystanders each spin
-    // 10 ms a tick for ten ticks, so one is resumed with the tick's budget nearly spent, which
-    // one shared deadline would end.
+    Try lua.Set("half", budget.TotalSeconds / 2)
     Try lua.Run("finished = 0 " +
-                "task.spawn(function() while true do task.wait() local t = os.clock() " +
-                "while os.clock() - t < 0.025 do end end end) " +
-                "for i = 1, 5 do task.spawn(function() for j = 1, 10 do task.wait() " +
-                "local t = os.clock() while os.clock() - t < 0.01 do end end " +
+                "task.spawn(function() task.wait() while true do end end) " +
+                "for i = 1, 2 do task.spawn(function() for j = 1, 3 do task.wait() " +
+                "local t = os.clock() while os.clock() - t < half do end end " +
                 "finished += 1 end) end")
-    For tick = 1 To 120
+    For tick = 1 To 10
         world.Tick(0.1)
     End For
-    Expect(Try lua.Get<Int>("finished") == 5)
+    Expect(Try lua.Get<Int>("finished") == 2)
+    Expect(failed == 1, "{failed} threads failed")
     lua.Close()
 End Function
 
@@ -693,8 +704,9 @@ Function AScriptNestingCCallsMeetsAStackOverflowErrorNotACrash() Throws LuauErro
     Expect(Try lua.Evaluate<Bool>("local function deep(n) if n == 0 then return end " +
                                   "string.gsub('x', 'x', function() deep(n - 1) end) end " +
                                   "return not pcall(deep, 300)"))
-    // Sixty levels, which Luau's own tests nest, are fine.
+    // Twenty levels are fine on any thread: fb test's run on threads of 512 KB of stack on
+    // macOS, where the guard stops about fifty, fewer in a debug build.
     Try lua.Run("local function deep(n) if n == 0 then return end " +
-                "string.gsub('x', 'x', function() deep(n - 1) end) end deep(60)")
+                "string.gsub('x', 'x', function() deep(n - 1) end) end deep(20)")
     Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
 End Function
