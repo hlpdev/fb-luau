@@ -107,3 +107,50 @@ Function PrintGoesWhereTheOptionsSay() Throws LuauError
     Try script.Run("print('from a script')")
     Expect(lines.Count == 3 && lines[2] == "from a script")
 End Function
+
+@Test
+Function AMetamethodTheProgramsOwnGetOrSetRunsHasTheBudget() Throws LuauError
+    Local options = LuauOptions()
+    options.TimeBudget = 20.Milliseconds
+    Local lua = Try LuauState(options)
+    Try lua.Run(r"spin = setmetatable({}, { __index = function() while true do end end, " +
+                r"__newindex = function() while true do end end, " +
+                r"__len = function() while true do end end })")
+    Local spin = Try lua.Get<LuauTable>("spin")
+    Local started = Instant.Now()
+    Local timeouts = 0
+    For attempt = 0 Until 6
+        Local error: LuauError? = Null
+        Select attempt
+            Case 0
+                error = ExpectThrows<LuauError>(spin.Get<Int>("x"))
+            Case 1
+                error = ExpectThrows<LuauError>(spin.GetOrNull<Int>("x"))
+            Case 2
+                error = ExpectThrows<LuauError>(spin.Has("x"))
+            Case 3
+                error = ExpectThrows<LuauError>(spin.Set("x", 1))
+            Case 4
+                error = ExpectThrows<LuauError>(spin.Remove("x"))
+            Default
+                Try lua.Run("setmetatable(_G, getmetatable(spin))")
+                error = ExpectThrows<LuauError>(lua.Get<Int>("missing"))
+        End Select
+        If error != Null && error.Kind == LuauErrorKind.TIMEOUT Then timeouts++
+    End For
+    Expect(timeouts == 6, "{timeouts}")
+    Expect(ExpectThrows<LuauError>(lua.Set("late", 1))?.Kind == LuauErrorKind.TIMEOUT)
+    Expect(started.Elapsed < 5.Seconds)
+    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
+End Function
+
+@Test
+Function ATimeBudgetUnderAMicrosecondIsOneAndTheLongestRuns() Throws LuauError
+    Local options = LuauOptions()
+    options.TimeBudget = Duration.FromNanoseconds(1)
+    Local tight = Try LuauState(options)
+    Expect(ExpectThrows<LuauError>(tight.Run("while true do end"))?.Kind == LuauErrorKind.TIMEOUT)
+    options.TimeBudget = Duration.MaxValue()
+    Local loose = Try LuauState(options)
+    Expect(Try loose.Evaluate<Int>("local n = 0 for i = 1, 100 do n += i end return n") == 5050)
+End Function

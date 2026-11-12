@@ -3,8 +3,10 @@
 #include "core/core.hpp"
 #include "fbl.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -319,6 +321,30 @@ void close_state(fbl::state_t* state) {
 
 namespace fbl {
 
+entered_t::entered_t(state_t& state) noexcept
+    : m_state(state), m_outermost(state.depth == 0) {
+    if (m_outermost) {
+        m_state.timed_out = false;
+        if (m_state.time_budget.count() > 0) {
+            // now + budget, or the clock's last time point when that's past it.
+            const auto now = std::chrono::steady_clock::now();
+            const auto left = std::chrono::steady_clock::time_point::max() - now;
+            const auto budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::min(m_state.time_budget,
+                         std::chrono::duration_cast<std::chrono::microseconds>(left)));
+            m_state.deadline = now + budget;
+        }
+    }
+    m_state.depth++;
+}
+
+entered_t::~entered_t() {
+    m_state.depth--;
+    if (m_outermost) {
+        m_state.deadline = {};
+    }
+}
+
 void failure_point(lua_State* stack, const state_t& state) {
     if (state.failing_point >= 0 && state.failing_point-- == 0) {
         luaL_error(stack, "not enough memory");
@@ -426,7 +452,7 @@ int32_t kind_of(int status) noexcept {
     }
 }
 
-int protect_erased(const state_t& state, lua_State* thread, int arguments, int results,
+int protect_erased(state_t& state, lua_State* thread, int arguments, int results,
                    work_function_t function, void* data) noexcept {
     // Room for the function and what it gives, which lua_checkstack makes without raising, or
     // says it couldn't.
@@ -438,6 +464,9 @@ int protect_erased(const state_t& state, lua_State* thread, int arguments, int r
     // Pending until the function takes it; what was pending, for protect() in protect(), after.
     const work_t before = state.pending_work;
     state.pending_work = { .function = function, .data = data };
+    // The work can run a script's code, a metamethod's, which the time budget holds to as it
+    // does a call's when this is the outermost.
+    const entered_t entered(state);
     const int status = lua_pcall(thread, arguments, results, 0);
     state.pending_work = before;
     return status;
@@ -450,7 +479,10 @@ int32_t settle(state_t& state, lua_State* thread, int status) noexcept {
     if (status == no_room) {
         return record_error(state, FBL_MEMORY, "not enough memory");
     }
-    return take_error(state, thread, kind_of(status));
+    // An error the interrupt raised, or any the timeout led to, is the timeout.
+    const int32_t kind =
+        state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
+    return take_error(state, thread, kind);
 }
 
 int32_t take_error(state_t& state, lua_State* thread, int32_t kind,

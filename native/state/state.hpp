@@ -135,11 +135,11 @@ int32_t kind_of(int status) noexcept;
 // pushed, when the stack can't grow. `work` is called with the thread and gives how many values it
 // pushed, as a C function does.
 constexpr int no_room = -1;
-int protect_erased(const state_t& state, lua_State* thread, int arguments, int results,
+int protect_erased(state_t& state, lua_State* thread, int arguments, int results,
                    work_function_t function, void* data) noexcept;
 
 template <typename Work>
-int protect(const state_t& state, lua_State* thread, int arguments, int results,
+int protect(state_t& state, lua_State* thread, int arguments, int results,
             Work& work) noexcept {
     return protect_erased(
         state, thread, arguments, results,
@@ -183,6 +183,23 @@ void prepare_objects(lua_State* thread, state_t& state);
 // What the shim's errors for a yield nothing can wait for say first, by which a call's error is
 // FBL_YIELD.
 constexpr std::string_view yield_refused = "attempt to yield where nothing can wait for it";
+
+// One more call into Luau while it lives: the outermost, from the program, starts the time
+// budget's deadline, which can't overflow; and on every way out, the depth is put back and the
+// outermost's deadline cleared.
+class entered_t {
+public:
+    explicit entered_t(state_t& state) noexcept;
+    ~entered_t();
+    entered_t(const entered_t&) = delete;
+    entered_t& operator=(const entered_t&) = delete;
+    entered_t(entered_t&&) = delete;
+    entered_t& operator=(entered_t&&) = delete;
+
+private:
+    state_t& m_state;
+    bool m_outermost;
+};
 
 // Whether a thread is one the program's calls run on, which nothing else resumes, and which can't
 // yield to anything that waits.

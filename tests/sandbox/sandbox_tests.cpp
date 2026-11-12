@@ -1,9 +1,11 @@
 #include "fbl.h"
+#include "state/state.hpp"
 #include "support.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -181,4 +183,53 @@ TEST_CASE("loadstring loads into its caller's environment") {
                                   "loadstring('z = 4')() assert(z == 4)") == FBL_OK);
     CHECK(run_in_environment(lua, "assert(z == nil and x == 1)") == FBL_OK);
     CHECK(lua.run("local f, e = loadstring('return +') assert(f == nil and e)") == FBL_OK);
+}
+
+TEST_CASE("a script's metamethod the program's own get or set runs has the time budget") {
+    fbl_state_options_t options = default_options();
+    options.time_budget = 20000;
+    const test_state_t lua(options);
+    REQUIRE(lua.run("spin = setmetatable({}, { __index = function() while true do end end, "
+                    "__newindex = function() while true do end end })") == FBL_OK);
+    const int32_t frame = fbl_frame_open(lua.handle);
+    REQUIRE(fbl_frame_get_global(lua.handle, frame, bytes_of("spin"), 4) == FBL_OK);
+    REQUIRE(fbl_frame_push_string(lua.handle, frame, bytes_of("x"), 1) == FBL_OK);
+    const auto started = std::chrono::steady_clock::now();
+    CHECK(fbl_table_get(lua.handle, frame, 0, 1) == FBL_TIMEOUT);
+    REQUIRE(fbl_frame_push_number(lua.handle, frame, 1) == FBL_OK);
+    CHECK(fbl_table_set(lua.handle, frame, 0, 1, 2) == FBL_TIMEOUT);
+    fbl_frame_truncate(lua.handle, frame, 0);
+    // The globals' too.
+    REQUIRE(lua.run("setmetatable(_G, getmetatable(spin))") == FBL_OK);
+    CHECK(fbl_frame_get_global(lua.handle, frame, bytes_of("missing"), 7) == FBL_TIMEOUT);
+    REQUIRE(fbl_frame_push_number(lua.handle, frame, 1) == FBL_OK);
+    CHECK(fbl_frame_set_global(lua.handle, frame, bytes_of("late"), 4, 0) == FBL_TIMEOUT);
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
+    CHECK(fbl_frame_close(lua.handle, frame));
+    // The next call runs.
+    CHECK(lua.run("local n = 0 for i = 1, 100 do n += i end") == FBL_OK);
+}
+
+TEST_CASE("a call's depth and deadline are put back however it ends") {
+    fbl_state_options_t options = default_options();
+    options.time_budget = 1000000;
+    const test_state_t lua(options);
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    try {
+        const fbl::entered_t entered(*state);
+        CHECK(state->depth == 1);
+        CHECK(state->deadline != std::chrono::steady_clock::time_point{});
+        throw std::runtime_error("as Luau's resume can, as it starts");
+    } catch (const std::runtime_error&) {
+    }
+    CHECK(state->depth == 0);
+    CHECK(state->deadline == std::chrono::steady_clock::time_point{});
+}
+
+TEST_CASE("a time budget past what the clock holds is no overflow") {
+    fbl_state_options_t options = default_options();
+    options.time_budget = INT64_MAX;
+    const test_state_t lua(options);
+    CHECK(lua.run("local n = 0 for i = 1, 1000 do n += i end") == FBL_OK);
 }

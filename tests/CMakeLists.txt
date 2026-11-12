@@ -98,6 +98,7 @@ if(FBL_FB_TESTS)
       "unregistered=Door isn't registered"
       "buffer-bounds=4 bytes at 1 aren't within a buffer of 4"
       "negative-limit=a memory limit of -1 bytes is below 0"
+      "negative-budget=a time budget of -1 microseconds is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "started-twice=the Luau thread runs on the scheduler already"
       "resumed-by-hand=the Luau thread runs on the scheduler")

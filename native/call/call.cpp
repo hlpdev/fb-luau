@@ -59,21 +59,26 @@ void mark_runner(lua_State* thread) noexcept {
 
 int resume_from(state_t& state, lua_State* thread, lua_State* co, int arguments,
                 bool raise) noexcept {
-    const bool outermost = state.depth == 0;
-    if (outermost && state.time_budget.count() > 0) {
-        state.timed_out = false;
-        state.deadline = std::chrono::steady_clock::now() + state.time_budget;
+    // Put back however the resume ends, if Luau throws as it starts too.
+    const entered_t entered(state);
+    try {
+        return raise ? lua_resumeerror(co, thread) : lua_resume(co, thread, arguments);
+    } catch (...) {
+        // The error has no value: pushing one could fail too.
+        lua_settop(co, 0);
+        return LUA_ERRMEM;
     }
-    state.depth++;
-    const int status = raise ? lua_resumeerror(co, thread) : lua_resume(co, thread, arguments);
-    state.depth--;
-    if (outermost) {
-        state.deadline = {};
-    }
-    return status;
 }
 
 int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, bool reset) noexcept {
+    // An error the interrupt raised, or any the timeout led to, is the timeout; and one the shim
+    // raised for a yield nothing could wait for is a yield's. Read before the traceback's making,
+    // a call into Luau of its own, which starts a budget of its own.
+    int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
+    if (kind == FBL_RUNTIME && lua_type(co, -1) == LUA_TSTRING &&
+        std::string_view(lua_tostring(co, -1)).contains(yield_refused)) {
+        kind = FBL_YIELD;
+    }
     std::string traceback;
     // Its traceback is made of strings, which need memory, so it's made under protection, on the
     // caller's thread, from the resumed thread's frames, which an error leaves where they were.
@@ -97,13 +102,6 @@ int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, boo
     }
     if (!traceback.empty() && traceback.back() == '\n') {
         traceback.pop_back();
-    }
-    // An error the interrupt raised, or any the timeout led to, is the timeout; and one the shim
-    // raised for a yield nothing could wait for is a yield's.
-    int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
-    if (kind == FBL_RUNTIME && lua_type(co, -1) == LUA_TSTRING &&
-        std::string_view(lua_tostring(co, -1)).contains(yield_refused)) {
-        kind = FBL_YIELD;
     }
     if (status == LUA_YIELD) {
         record_error(state, FBL_YIELD,

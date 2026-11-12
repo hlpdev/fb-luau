@@ -61,10 +61,12 @@ Public Struct LuauOptions
     /// the State goes on, with what was freed free.
     Public Field MemoryLimit: Int64 = 0
     /// How long each call of the program's into the State may run, or 0, the default, for no
-    /// limit. Past it, the script meets a LuauError of TIMEOUT at each of Luau's safe points, its
-    /// loops' and calls', which its own pcall can't keep it from, until the call returns; a C
-    /// function that runs long, like a string pattern that backtracks, has it only once it
-    /// returns.
+    /// limit: every one that can run a script's code, a call, a thread's resume, and a table's or
+    /// the globals' get and set, which can run a metamethod, rounded up to a whole microsecond.
+    /// Past it, the script meets a LuauError of TIMEOUT at each of Luau's safe points, its loops'
+    /// and calls', which its own pcall can't keep it from, until the call returns; a C function
+    /// that runs long, like a string pattern that backtracks, has it only once it returns. A
+    /// budget below 0 panics, where the State's made.
     Public Field TimeBudget: Duration
     /// How its code is compiled.
     Public Field Compile: LuauCompileOptions = LuauCompileOptions()
@@ -168,7 +170,7 @@ Public Class LuauState
     ///
     /// # Panics
     ///
-    /// When a memory limit is below 0, or a compile option isn't from 0 to 2.
+    /// When a memory limit or a time budget is below 0, or a compile option isn't from 0 to 2.
     @PanicsAtCaller
     Public New(options: LuauOptions) Throws LuauError
         Functions = {}
@@ -755,7 +757,7 @@ End Class
 /// a handle of 0 when it couldn't be made.
 Function Made(options: LuauOptions): (UInt64, Int32, String)
     Local given = fbl_state_options_t(memory_limit: options.MemoryLimit,
-                                      time_budget: options.TimeBudget.TotalMicroseconds As Int64,
+                                      time_budget: Microseconds(options.TimeBudget),
                                       optimization: options.Compile.Optimization,
                                       debug: options.Compile.Debug,
                                       coverage: options.Compile.Coverage,
@@ -778,4 +780,12 @@ Function Reported(error: LuauError)
     Else
         PrintError(error.Message + "\n" + error.Traceback)
     End If
+End Function
+
+/// A time budget in whole microseconds, rounded up, so one under a microsecond isn't none; below 0
+/// stays below 0, which the State refuses.
+Function Microseconds(budget: Duration): Int64
+    Local nanoseconds = budget.Nanoseconds
+    If nanoseconds <= 0 Then Return nanoseconds < 0 ? -1 : 0
+    Return nanoseconds / 1000 + (nanoseconds % 1000 > 0 ? 1 : 0)
 End Function

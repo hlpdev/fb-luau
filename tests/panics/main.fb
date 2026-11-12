@@ -2,6 +2,7 @@
 // this with a case's name and checks it panics with the case's message.
 
 Import std.os
+Import std.time
 Import luau
 
 Class Door Implements LuauObject
@@ -37,6 +38,11 @@ Function Run(name: String) Throws LuauError
         Case "negative-limit"
             Local options = LuauOptions()
             options.MemoryLimit = -1
+            Local _lua = Try LuauState(options)
+        // A time budget below 0.
+        Case "negative-budget"
+            Local options = LuauOptions()
+            options.TimeBudget = Duration.FromNanoseconds(-5)
             Local _lua = Try LuauState(options)
         // A compile option out of its range.
         Case "optimization"
