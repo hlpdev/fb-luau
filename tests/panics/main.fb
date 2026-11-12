@@ -48,6 +48,32 @@ Function Run(name: String) Throws LuauError
         Case "unregistered"
             Local lua = LuauState()
             Try lua.Set("door", Door())
+        // A table, a buffer, and a script used once their State is closed.
+        Case "table-after-close"
+            Local lua = LuauState()
+            Local table = Try lua.NewTable()
+            lua.Close()
+            Try table.Set("x", 1)
+        Case "buffer-after-close"
+            Local lua = LuauState()
+            Local data = Try lua.NewBuffer(4)
+            lua.Close()
+            data.ReadUInt8(0)
+        Case "script-after-close"
+            Local lua = LuauState()
+            Local script = Try lua.NewScript()
+            lua.Close()
+            Try script.Run("x = 1")
+        // A handle of another State given to one.
+        Case "other-state-handle"
+            Local lua = LuauState()
+            Local other = LuauState()
+            Try lua.Set("t", Try other.NewTable())
+        // A write past a buffer's end.
+        Case "buffer-write-past-end"
+            Local lua = LuauState()
+            Local data = Try lua.NewBuffer(4)
+            data.Write(2, [1 As UInt8, 2, 3])
         // A read past a buffer's end.
         Case "buffer-bounds"
             Local lua = LuauState()

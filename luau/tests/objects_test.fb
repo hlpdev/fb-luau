@@ -71,7 +71,8 @@ Function WhatIsntMarkedCantBeReached() Throws LuauError
         r"local ok, err = pcall(function() return player.secret end) return err")
     Expect(message.Contains("Player has no member named 'secret'"), message)
     Expect(ExpectThrows<LuauError>(lua.Run("player:Hidden()")) != Null)
-    Expect(ExpectThrows<LuauError>(lua.Run("player.Health = 5")) != Null)
+    Local readOnly = ExpectThrows<LuauError>(lua.Run("player.Health = 5"))?.Message ?? ""
+    Expect(readOnly.Contains("Player's Health is read-only"), readOnly)
     Expect(ExpectThrows<LuauError>(lua.Run("player.x = 5")) != Null)
     Expect(Try lua.Evaluate<String>("return getmetatable(player)") == "The metatable is locked")
     Expect(ExpectThrows<LuauError>(lua.Run("setmetatable(player, {{}})")) != Null)
@@ -140,7 +141,10 @@ Function AnObjectLivesWhileLuauHasItAndGoesAfter() Throws LuauError
     lua.Collect()
     Try lua.Run("x = 2")
     Try lua.Set("again", player)
-    Expect(Try lua.Evaluate<Int>("return again.Health") == 100)
+    Expect(lua.Objects.Count == 1)
+    Try lua.Set("same", player)
+    Expect(Try lua.Evaluate<Bool>("return again == same and again.Health == 100"))
+    Expect(lua.Objects.Count == 1)
 End Function
 
 @Test

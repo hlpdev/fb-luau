@@ -104,6 +104,11 @@ if(FBL_FB_TESTS)
   set(fbl_panics
       "closed-state=the Luau State is closed"
       "closed-function=the Luau State is closed"
+      "table-after-close=the Luau State is closed"
+      "buffer-after-close=the Luau State is closed"
+      "script-after-close=the Luau State is closed"
+      "other-state-handle=a LuauTable of another Luau State"
+      "buffer-write-past-end=3 bytes at 2 aren't within a buffer of 4"
       "dropped-state=the Luau State is closed"
       "unregistered=Door isn't registered"
       "buffer-bounds=4 bytes at 1 aren't within a buffer of 4"

@@ -1,0 +1,243 @@
+Import std.collections
+Import std.core
+Import std.io
+Import std.test
+Import std.text
+Import luau
+
+/// An animal, which a dog extends.
+Class Animal Implements LuauObject
+    @LuauExpose Method Sound(): String => "..."
+End Class
+
+/// A dog, an animal that sounds its own way. It can't list LuauObject itself while FutureBlitz
+/// gives a derived Class its base's Static defaults (fbengine-notes/luau/derived_static_default.fb),
+/// so it crosses as an Animal.
+Class Dog Extends Animal
+    Override Method Sound(): String => "woof"
+End Class
+
+/// A type whose Methods throw, and one of seven arguments, and a Private one.
+Class Risky Implements LuauObject
+    @LuauExpose Method Fail(): Int Throws IOError
+        Throw IOError(IOErrorKind.OTHER, "no saves")
+    End Method
+
+    @LuauGet Method Broken(): Int Throws IOError
+        Throw IOError(IOErrorKind.OTHER, "no reading")
+    End Method
+
+    @LuauSet Method Fragile(value: Int) Throws IOError
+        Throw IOError(IOErrorKind.OTHER, "no writing {value}")
+    End Method
+
+    @LuauExpose Method Seven(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int): Int
+        Return a + b + c + d + e + f + g
+    End Method
+
+    @LuauExpose Private Method Secret(): Int => 7
+End Class
+
+/// Money, whose operators are added by hand.
+Class Coins Implements LuauObject
+    Field Cents: Int
+
+    New(cents: Int)
+        Cents = cents
+    End New
+End Class
+
+/// A type with no ToString.
+Class Plain Implements LuauObject
+End Class
+
+Struct Renamed Implements LuauRecord
+    @Rename("hp") Field Health: Int
+    @Skip Field Cache: Int = 9
+End Struct
+
+@Test
+Function AnObjectGivenAgainBeforeItsReleaseIsTakenSurvives() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Animal>()
+    Local animal = Animal()
+    Local weak: Weak<LuauState> = lua
+    Try lua.Set("held", animal)
+    Try lua.SetFunction("collect", Function()
+        Local state: LuauState? = weak
+        If state != Null Then state.Collect()
+    End Function)
+    Try lua.SetFunction("give", Function(): Animal => animal)
+    // Its userdata's collected inside the call, and it crosses again before the release is taken.
+    Try lua.Run("held = nil collect() kept = give() assert(kept:Sound() == '...')")
+    Expect(lua.Objects.Count == 1)
+    lua.Collect()
+    Expect(Try lua.Evaluate<String>("return kept:Sound()") == "...")
+    Expect(lua.Objects.Count == 1)
+End Function
+
+@Test
+Function ADerivedObjectCrossesAsItsBaseAndRunsItsOwnMethods() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Animal>()
+    Local dog: Animal = Dog()
+    Try lua.Set("dog", dog)
+    Expect(Try lua.Evaluate<String>("return typeof(dog) .. ' ' .. dog:Sound()") == "Animal woof")
+    Try lua.SetFunction("speak", Function(a: Animal) => a.Sound())
+    Expect(Try lua.Evaluate<String>("return speak(dog)") == "woof")
+    Local error = ExpectThrows<LuauError>(lua.Run("speak(5)"))
+    Expect(error != Null && error.Message.Contains("invalid argument #1 to 'speak'"),
+           error?.Message ?? "")
+End Function
+
+@Test
+Function MarkedMethodsThatThrowRaiseTheirErrors() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Risky>()
+    Try lua.Set("risky", Risky())
+    For source In ["risky:Fail()", "local x = risky.Broken", "risky.Fragile = 5"]
+        Local error = ExpectThrows<LuauError>(lua.Run(source))
+        Expect(error != Null && error.Cause Is IOError, source)
+    End For
+    Expect(Try lua.Evaluate<Int>("return risky:Seven(1, 2, 3, 4, 5, 6, 7)") == 28)
+    Expect(Try lua.Evaluate<Int>("return risky:Secret()") == 7)
+End Function
+
+@Test
+Function OperatorsAddedByHandWorkEitherWay() Throws LuauError
+    Local lua = LuauState()
+    Local coins = Try lua.Register<Coins>()
+    Local CentsOf = Function(value: LuauValue): Int Throws LuauError
+        If value.Kind == LuauValueKind.NUMBER Then Return (value.AsNumber() ?? 0) As Int
+        Return (Try value.Read<Coins>()).Cents
+    End Function
+    Try coins.AddOperator(LuauOperator.ADD, Try lua.Wrap(Function(a: LuauValue, b: LuauValue): Coins Throws Error
+        Return Coins(Try CentsOf(a) + Try CentsOf(b))
+    End Function))
+    Try coins.AddOperator(LuauOperator.EQ, Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents == b.Cents))
+    Try coins.AddOperator(LuauOperator.LT, Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents < b.Cents))
+    Try coins.AddOperator(LuauOperator.LE, Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents <= b.Cents))
+    Try coins.AddOperator(LuauOperator.CALL, Try lua.Wrap(Function(c: Coins, times: Int) => c.Cents * times))
+    Try coins.AddOperator(LuauOperator.CONCAT, Try lua.Wrap(Function(a: LuauValue, b: LuauValue): String Throws Error
+        Return a.ToString() + "|" + (Try CentsOf(b)).ToString()
+    End Function))
+    Try coins.AddOperator(LuauOperator.TOSTRING, Try lua.Wrap(Function(c: Coins) => "{c.Cents} cents"))
+    Try lua.Set("a", Coins(150))
+    Try lua.Set("b", Coins(150))
+    Try lua.Set("c", Coins(200))
+    Expect((Try lua.Evaluate<Coins>("return a + 5")).Cents == 155)
+    Expect((Try lua.Evaluate<Coins>("return 5 + a")).Cents == 155)
+    Expect(Try lua.Evaluate<Bool>("return a == b and a ~= c and a < c and a <= b and not (c < a)"))
+    Expect(Try lua.Evaluate<Int>("return a(3)") == 450)
+    Expect(Try lua.Evaluate<String>("return 'x' .. c") == "x|200")
+    Expect(Try lua.Evaluate<String>("return tostring(a)") == "150 cents")
+    Try lua.Register<Plain>()
+    Try lua.Set("plain", Plain())
+    Expect(Try lua.Evaluate<String>("return tostring(plain)").StartsWith("Plain"))
+End Function
+
+@Test
+Function OneTypeInTwoStatesWhenOneCloses() Throws LuauError
+    Local first = LuauState()
+    Local second = LuauState()
+    Try first.Register<Animal>()
+    Try second.Register<Animal>()
+    Local animal = Animal()
+    Try first.Set("a", animal)
+    Try second.Set("a", animal)
+    first.Close()
+    Expect(Try second.Evaluate<String>("return a:Sound()") == "...")
+    Try second.Set("b", Animal())
+    Expect(second.Objects.Count == 2)
+End Function
+
+/// A State dropped without Close, which held an object and a function that captured one; what it
+/// held is let go of.
+Function Dropped(): Weak<Animal>[] Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Animal>()
+    Local given = Animal()
+    Local captured = Animal()
+    Try lua.Set("given", given)
+    Try lua.SetFunction("sound", Function() => captured.Sound())
+    Local a: Weak<Animal> = given
+    Local b: Weak<Animal> = captured
+    Return [a, b]
+End Function
+
+@Test
+Function AStateDroppedWithoutCloseLetsGoOfWhatItHeld() Throws LuauError
+    Local before = LuauStatesOpen()
+    Local held = Try Dropped()
+    Local given: Animal? = held[0]
+    Local captured: Animal? = held[1]
+    Expect(given == Null && captured == Null)
+    Expect(LuauStatesOpen() == before)
+End Function
+
+@Test
+Function AStateInAClosedOnesSlotIsItsOwn() Throws LuauError
+    Local old = LuauState()
+    Local function = Try old.Load("return 1")
+    Local slot = old.Handle >> 32
+    old.Close()
+    Local made = LuauState()
+    Expect(made.Handle >> 32 == slot)
+    Try made.SetFunction("twice", Function(n: Int) => n * 2)
+    Expect(Try made.Evaluate<Int>("return twice(21)") == 42)
+    Expect(!function.Owner.IsOpen)
+End Function
+
+/// A table whose State is gone once this returns.
+Function Orphaned(): LuauTable Throws LuauError
+    Local lua = LuauState()
+    Return Try lua.NewTable()
+End Function
+
+@Test
+Function HandlesOutliveTheirState() Throws LuauError
+    Local before = LuauStatesOpen()
+    For round = 0 Until 10
+        Local table = Try Orphaned()
+        Expect(LuauStatesOpen() == before)
+    End For
+End Function
+
+@Test
+Function ToArrayOfATableWithHoles() Throws LuauError
+    Local lua = LuauState()
+    Local table = Try lua.Evaluate<LuauTable>(r"return { 1, nil, 3 }")
+    Expect(ExpectThrows<LuauError>(table.ToArray<Int>())?.Kind == LuauErrorKind.CONVERSION)
+    Local values = Try table.ToArray<LuauValue>()
+    Expect(values.Count == 3 && values[1].IsNil && values[2].AsNumber() == 3)
+End Function
+
+@Test
+Function ARecordsRenamedAndSkippedFields() Throws LuauError
+    Local lua = LuauState()
+    Local read = Try lua.Evaluate<Renamed>(r"return { hp = 5, Cache = 1 }")
+    Expect(read.Health == 5 && read.Cache == 9)
+    Try lua.Set("given", Renamed(7, 1))
+    Expect(Try lua.Evaluate<Bool>("return given.hp == 7 and given.Health == nil and given.Cache == nil"))
+End Function
+
+@Test
+Function ANumberIsntABool() Throws LuauError
+    Local lua = LuauState()
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return 1"))?.Kind == LuauErrorKind.CONVERSION)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return nil"))?.Kind == LuauErrorKind.CONVERSION)
+End Function
+
+@Test
+Function AScriptsLoadAndGlobals() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Set("shared", "all")
+    Local script = Try lua.NewScript()
+    Local set = Try script.Load("x = 3")
+    Try set.Invoke()
+    Expect(Try script.Get<Int>("x") == 3)
+    Local globals = Try script.Globals()
+    Expect(Try globals.Get<Int>("x") == 3)
+    Expect(Try globals.Get<String>("shared") == "all")
+    Expect(Try lua.Evaluate<Bool>("return x == nil"))
+End Function

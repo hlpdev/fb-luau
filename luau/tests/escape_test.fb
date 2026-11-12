@@ -1,0 +1,113 @@
+Import std.collections
+Import std.core
+Import std.test
+Import std.text
+Import luau
+
+/// An object a script holds, whose Method calls back into Luau, which then runs on another thread.
+Class Probe Implements LuauObject
+    Field Script: LuauFunction? = Null
+
+    @LuauExpose Method Run(): Int
+        Local script = Script
+        If script == Null Then Return 0
+        Return (Try? script.Call<Int>()) ?? -1
+    End Method
+
+    @LuauGet Method Size(): Int => 3
+End Class
+
+/// Another type, whose objects aren't a Probe.
+Class Other Implements LuauObject
+End Class
+
+/// A script that walks every level of the stack of the thread running it, and of `origin`, a thread
+/// a script kept, and calls each C function it finds with nothing, a number, a table, a proxy, and
+/// an object, one and two of each, in a pcall: none of it may crash the host. It counts the C
+/// functions it found.
+Const Walker = "local walking = false\n" +
+               "local junk = {{ 'nothing', 1, 'table', 'proxy', 'object' }}\n" +
+               "local function poke(f, object)\n" +
+               "  if f == coroutine.yield or f == error then return end\n" +
+               "  for _, given in junk do\n" +
+               "    local arg = given\n" +
+               "    if given == 'nothing' then arg = nil end\n" +
+               "    if given == 'table' then arg = {{}} end\n" +
+               "    if given == 'proxy' then arg = newproxy() end\n" +
+               "    if given == 'object' then arg = object end\n" +
+               "    pcall(f, arg)\n" +
+               "    pcall(f, arg, arg)\n" +
+               "  end\n" +
+               "end\n" +
+               "function walk(object, origin)\n" +
+               "  if walking then return 0 end\n" +
+               "  walking = true\n" +
+               "  local found = 0\n" +
+               "  for level = 1, 60 do\n" +
+               "    local f = debug.info(level, 'f')\n" +
+               "    if f == nil then break end\n" +
+               "    if debug.info(f, 's') == '[C]' then found += 1 poke(f, object) end\n" +
+               "  end\n" +
+               "  if origin then\n" +
+               "    for level = 0, 60 do\n" +
+               "      local f = debug.info(origin, level, 'f')\n" +
+               "      if f == nil then break end\n" +
+               "      if debug.info(f, 's') == '[C]' then found += 1 poke(f, object) end\n" +
+               "    end\n" +
+               "  end\n" +
+               "  walking = false\n" +
+               "  return found\n" +
+               "end"
+
+@Test
+Function NoCFunctionAScriptReachesOnTheStackCrashesTheHost() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Probe>()
+    Local probe = Probe()
+    Try lua.Set("probe", probe)
+    Try lua.Run(Walker)
+    Local found = 0
+    // During a registered type's Method, which calls back into Luau: the thread that called it
+    // has the type's handler on it.
+    probe.Script = Try lua.Load("return walk(probe, origin)")
+    found += Try lua.Evaluate<Int>("origin = coroutine.running() return probe:Run()")
+    // During the program's function, called from Luau.
+    Try lua.SetFunction("viaProgram", Function(): Int
+        Return (Try? probe.Script?.Call<Int>()) ?? -1
+    End Function)
+    found += Try lua.Evaluate<Int>("origin = coroutine.running() return viaProgram()")
+    // Through a protected get's metamethod, where the shim's own function is on the stack.
+    Try lua.Run(r"hooked = setmetatable({}, { __index = function() return walk(probe) end })")
+    found += Try (Try lua.Get<LuauTable>("hooked")).Get<Int>("x")
+    // During a thread's resume, and print's tostring.
+    Local thread = Try lua.Spawn(Try lua.Load("return walk(probe)"))
+    found += ((Try thread.Resume())[0].AsNumber() ?? 0) As Int
+    Try lua.Run(r"print(setmetatable({}, { __tostring = function() walk(probe) return 'x' end }))")
+    Expect(found >= 3, "{found}")
+    // The State goes on.
+    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
+    Expect(Try lua.Evaluate<Int>("return probe.Size") == 3)
+End Function
+
+@Test
+Function ATypesHandlerCalledWithWhatItIsntIsAnError() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Probe>()
+    Try lua.Register<Other>()
+    Local probe = Probe()
+    Try lua.Set("probe", probe)
+    Try lua.Set("other", Other())
+    // A script keeps the thread that calls the type's Method, and, while the Method calls back
+    // into Luau, takes the type's handler from that thread's stack, then calls it later with a
+    // table, another type's object, and a number as self.
+    probe.Script = Try lua.Load(r"kept = {} for level = 0, 10 do " +
+                                r"local f = debug.info(origin, level, 'f') " +
+                                r"if f and debug.info(f, 's') == '[C]' then table.insert(kept, f) end " +
+                                r"end return #kept")
+    Expect(Try lua.Evaluate<Int>("origin = coroutine.running() return probe:Run()") > 0)
+    Expect(Try lua.Evaluate<Int>(r"local n = 0 for _, f in kept do " +
+                                 r"for _, self in { {}, other, 5 } do " +
+                                 r"if not pcall(f, self, 'Run') then n += 1 end end end return n") > 0)
+    Expect(Try lua.Evaluate<Int>("return probe:Run()") >= 0)
+    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
+End Function

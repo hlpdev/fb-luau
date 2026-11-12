@@ -147,13 +147,18 @@ End Function
 
 @Test
 Function ClosingIsOnceAndFinal() Throws LuauError
+    Local before = LuauStatesOpen()
     Local lua = LuauState()
     Local function = Try lua.Load("return 1")
     Expect(lua.IsOpen)
+    Expect(LuauStatesOpen().0 == before.0 + 1)
     lua.Close()
     Expect(!lua.IsOpen)
+    Expect(LuauStatesOpen() == before)
+    // Again, it changes nothing; the function's State is the closed one, which it can't call.
     lua.Close()
-    Expect(function.Owner == lua)
+    Expect(LuauStatesOpen() == before)
+    Expect(RefEquals(function.Owner, lua) && !function.Owner.IsOpen)
 End Function
 
 @Test

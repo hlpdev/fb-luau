@@ -1,3 +1,4 @@
+Import std.concurrent
 Import std.test
 Import luau
 
@@ -13,6 +14,9 @@ End Function
 
 @Test
 Function NoFailureSaysNothing()
-    // This test's thread has called nothing that fails.
-    Expect(LastError() == "")
+    // A thread of its own, which nothing else has used, has called nothing that fails.
+    Const said = Channel<String>(1)
+    Local thread = Thread.Start(Function() => said.Send(LastError()))
+    thread.Join()
+    Expect(said.Receive() == "")
 End Function
