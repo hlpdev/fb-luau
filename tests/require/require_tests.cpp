@@ -1,4 +1,5 @@
 #include "fbl.h"
+#include "state/state.hpp"
 #include "support.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -289,4 +290,28 @@ TEST_CASE("a reader that runs code that requires doesn't lose the walk it's in")
     REQUIRE(lua.run("function inner() innerResult = require('./other') end", "@main.luau") ==
             FBL_OK);
     CHECK(lua.run("assert(require('./nested') == 'outer')", "@main.luau") == FBL_OK);
+}
+
+TEST_CASE("a memory error at any point after a placeholder's made clears it, frozen") {
+    // A module in a cycle, a's placeholder given to b: whatever allocation fails, after it the
+    // modules load whole, and the placeholder b holds is never left writable.
+    files_of() = {
+        { "a.luau", "local b = require('./b')\nexport local x = 1\nexport local t = { 1, 2 }" },
+        { "b.luau", "local a = require('./a')\nheld = a\nexport local y = 2" },
+    };
+    const require_state_t lua;
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    for (int64_t failing = 0; failing < 400; failing++) {
+        state->failing_allocation = failing;
+        const int32_t status = lua.run("require('./a')", "@main.luau");
+        state->failing_allocation = -1;
+        CHECK((status == FBL_OK || status == FBL_MEMORY || status == FBL_RUNTIME));
+        // What b kept of a, when it kept it, isn't anyone's to change.
+        CHECK(lua.run("if held then local ok = pcall(function() held.x = 9 end) assert(not ok) end",
+                      "@main.luau") == FBL_OK);
+        REQUIRE(fbl_require_forget(lua.handle) == FBL_OK);
+        CHECK(lua.run("held = nil", "@main.luau") == FBL_OK);
+    }
+    CHECK(lua.run("assert(require('./a').x == 1)", "@main.luau") == FBL_OK);
 }

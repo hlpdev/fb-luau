@@ -283,21 +283,75 @@ private:
     fbl::state_t& m_state;
 };
 
-// Raises the error on top of the requiring thread's stack, first clearing the placeholder Luau's
-// require made for the module `key`, when it made one, so the next require loads it anew.
+// Clears the placeholder Luau's require made for the module `key`: from the modules and the
+// provided flags, so the next require loads it anew, and frozen again, as a cyclic requirer holds
+// it. Nothing here allocates, with the room load reserved, so it runs as an error goes by.
+void cleared(lua_State* stack, const char* key) {
+    const int top = lua_gettop(stack);
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_MODULES");
+    if (lua_type(stack, -1) == LUA_TTABLE) {
+        lua_getfield(stack, -1, key);
+        if (lua_type(stack, -1) == LUA_TTABLE) {
+            lua_setreadonly(stack, -1, 1);
+        }
+        lua_pop(stack, 1);
+        lua_pushnil(stack);
+        lua_setfield(stack, -2, key);
+    }
+    lua_settop(stack, top);
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_CYCLIC_PLACEHOLDER_PROVIDED");
+    if (lua_type(stack, -1) == LUA_TTABLE) {
+        lua_pushnil(stack);
+        lua_setfield(stack, -2, key);
+    }
+    lua_settop(stack, top);
+}
+
+// Raises the error on top of the requiring thread's stack, first clearing the placeholder for the
+// module `key`, when there's one.
 [[noreturn]] void failed(lua_State* stack, bool placeholder, const char* key) {
     if (placeholder) {
-        for (const char* table : { "_MODULES", "_CYCLIC_PLACEHOLDER_PROVIDED" }) {
-            lua_getfield(stack, LUA_REGISTRYINDEX, table);
-            if (lua_type(stack, -1) == LUA_TTABLE) {
-                lua_pushnil(stack);
-                lua_setfield(stack, -2, key);
-            }
-            lua_pop(stack, 1);
-        }
+        cleared(stack, key);
     }
     lua_error(stack);
 }
+
+// Fills the placeholder for the module `key`, when a cyclic require was given it, from the module's
+// table on top, and puts it in the table's place: here, where a failure clears it, rather than in
+// Luau's require after load, where one partway would leave it half filled and writable.
+void filled(lua_State* stack, const char* key) {
+    const int result = lua_gettop(stack);
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_CYCLIC_PLACEHOLDER_PROVIDED");
+    bool provided = false;
+    if (lua_type(stack, -1) == LUA_TTABLE) {
+        lua_getfield(stack, -1, key);
+        provided = lua_toboolean(stack, -1) != 0;
+    }
+    lua_settop(stack, result);
+    if (!provided) {
+        return;
+    }
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_MODULES");
+    lua_getfield(stack, -1, key);
+    const int placeholder = lua_gettop(stack);
+    if (lua_type(stack, placeholder) != LUA_TTABLE) {
+        lua_settop(stack, result);
+        return;
+    }
+    lua_setreadonly(stack, placeholder, 0);
+    for (int iterator = 0; (iterator = lua_rawiter(stack, result, iterator)) != -1;) {
+        lua_rawset(stack, placeholder);
+    }
+    if (lua_getmetatable(stack, result) == 0) {
+        lua_pushnil(stack);
+    }
+    lua_setmetatable(stack, placeholder);
+    lua_setreadonly(stack, placeholder, 1);
+    lua_replace(stack, result);
+    lua_settop(stack, result);
+}
+
+void loaded(lua_State* stack, lua_State* module, const char* loadname, bool placeholder);
 
 // Runs a module, on a thread of its own whose globals are an environment of its own, and leaves
 // its one value on the requiring thread's stack, a table frozen through its fields; its errors are
@@ -319,7 +373,8 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
     if (bytecode == nullptr) {
         luaL_error(stack, "not enough memory to compile");
     }
-    luaL_checkstack(stack, 4, "loading a module");
+    // Room for the placeholder's clearing too, which mustn't allocate as an error goes by.
+    luaL_checkstack(stack, 12, "loading a module");
     if (lua_checkstack(state.main, 1) == 0) {
         luaL_error(stack, "not enough memory");
     }
@@ -340,6 +395,21 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
         luarequire_createplaceholder(stack);
         placeholder = true;
     }
+    // From here, an error of any kind clears the placeholder, the memory's too.
+    try {
+        loaded(stack, module, loadname, placeholder);
+    } catch (...) {
+        if (placeholder) {
+            cleared(stack, loadname);
+        }
+        throw;
+    }
+    return 1;
+}
+
+// Runs the module, and leaves its one value on the requiring thread's stack, frozen, in place of
+// the module's thread.
+void loaded(lua_State* stack, lua_State* module, const char* loadname, bool placeholder) {
     const int status = lua_resume(module, stack, 0);
     if (status == LUA_YIELD) {
         lua_resetthread(module);
@@ -367,9 +437,11 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
     // What a module gives every script that requires it is frozen, so none changes another's.
     if (lua_type(stack, -1) == LUA_TTABLE) {
         fbl::freeze_tables(stack, lua_gettop(stack));
+        if (placeholder) {
+            filled(stack, loadname);
+        }
     }
     lua_remove(stack, -2);
-    return 1;
 }
 
 void configure(luarequire_Configuration* config) {
