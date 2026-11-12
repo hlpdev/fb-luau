@@ -23,8 +23,6 @@ Const Skipped: Map<String, String> = {
     "apicalls.luau": "calls Luau's C API from C functions of the runner's own",
     "classes.luau": "is in class syntax, which an experimental flag of Luau's turns on",
     "closure.luau": "sets a thread's globals, setfenv(0), which the sandbox refuses",
-    "coroutine.luau": "expects its chunk on Luau's main thread, where the package runs a " +
-    "script on a thread of its call's",
     "coroutinehost.luau": "resumes coroutines from the runner's C code",
     "coverage.luau": "reads coverage counters, which the package doesn't give",
     "cyield.luau": "needs C functions of the runner's that yield and continue",
@@ -33,20 +31,94 @@ Const Skipped: Map<String, String> = {
     "exceptions.luau": "throws C++ exceptions through the runner's C functions",
     "gc.luau": "needs the runner's setblockallocations, of Luau's allocator",
     "interrupt.luau": "needs the runner's own interrupt callback",
-    "iter.luau": "needs the runner's cYieldingIterator, a C function that yields",
     "jit_inliner.luau": "turns on the code generator's inliner, an experimental option",
     "locals.luau": "reads a thread's globals, getfenv(0), which the sandbox refuses",
     "native_types.luau": "asks is_native of a function that's left native code, which only " +
     "Luau's internals know",
     "native_userdata.luau": "needs the runner's userdata types, by tag, for native code",
     "ndebug_upvalues.luau": "is compiled at debug level 0 by the runner",
-    "pcall.luau": "needs the runner's cxxthrow, a C++ exception through Luau",
-    "tables.luau": "needs the runner's makelud, a light userdata",
     "types.luau": "needs the runner's RTTI, the type checker's builtin types as a table",
     "udata_direct.luau": "needs the runner's userdata, with direct access by tag",
     "userdata.luau": "needs the runner's userdata types and their metatables",
     "vector.luau": "needs the runner's metatable for vectors, its Magnitude and Unit"
 }
+
+// Cases of scripts that run, cut out as only Luau's own runner can run them, each from its first
+// line's text up to the text that follows it, with why: a script whose helpers have stand-ins
+// below runs but for these.
+Const Cuts: (String, String, String, String)[] = [
+    ("coroutine.luau", "assert(main == nil)\n", "-- assert(not coroutine.resume(main))",
+     "expects its chunk on Luau's main thread, where coroutine.running() is nil; the package " +
+     "runs a script on a thread of its call's"),
+    ("pcall.luau", "\tresumeerror(co, ", "\t-- stack overflow",
+     "needs the runner's resumeerror, lua_resumeerror from C"),
+    ("tables.luau", "do\n  local t = {{}}\n\n  t[64] = \"item\"", "return \"OK\"",
+     "needs the runner's setallocationlimit, a limit on each of Luau's allocations")
+]
+
+// The memory limit a script needs, where Luau's runner refuses any one allocation past 8 MB and
+// a script counts on that: none for the rest, as the runner has none of the whole.
+Function MemoryLimitOf(name: String): Int64
+    If name == "pcall.luau" Then Return 12 * 1024 * 1024
+    Return 0
+End Function
+
+// A light userdata's stand-in, for tables.luau's makelud: the same value is the same key, as a
+// light userdata of the same pointer is.
+Class Lud Implements LuauObject
+    Field value: String
+
+    New(value: String)
+        Self.value = value
+    End New
+End Class
+
+// What the runner's C functions are, where something of the package's can stand in: makelud's
+// light userdata, an object of the program's, one for each value; cxxthrow's C++ exception, an
+// error the program's function throws; and cYieldingIterator, a C function that yields and
+// continues, a Luau function that does the same.
+Function GiveStandIns(lua: LuauState, name: String) Throws LuauError
+    If name == "tables.luau"
+        Try lua.Register<Lud>()
+        Local made: Map<String, Lud> = {}
+        Try lua.SetFunction("makelud", Function(value: LuauValue): Lud
+            Local key = value.ToString()
+            Local found = made.Get(key)
+            If found != Null Then Return found
+            Local lud = Lud(key)
+            made[key] = lud
+            Return lud
+        End Function)
+    ElseIf name == "pcall.luau"
+        Try lua.SetFunction("cxxthrow", Function() Throws LuauError
+            Throw LuauError(LuauErrorKind.RUNTIME, "oops")
+        End Function)
+    ElseIf name == "iter.luau"
+        Try lua.Run("function cYieldingIterator(max, index) if index >= max then return nil end " +
+                    "coroutine.yield(index + 1) return index + 1, index + 1 end")
+    End If
+End Function
+
+// `source` with its cuts taken out; a script without any as it is, its bytes, which needn't be
+// UTF-8, untouched.
+Function WithoutCuts(name: String, source: UInt8[]): UInt8[]
+    Local cut = False
+    For each In Cuts
+        If each.0 == name Then cut = True
+    End For
+    If !cut Then Return source
+    Local decoded = String.FromUtf8(source)
+    If decoded == Null Then Panic("{name}, which has cuts, isn't UTF-8")
+    Local lines = decoded ?? ""
+    For each In Cuts
+        If each.0 != name Then Continue
+        Local first = lines.Find(each.1)
+        Local after = first == Null ? Null : lines.Find(each.2, first)
+        If first == Null || after == Null Then Panic("{name} has no case '{each.1}' to cut")
+        lines = lines.Slice(0, first) + lines.Slice(after, lines.Length)
+    End For
+    Return lines.Bytes
+End Function
 
 // Scripts Luau's runner runs only when its code is native, as they ask is_native.
 Const NativeOnly: String[] = ["integers_regspill.luau", "native.luau"]
@@ -54,8 +126,8 @@ Const NativeOnly: String[] = ["integers_regspill.luau", "native.luau"]
 // Runs one script with native code `native`: Null when it gave "OK", or what went wrong.
 Function Ran(name: String, source: UInt8[], native: LuauNativeCode): String?
     Local options = LuauOptions()
-    // No limits, as Luau's runner has none.
-    options.MemoryLimit = 0
+    // No limits, as Luau's runner has none, but where a script needs one.
+    options.MemoryLimit = MemoryLimitOf(name)
     options.TimeBudget = 0.Seconds
     options.CollectGarbage = LuauCollectGarbage.FULL
     options.LoadString = True
@@ -76,10 +148,12 @@ Function Ran(name: String, source: UInt8[], native: LuauNativeCode): String?
         Try lua.SetFunction("is_native_if_supported", Function(): Bool
             Return native == LuauNativeCode.OFF || !LuauNativeCodeSupported() || compiled
         End Function)
+        Try GiveStandIns(lua, name)
         Try lua.Freeze()
         Local script = Try lua.NewScript("=" + name)
         Try script.Set("_G", Try script.Globals())
-        Local result = Try (Try script.Load(source, "=" + name)).Call<LuauValue>()
+        Local result = Try (Try script.Load(WithoutCuts(name, source),
+                                            "=" + name)).Call<LuauValue>()
         lua.Close()
         If result.AsString() == "OK" Then Return Null
         Return "gave {result}, not OK"
@@ -106,6 +180,9 @@ For name In names
         skipped++
         Continue
     End If
+    For cut In Cuts
+        If cut.0 == name Then Print("cut a case of {name}: {cut.3}")
+    End For
     Local source = Scripts[name]
     For native In [LuauNativeCode.OFF, LuauNativeCode.ALL]
         // A script of native code's own runs only where it's native, as Luau's runner has it.

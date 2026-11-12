@@ -599,3 +599,11 @@ Written while the PC was kept free for the user: none of it built or run until t
   with them, and LeakSanitizer on. GCC rather than the C++ tests' Clang, as Clang's runtime for a
   shared library is one more thing to preload; run in WSL's Ubuntu with GCC 15 before it landed,
   all 202 tests passed. Windows has none, as MinGW's GCC has no sanitizers; the plan says so.
+- **Stand-ins and cuts for the conformance scripts (121):** pcall.luau, tables.luau,
+  coroutine.luau, and iter.luau ran no case for want of one of Luau's runner's helpers each. Now
+  makelud is an object of the program's, one for each value; cxxthrow, a program function that
+  throws "oops"; cYieldingIterator, a Luau function that yields and continues; and pcall.luau has
+  12 MB, as the runner refuses any allocation past 8 MB and the script counts on it. What only
+  the runner can do is cut, from a case's first text to the text after it, each with why:
+  coroutine.luau's `assert(main == nil)`, pcall.luau's resumeerror, and tables.luau's cases of
+  setallocationlimit. 76 runs pass, 20 scripts skipped, from 24.
