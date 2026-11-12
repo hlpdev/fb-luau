@@ -531,3 +531,21 @@ Written while the PC was kept free for the user: none of it built or run until t
   Linux, about 2 KB each, so nothing stopped them. On 256 KB the guard leaves 128 KB, which 190
   levels pass in any build whose level takes over 700 bytes, short of Luau's 200 C calls.
 
+## The seventh review, publish.yml on dev/l14-release (2026-11-12)
+
+- **Publishing is by hand only (134),** on the tag v<version> of luau/project.toml, which a
+  `version` job checks before anything else runs, as fbengine's does: a pushed tag publishes
+  nothing, as a published version can't be taken back.
+- **A first version publishes by token (135):** the registry answers a package it doesn't have
+  with 403, so the Publish step's env has FB_REGISTRY_TOKEN from the secret of that name, which
+  fb uses when it's set, and trusted publishing when it isn't.
+- **The release is posted to Discord (136),** as fbengine's: the GitHub release's first
+  paragraph, made before the run with the notes the user approves, pinging
+  DISCORD_RELEASES_ROLE, only for futureblitz.dev, and with nothing posted and nothing failed when
+  DISCORD_RELEASES_WEBHOOK or the role isn't set.
+- **The registry is a choice of two (137):** `futureblitz`, futureblitz.dev, the default, or
+  `staging`, https://staging-index.futureblitz.dev/, as fbengine's. The input was
+  `futureblitz.dev`, which `fb publish --registry` would have taken for a folder, as fb names
+  futureblitz.dev's registry `futureblitz`; the installed check adds from staging by a
+  [registries] entry, as fbengine's does.
+

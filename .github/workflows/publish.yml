@@ -1,19 +1,25 @@
 name: Publish
 
-# A release, only on the user's yes: on a tag v<version>, which the user pushes, or by hand with the
-# registry named. Each target's library (native.yml), all five unpacked into the package, a check
-# that they're there and that the tag is the package's version, a dry run, then `fb publish` by
-# trusted publishing to the registry; then on each target a new project that adds that version of
-# luau from the registry and runs a script.
+# A release, only on the user's yes, and only by hand, on the tag v<version> of luau/project.toml,
+# which it refuses to run on anything else: `gh workflow run publish.yml --ref v0.1.0 -f
+# registry=staging`. A published version can't be taken back, so a pushed tag publishes nothing.
+# Each target's library (native.yml), all five unpacked into the package, a check that they're
+# there, a dry run, then `fb publish`: by FB_REGISTRY_TOKEN when the secret's set, which a package's
+# first version needs, as the registry has no package yet to trust this workflow; by trusted
+# publishing when it isn't. Then on each target a new project adds that version of luau from the
+# registry and runs a script. Published to futureblitz.dev, the GitHub release's first paragraph is
+# posted in the Discord server's releases channel, when DISCORD_RELEASES_WEBHOOK is set.
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       registry:
-        description: Where to publish, by a name in [registries], futureblitz.dev by default
-        default: futureblitz.dev
+        description: >-
+          The registry to publish to: futureblitz, which is futureblitz.dev, or staging, which is
+          https://staging-index.futureblitz.dev/
+        type: choice
+        options: [futureblitz, staging]
+        default: futureblitz
 
 concurrency:
   group: publish
@@ -24,25 +30,50 @@ permissions:
 
 env:
   FB_VERSION: 1.3.3
-  REGISTRY: ${{ inputs.registry || 'futureblitz.dev' }}
 
 jobs:
+  # The tag is the version luau/project.toml says, and the registry one fb knows.
+  version:
+    name: version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      index: ${{ steps.version.outputs.index }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: version
+        env:
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' luau/project.toml)"
+          if [ "$GITHUB_REF" != "refs/tags/v$version" ]; then
+            echo "::error::Publish runs on the tag v$version, not $GITHUB_REF"
+            exit 1
+          fi
+          case "$REGISTRY" in
+            futureblitz) index=futureblitz ;;
+            staging) index=https://staging-index.futureblitz.dev/ ;;
+            *) echo "::error::There's no registry $REGISTRY"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "index=$index" >> "$GITHUB_OUTPUT"
+
   native:
+    needs: version
     uses: ./.github/workflows/native.yml
 
   publish:
     name: publish
-    needs: native
+    needs: [version, native]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     # An environment the repository's settings can give required reviewers.
     environment: publish
     permissions:
       contents: read
-      # Trusted publishing: the registry takes the workflow's OIDC token, no secret.
+      # Trusted publishing: the registry takes the workflow's OIDC token, when there's no token.
       id-token: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -62,25 +93,20 @@ jobs:
             ls luau/native/$target/*luau_native* > /dev/null
           done
 
-      - name: Check the version
-        id: version
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' luau/project.toml)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/v* && "v$version" != "$GITHUB_REF_NAME" ]]; then
-            echo "the tag is $GITHUB_REF_NAME, but luau/project.toml says $version"
-            exit 1
-          fi
-
       - name: Publish
+        env:
+          INDEX: ${{ needs.version.outputs.index }}
+          # A first version's: fb uses it when it's set, and trusted publishing when it isn't. The
+          # user sets the secret for 0.1.0 and removes it after.
+          FB_REGISTRY_TOKEN: ${{ secrets.FB_REGISTRY_TOKEN }}
         run: |
-          fb publish --dry-run --registry "$REGISTRY" luau
-          fb publish --registry "$REGISTRY" luau
+          fb publish --dry-run --registry "$INDEX" luau
+          fb publish --registry "$INDEX" luau
 
   # A new project on each target that adds the published luau and runs a script.
   installed:
     name: installed ${{ matrix.target }}
-    needs: publish
+    needs: [version, publish]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -111,13 +137,19 @@ jobs:
 
       - name: Add luau and run a script
         env:
-          VERSION: ${{ needs.publish.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
+          INDEX: ${{ needs.version.outputs.index }}
         run: |
           fb new hello
           cd hello
+          registry=futureblitz
+          if [ "$INDEX" != futureblitz ]; then
+            registry=published
+            printf '\n[registries]\npublished = { index = "%s" }\n' "$INDEX" >> project.toml
+          fi
           # The index can take a moment to have the new version.
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            fb add "luau@$VERSION" --registry "$REGISTRY" && break
+            fb add "luau@$VERSION" --registry "$registry" && break
             sleep 30
           done
           grep -q "luau" project.toml
@@ -131,3 +163,40 @@ jobs:
           PROGRAM
           fb run 2>&1 | tee run.log
           grep -q ": 5" run.log
+
+  # Published to futureblitz.dev, the release is posted in the Discord server's releases channel:
+  # the GitHub release's first paragraph, made before the run with the notes the user approved,
+  # pinging DISCORD_RELEASES_ROLE. Without the webhook's secret it posts nothing and fails nothing.
+  discord:
+    name: discord
+    needs: [version, installed]
+    if: inputs.registry == 'futureblitz'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Post it
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          WEBHOOK: ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
+          ROLE: ${{ vars.DISCORD_RELEASES_ROLE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if [ -z "$WEBHOOK" ] || [ -z "$ROLE" ]; then
+            echo "::notice::DISCORD_RELEASES_WEBHOOK or DISCORD_RELEASES_ROLE isn't set: nothing posted"
+            exit 0
+          fi
+          link="https://pkg.futureblitz.dev/packages/luau"
+          summary=""
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            link="https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+            summary="$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json body -q .body \
+              | awk 'NF { print; next } { exit }' | head -c 1200)"
+          fi
+          content="$(printf '<@&%s> **luau %s** is out.' "$ROLE" "$VERSION")"
+          if [ -n "$summary" ]; then
+            content="$(printf '%s\n\n%s' "$content" "$summary")"
+          fi
+          content="$(printf '%s\n\nRelease notes: <%s>' "$content" "$link")"
+          jq -n --arg content "$content" --arg role "$ROLE" \
+            '{ content: $content, allowed_mentions: { parse: [], roles: [$role] } }' \
+            | curl -fsS -H 'Content-Type: application/json' -d @- "$WEBHOOK"
