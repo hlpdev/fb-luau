@@ -8,11 +8,13 @@ Import "./c/fbl_callback"
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_ref"
+Import "./c/fbl_thread"
 Import "./errors"
 Import "./functions"
 Import "./library"
 Import "./shim"
 Import "./state"
+Import "./threads"
 Import "./value"
 
 /// What crosses between a program and Luau by its type: a type that implements it is one a
@@ -205,25 +207,73 @@ Public Struct LuauSlots
     /// back out as.
     Package Method Raise(error: Error): Int32
         Truncate(0)
+        Local where = ""
+        If fbl_callback_where(Owner.Live(), Frame) == FBL_OK
+            where = Try? String.FromLuau(Self, 0) ?? ""
+            Truncate(0)
+        End If
+        Try? PushError(error, where)
+        Return FBL_RUNTIME
+    End Method
+
+    /// Adds `error` to the slots as Luau raises it: the value a LuauError from Luau's code raised,
+    /// as it was, or the error's message after `where`, keeping the error by it, so it's the Cause
+    /// of the LuauError it comes back out as.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY when there's no room for either.
+    Package Method PushError(error: Error, where: String) Throws LuauError
+        Local count = Count()
         If error Is LuauError
             Local value = (error As LuauError).Value
             If value != Null
                 Try
                     Try LuauValue.ToLuau(Self, value)
-                    Return FBL_RUNTIME
+                    Return
                 Catch failed As LuauError
-                    Truncate(0)
+                    Truncate(count)
                 End Try
             End If
         End If
-        Local message = error.Message
-        If fbl_callback_where(Owner.Live(), Frame) == FBL_OK
-            message = (Try? String.FromLuau(Self, 0) ?? "") + message
-            Truncate(0)
-        End If
+        Local message = where + error.Message
         Owner.Raised[message] = error
-        Try? String.ToLuau(Self, message)
-        Return FBL_RUNTIME
+        Try String.ToLuau(Self, message)
+    End Method
+
+    /// Nothing when the program's function with these slots can yield its thread, to wait.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of YIELD when nothing can wait for it: on a call of the program's, which runs
+    /// to its end, or in a metamethod, saying that `name` waits.
+    Package Method Yieldable(name: String) Throws LuauError
+        If fbl_thread_can_yield(Owner.Live(), Frame) == 1 Then Return
+        Throw LuauError(LuauErrorKind.YIELD,
+                        "attempt to yield where nothing can wait for it: '{name}' waits, so it " +
+                        "runs on a thread on the scheduler, not in a call of the program's or a " +
+                        "metamethod")
+    End Method
+
+    /// The thread that called the program's function with these slots.
+    Package Method Running(): LuauThread Throws LuauError
+        Try Owner.Check(fbl_thread_current(Owner.Live(), Frame))
+        Local thread = Try LuauThread.FromLuau(Self, Count() - 1)
+        Remove(Count() - 1)
+        Return thread
+    End Method
+
+    /// Yields the thread that called the program's function with these slots, to wait for `task`,
+    /// which gives what it's resumed with: FBL_YIELD, for the library.
+    Package Method Awaited(task: Task<LuauResumed>): Int32 Throws LuauError
+        Local where = ""
+        If fbl_callback_where(Owner.Live(), Frame) == FBL_OK
+            where = Try? String.FromLuau(Self, Count() - 1) ?? ""
+            Remove(Count() - 1)
+        End If
+        Owner.Waiting.Add(LuauWaiting(Try Running(), task, where))
+        Truncate(0)
+        Return FBL_YIELD
     End Method
 
     /// Gives a number to Luau.

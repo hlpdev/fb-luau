@@ -71,6 +71,13 @@ int call_back(lua_State* thread) {
     if (status == FBL_OK) {
         return lua_gettop(thread);
     }
+    // What the function left in its frame is what the thread yields, when something can wait.
+    if (status == FBL_YIELD) {
+        if (thread == state->main || lua_isyieldable(thread) == 0) {
+            luaL_error(thread, "attempt to yield where nothing can wait for it");
+        }
+        return lua_yield(thread, lua_gettop(thread));
+    }
     if (lua_gettop(thread) == 0) {
         lua_pushliteral(thread, "the program's function failed, and gave no error");
     }

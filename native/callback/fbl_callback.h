@@ -5,9 +5,11 @@
 // program gives, with its State, a frame of the arguments it was called with, and the number the
 // program gave the function. The callback reads the arguments, and leaves the frame holding the
 // function's results, giving FBL_OK; or holding only the error to raise, as it is, giving
-// FBL_RUNTIME. It runs on the State's thread, inside a call the program made, so it reaches what
-// the program keeps of the State through that thread. A function's number is given back, by
-// fbl_callback_released, once Luau has collected its last copy.
+// FBL_RUNTIME; or holding what to yield, giving FBL_YIELD, which yields the thread that called it,
+// when fbl_thread_can_yield says one can, and is an error otherwise. It runs on the State's thread,
+// inside a call the program made, so it reaches what the program keeps of the State through that
+// thread. A function's number is given back, by fbl_callback_released, once Luau has collected its
+// last copy.
 
 #include "core/fbl_core.h"
 

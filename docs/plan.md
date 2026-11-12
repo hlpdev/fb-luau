@@ -406,21 +406,33 @@ end
 ```
 
 - `lua.Spawn(f)` makes a `LuauThread` that will run `f`. `thread.Start()` runs it as an Async
-  Function would: it resumes the thread, and each time the thread yields to wait, the Async
-  code under it Awaits what it waits for, then resumes it. Its Task is done when the thread
-  ends, and throws its error. It's on the scheduler running the code, so `s.Run(...)` moves it
-  to a Scheduler of the program's own, which a pause stops, and whose `Tick(dt * speed)` scales
-  its waits.
+  Function would: it resumes the thread, and each time the thread yields to wait, it Awaits
+  what the thread waits for, then resumes it. Its Task is done when the thread ends, and throws
+  its error. It's on the scheduler running the code, so `s.Run(...)` moves it to a Scheduler of
+  the program's own, which a pause stops, and whose `Tick(dt * speed)` scales its waits. A
+  `coroutine.yield` of the thread's own waits for the scheduler's next tick.
 - The `task` library, which the State opens when `LuauOptions.Tasks` is on, as it is by default,
   is Roblox's: `task.wait(seconds)`, `task.spawn(f, ...)`, `task.defer(f, ...)`,
   `task.delay(seconds, f, ...)`, and `task.cancel(thread)`, so a mod's author writes what they
-  know. `task.wait` is `Await Wait(seconds)` on the thread's scheduler.
+  know. `task.wait` is `Await Wait(seconds)` on the thread's scheduler, and gives the seconds it
+  waited for, of the scheduler's time; nil or 0 waits for the next tick.
+- As Roblox's do, a wait belongs to the thread that waits, not to whatever resumed it: a
+  coroutine that calls `task.wait` yields to its resumer at once, and the scheduler goes on with
+  it later. A thread that waits with nothing running it, one of `task.spawn`, `task.defer`, or
+  `task.delay`, or a coroutine of a call of the program's, is run by the scheduler running the
+  code once the program's outermost call into the State returns. An error that ends one goes to
+  `LuauOptions.ThreadError`, by default std's `PrintError` of its message and traceback.
 - A function from `SetAsync` that a script calls on a thread yields it until its Task is done,
-  then resumes it with the result, or raises the Task's error in it.
+  then resumes it with the result, or raises the Task's error in it, as `Wrap` raises one. The
+  function is called only once the thread can wait.
 - A yield where nothing can wait, as in `lua.Run`, which runs on the program's own stack, or
   inside a metamethod, is a `LuauError` of `YIELD`, saying so.
 - `thread.Resume(args...)` and `thread.Status` drive a thread by hand, as `coroutine.resume`
-  does, for a program with a loop of its own.
+  does, for a program with a loop of its own. A thread the scheduler runs can't be resumed by
+  hand, or started again: either panics.
+- A State closed while its threads wait lets them go: each one's wait ends as it would, and
+  then its Task throws a `LuauError` of `CLOSED`. A wait isn't cut short, since nothing that
+  ends it early wakes a program's Scheduler without a tick of the main one too.
 
 ### Sandboxing and limits
 
@@ -811,6 +823,11 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
     nothing,** so a Where line on R fails for it, and a loop over the Methods that give a value
     can't be written beside those that don't; `@LuauAction` marks the second kind meanwhile
     (fbengine-notes/luau/void_result.fb).
+13. **A bug: a Scheduler's `Run(task)` moves only the task's own coroutine,** not the Async
+    coroutines it awaits, which spec 10 says it moves with it, so those stay on the scheduler
+    that started them. `Start` awaits each wait itself, so `s.Run(thread.Start())` moves its
+    `task.wait`s; but a function from `SetAsync` that the thread called before the Run, from
+    the main scheduler, stays there until it's done (fbengine-notes/luau/scheduler_run_nested.fb).
 
 ## Milestones
 

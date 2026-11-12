@@ -16,6 +16,7 @@ Import "./c/fbl_load"
 Import "./c/fbl_sandbox"
 Import "./c/fbl_state"
 Import "./c/fbl_table"
+Import "./c/fbl_thread"
 Import "./c/fbl_udata"
 Import "./callbacks"
 Import "./errors"
@@ -25,6 +26,7 @@ Import "./objects"
 Import "./scripts"
 Import "./shim"
 Import "./tables"
+Import "./threads"
 Import "./value"
 Import "./values"
 
@@ -78,6 +80,12 @@ Public Struct LuauOptions
     /// Where `print` writes, a line each call, its arguments by tostring with tabs between; or
     /// Null, the default, for std's Print, as Luau's own writes to the C runtime's stdout.
     Public Field Print: (Func(String))? = Null
+    /// Whether its scripts have the `task` library, Roblox's: True by default.
+    Public Field Tasks: Bool = True
+    /// What gets an error that ends a thread nothing waits for, one `task.spawn`, `task.defer`, or
+    /// `task.delay` runs, or one that went on from a wait; or Null, the default, for std's
+    /// PrintError of its message and traceback.
+    Public Field ThreadError: (Func(LuauError))? = Null
 End Struct
 
 /// A Luau VM of the program's own, which runs scripts. It stays on the thread that made it, as
@@ -112,6 +120,12 @@ Public Class LuauState
     Package Field ObjectTypes: Map<Int64, Int32>
     Field nextType: Int32 = 0
     Field nextObject: Int64 = 0
+    /// What its threads wait for, that the scheduler hasn't taken yet, and the threads it runs, by
+    /// their ids, whose waits their drivers take.
+    Package Field Waiting: LuauWaiting[]
+    Package Field Driven: Map<UInt64, Bool>
+    /// What gets an error that ends a thread nothing waits for.
+    Package Field ThreadError: Func(LuauError)
 
     /// Makes a State with the default options: no memory limit, and Luau's libraries.
     @PanicsAtCaller
@@ -122,11 +136,17 @@ Public Class LuauState
         TypesByNumber = {}
         Objects = {}
         ObjectTypes = {}
+        Waiting = []
+        Driven = {}
+        ThreadError = Function(error: LuauError)
+            Reported(error)
+        End Function
         Local made = Made(LuauOptions())
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
         Try? Printing(Null)
+        Try? TaskLibrary(Self)
     End New
 
     /// Makes a State with `options`.
@@ -146,12 +166,20 @@ Public Class LuauState
         TypesByNumber = {}
         Objects = {}
         ObjectTypes = {}
+        Waiting = []
+        Driven = {}
+        ThreadError = Function(error: LuauError)
+            Reported(error)
+        End Function
+        Local given = options.ThreadError
+        If given != Null Then ThreadError = given
         Local made = Made(options)
         If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
         Try Printing(options.Print)
+        If options.Tasks Then Try TaskLibrary(Self)
     End New
 
     Method Destroy()
@@ -180,6 +208,8 @@ Public Class LuauState
         TypesByNumber.Clear()
         Objects.Clear()
         ObjectTypes.Clear()
+        Waiting.Clear()
+        Driven.Clear()
     End Method
 
     /// The bytes its VM holds now.
@@ -380,6 +410,21 @@ Public Class LuauState
         End Get
     End Property
 
+    /// A new thread, which runs `f` when it's started or first resumed.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Spawn(f: LuauFunction): LuauThread Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Local slots = LuauSlots(Self, frame)
+        Try LuauFunction.ToLuau(slots, f)
+        Try Check(fbl_thread_new(Handle, frame, 0))
+        Return Try LuauThread.FromLuau(slots, 1)
+    End Method
+
     /// A new script, with globals of its own over its State's, which it freezes.
     ///
     /// # Errors
@@ -433,12 +478,14 @@ Public Class LuauState
     End Method
 
     /// Closes the frame Opened gave. Once the program's call that opened the first is done, it lets
-    /// go of the functions Luau has collected, and of the errors it raised.
+    /// go of the functions Luau has collected, and of the errors it raised, and has the scheduler
+    /// run each thread that waits on its own.
     Package Method Closed(frame: Int32)
         If Handle == 0 Then Return
         fbl_frame_close(Handle, frame)
         If frame != 0 Then Return
         Raised.Clear()
+        Scheduled()
         Local taken: Int64[64]
         While True
             Local count: Int32
@@ -467,6 +514,36 @@ Public Class LuauState
             End For
             If count < 64 Then Return
         End While
+    End Method
+
+    /// Has the scheduler running the code run each thread that waits, unless one of its drivers
+    /// runs it, which takes what it waits for itself.
+    Package Method Scheduled()
+        If Waiting.Count == 0 Then Return
+        Local kept: LuauWaiting[] = []
+        Local started: LuauWaiting[] = []
+        For waiting In Waiting
+            If Driven.Contains(waiting.Thread.Id)
+                kept.Add(waiting)
+            Else
+                started.Add(waiting)
+            End If
+        End For
+        Waiting = kept
+        For waiting In started
+            Followed(waiting)
+        End For
+    End Method
+
+    /// What the thread `id` waits for, taken from what's waiting, or Null.
+    Package Method TakeWaiting(id: UInt64): LuauWaiting?
+        For index = 0 Until Waiting.Count
+            Local waiting = Waiting[index]
+            If waiting.Thread.Id != id Then Continue
+            Waiting.RemoveAt(index)
+            Return waiting
+        End For
+        Return Null
     End Method
 
     /// T's registration, if it has one.
@@ -596,8 +673,13 @@ Public Class LuauState
             message = TextAt(fbl_state_error_message(Handle, AddressOf(length)), length)
             traceback = TextAt(fbl_state_error_traceback(Handle, AddressOf(length)), length)
         End Unsafe
-        Throw LuauError(status As LuauErrorKind, message, traceback, Raised.Get(message),
-                        ErrorValue())
+        // A yield nothing can wait for, refused by the package's function, is still a yield.
+        Local cause = Raised.Get(message)
+        Local kind = status As LuauErrorKind
+        If cause Is LuauError && (cause As LuauError).Kind == LuauErrorKind.YIELD
+            kind = LuauErrorKind.YIELD
+        End If
+        Throw LuauError(kind, message, traceback, cause, ErrorValue())
     End Method
 
     /// The value of the last error a call met, or Null for one that isn't a value of Luau's.
@@ -638,4 +720,13 @@ Function Made(options: LuauOptions): (UInt64, Int32, String)
         handle = fbl_state_new(AddressOf(given), AddressOf(status))
     End Unsafe
     Return (handle, status, handle == 0 ? LastError() : "")
+End Function
+
+/// Writes an error that ended a thread nothing waits for to stderr, its message and traceback.
+Function Reported(error: LuauError)
+    If error.Traceback == ""
+        PrintError(error.Message)
+    Else
+        PrintError(error.Message + "\n" + error.Traceback)
+    End If
 End Function

@@ -13,6 +13,7 @@
 #include "sandbox/fbl_sandbox.h"
 #include "state/fbl_state.h"
 #include "table/fbl_table.h"
+#include "thread/fbl_thread.h"
 #include "udata/fbl_udata.h"
 
 #endif

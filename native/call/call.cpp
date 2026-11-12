@@ -12,6 +12,9 @@
 
 namespace {
 
+// What marks a runner, as its thread data.
+int runner_mark = 0;
+
 // The thread calls at `depth` run on, made the first time one's that deep, and kept by the
 // registry; or null, with the State's error.
 lua_State* runner(fbl::state_t& state, lua_State* thread, int depth) {
@@ -29,7 +32,7 @@ lua_State* runner(fbl::state_t& state, lua_State* thread, int depth) {
     }
     int made = LUA_NOREF;
     auto work = [&made](lua_State* stack) {
-        lua_newthread(stack);
+        lua_setthreaddata(lua_newthread(stack), &runner_mark);
         made = lua_ref(stack, -1);
         lua_pop(stack, 1);
         return 0;
@@ -41,17 +44,39 @@ lua_State* runner(fbl::state_t& state, lua_State* thread, int depth) {
     return runner(state, thread, depth);
 }
 
-// Keeps the error a runner's call met, the value on top of its stack, with where it was raised, and
-// makes the runner ready for its next call.
-int32_t failed(fbl::state_t& state, lua_State* thread, lua_State* runner, int status) noexcept {
+} // namespace
+
+namespace fbl {
+
+bool is_runner(lua_State* thread) noexcept {
+    return lua_getthreaddata(thread) == &runner_mark;
+}
+
+int resume_from(state_t& state, lua_State* thread, lua_State* co, int arguments,
+                bool raise) noexcept {
+    const bool outermost = state.depth == 0;
+    if (outermost && state.time_budget.count() > 0) {
+        state.timed_out = false;
+        state.deadline = std::chrono::steady_clock::now() + state.time_budget;
+    }
+    state.depth++;
+    const int status = raise ? lua_resumeerror(co, thread) : lua_resume(co, thread, arguments);
+    state.depth--;
+    if (outermost) {
+        state.deadline = {};
+    }
+    return status;
+}
+
+int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, bool reset) noexcept {
     std::string traceback;
     // Its traceback is made of strings, which need memory, so it's made under protection, on the
-    // caller's thread, from the runner's frames, which an error leaves where they were.
-    auto work = [runner](lua_State* stack) {
-        luaL_traceback(stack, runner, nullptr, 0);
+    // caller's thread, from the resumed thread's frames, which an error leaves where they were.
+    auto work = [co](lua_State* stack) {
+        luaL_traceback(stack, co, nullptr, 0);
         return 1;
     };
-    const int made = fbl::protect(state, thread, 0, 1, work);
+    const int made = protect(state, thread, 0, 1, work);
     if (made == LUA_OK) {
         size_t length = 0;
         const char* text = lua_tolstring(thread, -1, &length);
@@ -69,23 +94,24 @@ int32_t failed(fbl::state_t& state, lua_State* thread, lua_State* runner, int st
         traceback.pop_back();
     }
     // An error the interrupt raised, or any the timeout led to, is the timeout.
-    const int32_t kind =
-        state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : fbl::kind_of(status);
+    const int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
     if (status == LUA_YIELD) {
-        fbl::record_error(state, FBL_YIELD,
-                          "attempt to yield where nothing can wait for it: a call from the "
-                          "program runs to its end",
-                          traceback);
-    } else if (lua_gettop(runner) > 0) {
-        fbl::take_error(state, runner, kind, traceback);
+        record_error(state, FBL_YIELD,
+                     "attempt to yield where nothing can wait for it: a call from the program "
+                     "runs to its end",
+                     traceback);
+    } else if (lua_gettop(co) > 0) {
+        take_error(state, co, kind, traceback);
     } else {
-        fbl::record_error(state, kind, "an error with no value", traceback);
+        record_error(state, kind, "an error with no value", traceback);
     }
-    lua_resetthread(runner);
-    return kind;
+    if (reset) {
+        lua_resetthread(co);
+    }
+    return status == LUA_YIELD ? FBL_YIELD : kind;
 }
 
-} // namespace
+} // namespace fbl
 
 int32_t fbl_call_function(uint64_t state, int32_t frame, int32_t slot, int32_t results) try {
     fbl::state_t* found = fbl::find_state(state);
@@ -115,19 +141,9 @@ int32_t fbl_call_function(uint64_t state, int32_t frame, int32_t slot, int32_t r
                              : fbl::record_error(*found, FBL_MEMORY, "not enough memory");
     }
     lua_xmove(thread, co, count);
-    const bool outermost = found->depth == 0;
-    if (outermost && found->time_budget.count() > 0) {
-        found->timed_out = false;
-        found->deadline = std::chrono::steady_clock::now() + found->time_budget;
-    }
-    found->depth++;
-    const int status = lua_resume(co, thread, count - 1);
-    found->depth--;
-    if (outermost) {
-        found->deadline = {};
-    }
+    const int status = fbl::resume_from(*found, thread, co, count - 1, false);
     if (status != LUA_OK) {
-        return failed(*found, thread, co, status);
+        return fbl::failed(*found, thread, co, status, true);
     }
     const int made = lua_gettop(co);
     const int wanted = results == -1 ? made : results;

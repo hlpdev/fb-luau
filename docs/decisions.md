@@ -89,3 +89,25 @@ with its date; the rest are the lane's, which the user can change.
   out, as a call doesn't know its script.
 - **No memory count per script:** scripts' code runs on the State's shared runner threads.
 - **The time budget is per outermost call**, the interrupt raising past it at every safe point.
+
+## L7 (2026-11-11)
+
+- **A wait is the waiting thread's, as Roblox's is:** `task.wait` and a `SetAsync` function queue
+  the thread that called them, which yields to whatever resumed it; `Start`'s loop takes its own
+  thread's waits, and the scheduler running the code runs any other's once the program's
+  outermost call returns. So a coroutine that waits goes on by the scheduler, as in Roblox.
+- **A thread's own `coroutine.yield`, under `Start`, waits for the next tick,** so a script can
+  yield a frame; Roblox leaves such a thread suspended, which here would leave `Start`'s Task
+  never done.
+- **`task.wait` gives the seconds it was asked for**, the scheduler's time, not a clock's count,
+  which a program's Scheduler's ticks would make wrong.
+- **A thread's errors that nothing waits for go to `LuauOptions.ThreadError`**, by default std's
+  `PrintError`, as Roblox prints them; `Start`'s Task throws its own.
+- **Closing a State doesn't cut a wait short:** a TaskSource's Task wakes a coroutine on a
+  program's Scheduler only after a main tick too (tried), so each driver ends at its wait's end,
+  throwing `CLOSED`. A cancelled thread's driver ends quietly, its `Start` Task with no error.
+- **A yield the package's own function refuses keeps the kind `YIELD`** out of the call, found by
+  its Cause, as other errors raised in a script come out as `RUNTIME`.
+- **A thread a call of the program's runs on can't be resumed or closed by anything,** and a
+  bare yield on one is `YIELD`; a thread's id is its address, which its references keep alive.
+- **The `task` table is frozen**, as Roblox's library tables are read-only.

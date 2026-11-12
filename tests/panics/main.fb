@@ -43,6 +43,18 @@ Function Run(name: String) Throws LuauError
             Local options = LuauOptions()
             options.Compile.Optimization = 3
             Local _lua = Try LuauState(options)
+        // A thread started while the scheduler runs it already.
+        Case "started-twice"
+            Local lua = LuauState()
+            Local thread = Try lua.Spawn(Try lua.Load("task.wait(1)"))
+            Local _first = thread.Start()
+            Local _second = thread.Start()
+        // A thread the scheduler runs, resumed by hand.
+        Case "resumed-by-hand"
+            Local lua = LuauState()
+            Local thread = Try lua.Spawn(Try lua.Load("task.wait(1)"))
+            Local _first = thread.Start()
+            Try thread.Resume()
         Default
             Panic("no such case as {name}")
     End Select

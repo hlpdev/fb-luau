@@ -1,7 +1,8 @@
 """Writes luau/arity.fb: the package's code that's the same for each number of a function's
 arguments, from none to MOST, which FutureBlitz has no variadic generics for: LuauState's
-SetFunction and Wrap, for a FutureBlitz function of each shape, and LuauFunction's Call, Invoke,
-Call2, Call3, CallAll, ToFunc, and ToAction.
+SetFunction and Wrap, and SetAsync and WrapAsync, for a FutureBlitz function of each shape,
+LuauFunction's Call, Invoke, Call2, Call3, CallAll, ToFunc, and ToAction, and LuauThread's
+Resume.
 
     python tools/gen_arity.py [--check]
 
@@ -103,6 +104,69 @@ def state_methods(count):
             lines.append("        End Function)")
             lines.append("    End Method")
             lines.append("")
+    return lines
+
+
+def async_methods(count):
+    """LuauState's SetAsync and WrapAsync for a function of `count` arguments that gives a Task, of
+    each shape: a Task of a result or not, which throws or doesn't."""
+    names = arguments(count)
+    lines = []
+    for gives in (True, False):
+        for throws in (False, True):
+            task = ("Task<R>" if gives else "Task") + (" Throws Error" if throws else "")
+            func = f"Func({', '.join(names)}): " + (f"({task})" if throws else task)
+            type_names = names + (["R"] if gives else [])
+            what = "that gives a Task" + (" of a result" if gives else "") + (", which throws" if throws else "")
+            lines += doc("    ", f"Sets the global `name` to `f`, a function of {counted(count)} {what}, as a Luau\n"
+                                 "function, as [WrapAsync] makes it.\n\n# Errors\n\nA LuauError of MEMORY.")
+            lines += header("    ", "SetAsync", type_names, f"name: String, f: {func}", " Throws LuauError")
+            lines.append("        Try Set(name, Try WrapAsync(f, name))")
+            lines.append("    End Method")
+            lines.append("")
+            lines += doc("    ", f"`f`, a function of {counted(count)} {what}, an Async Function's, as a Luau\n"
+                                 "function, named `name` in Luau's errors and tracebacks: its arguments are read as\n"
+                                 "Wrap reads them, and a script that calls it waits for the Task as an Await does,\n"
+                                 "while the program goes on, then has its result" + (", or its error raised where it\n"
+                                 "called it, as Wrap raises one." if throws else ".") + " Only a thread on the scheduler\n"
+                                 "can wait: a call of it on a call of the program's, or in a metamethod, is an error\n"
+                                 "of YIELD in the script, before it calls `f`.\n\n# Errors\n\nA LuauError of MEMORY.")
+            lines += header("    ", "WrapAsync", type_names, f"f: {func}, name: String = \"function\"",
+                            ": LuauFunction Throws LuauError")
+            lines.append("        Return Try NewFunction(name, Function(slots: LuauSlots): Int32")
+            lines.append("            Try")
+            lines.append("                Try slots.Yieldable(name)")
+            for index, name in enumerate(names):
+                lines.append(f"                Local a{index + 1} = Try slots.Argument<{name}>({index}, name)")
+            call = f"f({', '.join(f'a{index}' for index in range(1, count + 1))})"
+            lines.append(f"                Return Try slots.Awaited(Settled({call}))")
+            lines.append("            Catch error")
+            lines.append("                Return slots.Raise(error)")
+            lines.append("            End Try")
+            lines.append("        End Function)")
+            lines.append("    End Method")
+            lines.append("")
+    return lines
+
+
+def thread_methods(count):
+    """LuauThread's Resume with `count` arguments."""
+    names = arguments(count)
+    parameters = ", ".join(f"a{index}: A{index}" for index in range(1, count + 1))
+    with_arguments = f"with {counted(count)}" if count else "with no arguments"
+    lines = doc("    ", f"Resumes it {with_arguments}, as `coroutine.resume` does: the first time, they're its\n"
+                         "function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs\n"
+                         "until it yields or returns, and what it yields or returns comes back, of any types.\n\n"
+                         "# Errors\n\nA LuauError for what it raises or meets as it runs, which ends it, or of\n"
+                         "RUNTIME for a thread that isn't suspended.\n\n# Panics\n\nFor a thread that runs on the\n"
+                         "scheduler, from Start or the task library.")
+    lines += header("    ", "Resume", names, parameters, ": LuauValue[] Throws LuauError")
+    lines.append("        If Owner.Driven.Contains(Id) Then Panic(\"the Luau thread runs on the scheduler\")")
+    lines.append("        Local slots = Try Opened()")
+    lines.append("        Defer Owner.Closed(slots.Frame)")
+    lines += pushes(count)
+    lines.append("        Return (Try Ran(slots, 0, True)).1")
+    lines += ["    End Method", ""]
     return lines
 
 
@@ -257,8 +321,8 @@ def generate():
     lines = [
         "//! What's the same for each number of a function's arguments, from none to "
         f"{MOST}: a State's",
-        "//! SetFunction and Wrap, and a LuauFunction's calls. tools/gen_arity.py writes it; run it again",
-        "//! instead of editing it.",
+        "//! SetFunction, Wrap, SetAsync, and WrapAsync, a LuauFunction's calls, and a LuauThread's",
+        "//! resumes. tools/gen_arity.py writes it; run it again instead of editing it.",
         "",
         "Import std.core",
         "Import \"./c/fbl_call\"",
@@ -266,6 +330,7 @@ def generate():
         "Import \"./functions\"",
         "Import \"./objects\"",
         "Import \"./state\"",
+        "Import \"./threads\"",
         "Import \"./value\"",
         "Import \"./values\"",
         "",
@@ -274,10 +339,17 @@ def generate():
     ]
     for count in range(MOST + 1):
         lines += state_methods(count)
+    for count in range(MOST + 1):
+        lines += async_methods(count)
     lines += expose_members()
     lines += ["End Extend", "", "/// A Luau function's calls from the program.", "Extend LuauFunction"]
     for count in range(MOST + 1):
         lines += function_methods(count)
+    if lines[-1] == "":
+        lines.pop()
+    lines += ["End Extend", "", "/// A Luau thread's resumes by hand.", "Extend LuauThread"]
+    for count in range(MOST + 1):
+        lines += thread_methods(count)
     if lines[-1] == "":
         lines.pop()
     lines.append("End Extend")

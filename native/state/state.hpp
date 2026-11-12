@@ -138,6 +138,20 @@ constexpr int object_tag = 2;
 // Sets a new State up for the program's objects: their destructor, and their weak table.
 void prepare_objects(lua_State* thread, state_t& state);
 
+// Whether a thread is one the program's calls run on, which nothing else resumes, and which can't
+// yield to anything that waits.
+bool is_runner(lua_State* thread) noexcept;
+
+// Resumes `co` from `thread`, with the `arguments` on top of its stack, or raising the value on top
+// of it, a call one deeper, which has the time budget when it's the outermost: Luau's status.
+int resume_from(state_t& state, lua_State* thread, lua_State* co, int arguments,
+                bool raise) noexcept;
+
+// Keeps the error a resume of `co` met, the value on top of its stack, with where it was raised,
+// and resets `co` for its next call, when `reset`: the error's kind. A yield is FBL_YIELD's, as
+// nothing waits for a runner.
+int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, bool reset) noexcept;
+
 // Freezes the State's globals, unless they are: a status.
 int32_t frozen(state_t& state) noexcept;
 

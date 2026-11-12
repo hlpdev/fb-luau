@@ -1,6 +1,6 @@
 //! What's the same for each number of a function's arguments, from none to 8: a State's
-//! SetFunction and Wrap, and a LuauFunction's calls. tools/gen_arity.py writes it; run it again
-//! instead of editing it.
+//! SetFunction, Wrap, SetAsync, and WrapAsync, a LuauFunction's calls, and a LuauThread's
+//! resumes. tools/gen_arity.py writes it; run it again instead of editing it.
 
 Import std.core
 Import "./c/fbl_call"
@@ -8,6 +8,7 @@ Import "./errors"
 Import "./functions"
 Import "./objects"
 Import "./state"
+Import "./threads"
 Import "./value"
 Import "./values"
 
@@ -1760,6 +1761,1763 @@ Extend LuauState
                 Local a8 = Try slots.Argument<A8>(7, name)
                 Try f(a1, a2, a3, a4, a5, a6, a7, a8)
                 Return slots.NoResult()
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<R: LuauType>(name: String, f: Func(): Task<R>) Throws LuauError
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<R: LuauType>(f: Func(): Task<R>,
+                                         name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Return Try slots.Awaited(Settled(f()))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<R: LuauType>(name: String,
+                                        f: Func(): (Task<R> Throws Error)) Throws LuauError
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<R: LuauType>(f: Func(): (Task<R> Throws Error),
+                                         name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Return Try slots.Awaited(Settled(f()))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync(name: String, f: Func(): Task) Throws LuauError
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync(f: Func(): Task,
+                            name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Return Try slots.Awaited(Settled(f()))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of no arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync(name: String, f: Func(): (Task Throws Error)) Throws LuauError
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of no arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync(f: Func(): (Task Throws Error),
+                            name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Return Try slots.Awaited(Settled(f()))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, R>(name: String, f: Func(A1): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, R>(f: Func(A1): Task<R>,
+                                   name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Return Try slots.Awaited(Settled(f(a1)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, R>(name: String,
+                                  f: Func(A1): (Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, R>(f: Func(A1): (Task<R> Throws Error),
+                                   name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Return Try slots.Awaited(Settled(f(a1)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1: LuauType>(name: String, f: Func(A1): Task) Throws LuauError
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1: LuauType>(f: Func(A1): Task,
+                                          name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Return Try slots.Awaited(Settled(f(a1)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of one argument that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1: LuauType>(name: String,
+                                         f: Func(A1): (Task Throws Error)) Throws LuauError
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of one argument that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1: LuauType>(f: Func(A1): (Task Throws Error),
+                                          name: String = "function"): LuauFunction Throws LuauError
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Return Try slots.Awaited(Settled(f(a1)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, R>(name: String, f: Func(A1, A2): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, R>(f: Func(A1, A2): Task<R>,
+                                       name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Return Try slots.Awaited(Settled(f(a1, a2)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, R>(name: String,
+                                      f: Func(A1, A2): (Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, R>(f: Func(A1, A2): (Task<R> Throws Error),
+                                       name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Return Try slots.Awaited(Settled(f(a1, a2)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2>(name: String, f: Func(A1, A2): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2>(f: Func(A1, A2): Task,
+                                    name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Return Try slots.Awaited(Settled(f(a1, a2)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 2 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2>(name: String,
+                                   f: Func(A1, A2): (Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 2 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2>(f: Func(A1, A2): (Task Throws Error),
+                                    name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Return Try slots.Awaited(Settled(f(a1, a2)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, R>(name: String,
+                                          f: Func(A1, A2, A3): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, R>(f: Func(A1, A2, A3): Task<R>,
+                                           name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, R>(name: String,
+                                          f: Func(A1, A2,
+                                                  A3): (Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, R>(f: Func(A1, A2, A3): (Task<R> Throws Error),
+                                           name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3>(name: String, f: Func(A1, A2, A3): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3>(f: Func(A1, A2, A3): Task,
+                                        name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 3 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3>(name: String,
+                                       f: Func(A1, A2, A3): (Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 3 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3>(f: Func(A1, A2, A3): (Task Throws Error),
+                                        name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, R>(name: String,
+                                              f: Func(A1, A2, A3, A4): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, R>(f: Func(A1, A2, A3, A4): Task<R>,
+                                               name: String =
+                                               "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, R>(name: String,
+                                              f: Func(A1, A2, A3,
+                                                      A4): (Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, R>(f: Func(A1, A2, A3, A4): (Task<R> Throws Error),
+                                               name: String =
+                                               "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4>(name: String,
+                                           f: Func(A1, A2, A3, A4): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4>(f: Func(A1, A2, A3, A4): Task,
+                                            name: String =
+                                            "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 4 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4>(name: String,
+                                           f: Func(A1, A2, A3,
+                                                   A4): (Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 4 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4>(f: Func(A1, A2, A3, A4): (Task Throws Error),
+                                            name: String =
+                                            "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, R>(name: String,
+                                                  f: Func(A1, A2, A3, A4,
+                                                          A5): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, R>(f: Func(A1, A2, A3, A4, A5): Task<R>,
+                                                   name: String =
+                                                   "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, R>(name: String,
+                                                  f: Func(A1, A2, A3, A4, A5): (
+                                                      Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, R>(f: Func(A1, A2, A3, A4,
+                                                           A5): (Task<R> Throws Error),
+                                                   name: String =
+                                                   "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5>(name: String,
+                                               f: Func(A1, A2, A3, A4, A5): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5>(f: Func(A1, A2, A3, A4, A5): Task,
+                                                name: String =
+                                                "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 5 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5>(name: String,
+                                               f: Func(A1, A2, A3, A4,
+                                                       A5): (Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 5 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5>(f: Func(A1, A2, A3, A4, A5): (Task Throws Error),
+                                                name: String =
+                                                "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, R>(name: String,
+                                                      f: Func(A1, A2, A3, A4, A5,
+                                                              A6): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, R>(f: Func(A1, A2, A3, A4, A5, A6): Task<R>,
+                                                       name: String =
+                                                       "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, R>(name: String,
+                                                      f: Func(A1, A2, A3, A4, A5, A6): (
+                                                          Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, R>(f: Func(A1, A2, A3, A4, A5,
+                                                               A6): (Task<R> Throws Error),
+                                                       name: String =
+                                                       "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6>(name: String,
+                                                   f: Func(A1, A2, A3, A4, A5,
+                                                           A6): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6>(f: Func(A1, A2, A3, A4, A5, A6): Task,
+                                                    name: String =
+                                                    "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 6 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6>(name: String,
+                                                   f: Func(A1, A2, A3, A4, A5,
+                                                           A6): (
+                                                               Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 6 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6>(f: Func(A1, A2, A3, A4, A5,
+                                                            A6): (Task Throws Error),
+                                                    name: String =
+                                                    "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7, R>(name: String,
+                                                          f: Func(A1, A2, A3, A4, A5, A6,
+                                                                  A7): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7, R>(
+            f: Func(A1, A2, A3, A4, A5, A6, A7): Task<R>,
+            name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7, R>(name: String, f: Func(A1, A2, A3, A4, A5, A6, A7): (Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7, R>(f: Func(A1, A2, A3, A4, A5, A6, A7): (Task<R> Throws Error), name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7>(name: String,
+                                                       f: Func(A1, A2, A3, A4, A5, A6,
+                                                               A7): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7>(f: Func(A1, A2, A3, A4, A5, A6, A7): Task,
+                                                        name: String =
+                                                        "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 7 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7>(name: String,
+                                                       f: Func(A1, A2, A3, A4, A5, A6, A7): (
+                                                           Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 7 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7>(f: Func(A1, A2, A3, A4, A5, A6,
+                                                                A7): (Task Throws Error),
+                                                        name: String =
+                                                        "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives a Task of a result, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7, A8, R>(name: String,
+                                                              f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                      A8): Task<R>) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives a Task of a result, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7, A8, R>(f: Func(A1, A2, A3, A4, A5, A6, A7, A8): Task<R>, name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7, a8)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives a Task of a result, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7, A8, R>(name: String, f: Func(A1, A2, A3, A4, A5, A6, A7, A8): (Task<R> Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7, A8, R>(f: Func(A1, A2, A3, A4, A5, A6, A7, A8): (Task<R> Throws Error), name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Where R: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7, a8)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives a Task, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7, A8>(name: String,
+                                                           f: Func(A1, A2, A3, A4, A5, A6, A7,
+                                                                   A8): Task) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives a Task, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7, A8>(f: Func(A1, A2, A3, A4, A5, A6, A7, A8): Task, name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7, a8)))
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+    End Method
+
+    /// Sets the global `name` to `f`, a function of 8 arguments that gives a Task, which throws, as a Luau
+    /// function, as [WrapAsync] makes it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method SetAsync<A1, A2, A3, A4, A5, A6, A7, A8>(name: String, f: Func(A1, A2, A3, A4, A5, A6, A7, A8): (Task Throws Error)) Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Try Set(name, Try WrapAsync(f, name))
+    End Method
+
+    /// `f`, a function of 8 arguments that gives a Task, which throws, an Async Function's, as a Luau
+    /// function, named `name` in Luau's errors and tracebacks: its arguments are read as
+    /// Wrap reads them, and a script that calls it waits for the Task as an Await does,
+    /// while the program goes on, then has its result, or its error raised where it
+    /// called it, as Wrap raises one. Only a thread on the scheduler
+    /// can wait: a call of it on a call of the program's, or in a metamethod, is an error
+    /// of YIELD in the script, before it calls `f`.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method WrapAsync<A1, A2, A3, A4, A5, A6, A7, A8>(f: Func(A1, A2, A3, A4, A5, A6, A7, A8): (Task Throws Error), name: String = "function"): LuauFunction Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        Return Try NewFunction(name, Function(slots: LuauSlots): Int32
+            Try
+                Try slots.Yieldable(name)
+                Local a1 = Try slots.Argument<A1>(0, name)
+                Local a2 = Try slots.Argument<A2>(1, name)
+                Local a3 = Try slots.Argument<A3>(2, name)
+                Local a4 = Try slots.Argument<A4>(3, name)
+                Local a5 = Try slots.Argument<A5>(4, name)
+                Local a6 = Try slots.Argument<A6>(5, name)
+                Local a7 = Try slots.Argument<A7>(6, name)
+                Local a8 = Try slots.Argument<A8>(7, name)
+                Return Try slots.Awaited(Settled(f(a1, a2, a3, a4, a5, a6, a7, a8)))
             Catch error
                 Return slots.Raise(error)
             End Try
@@ -3887,5 +5645,274 @@ Extend LuauFunction
                         a8: A8) Throws LuauError
             Try Invoke(a1, a2, a3, a4, a5, a6, a7, a8)
         End Function
+    End Method
+End Extend
+
+/// A Luau thread's resumes by hand.
+Extend LuauThread
+    /// Resumes it with no arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume(): LuauValue[] Throws LuauError
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with one argument, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1: LuauType>(a1: A1): LuauValue[] Throws LuauError
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 2 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2>(a1: A1, a2: A2): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 3 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2, A3>(a1: A1, a2: A2, a3: A3): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 4 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3,
+                                         a4: A4): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 5 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
+                                             a5: A5): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 6 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                 a6: A6): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 7 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6,
+                                                     a7: A7): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Return (Try Ran(slots, 0, True)).1
+    End Method
+
+    /// Resumes it with 8 arguments, as `coroutine.resume` does: the first time, they're its
+    /// function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs
+    /// until it yields or returns, and what it yields or returns comes back, of any types.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError for what it raises or meets as it runs, which ends it, or of
+    /// RUNTIME for a thread that isn't suspended.
+    ///
+    /// # Panics
+    ///
+    /// For a thread that runs on the
+    /// scheduler, from Start or the task library.
+    @PanicsAtCaller
+    Public Method Resume<A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
+                                                         a6: A6, a7: A7,
+                                                         a8: A8): LuauValue[] Throws LuauError
+        Where A1: LuauType
+        Where A2: LuauType
+        Where A3: LuauType
+        Where A4: LuauType
+        Where A5: LuauType
+        Where A6: LuauType
+        Where A7: LuauType
+        Where A8: LuauType
+        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        Local slots = Try Opened()
+        Defer Owner.Closed(slots.Frame)
+        Try A1.ToLuau(slots, a1)
+        Try A2.ToLuau(slots, a2)
+        Try A3.ToLuau(slots, a3)
+        Try A4.ToLuau(slots, a4)
+        Try A5.ToLuau(slots, a5)
+        Try A6.ToLuau(slots, a6)
+        Try A7.ToLuau(slots, a7)
+        Try A8.ToLuau(slots, a8)
+        Return (Try Ran(slots, 0, True)).1
     End Method
 End Extend
