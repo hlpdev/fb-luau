@@ -418,12 +418,17 @@ end
   a driver resumes them: a thread's Start is one, for its thread and what the threads it starts
   wait for, and `lua.Start()` is the State's, for the rest, `task.spawn`'s, `task.delay`'s, and a
   coroutine's of a call of the program's. A driver is a coroutine that, at each of its
-  scheduler's ticks, resumes what's due, with one time budget for all of it, what's left due
-  going first the next tick, and ends when nothing of its waits or the State closes. Its time is
-  what its timer has seen pass, a `Wait` of the soonest due, at most a second at a time, as a
-  timer started in a tick counts from its end: a wait is never early, and late by at most what
-  the scheduler's ticks overshoot. At most `LuauOptions.MostWaiting` threads wait, 10,000 by
-  default, past which the script's call is an error, and a thread waits for one thing at a time.
+  scheduler's ticks, reads the scheduler's time (fb 1.3.2's `Scheduler.Current.Time()`) and
+  resumes what's due, what's left due going first the next tick. No wait is a timer: a wait made
+  in the driver's turn is due its seconds from the time then, and one made outside it, from the
+  driver's next turn, so a wait is never early, and at most a tick late. The State's time budget
+  decides only whether another thread is resumed in a tick; each resume has the budget of its
+  own, so a script that spins ends only itself. A thread's Start ends with its thread, giving what
+  it still drives to the State's driver, or, with none, to ThreadError. `lua.Start()` runs until
+  the State closes, so a Scheduler it runs on isn't idle, and a program ends it by closing the
+  State. At most `LuauOptions.MostWaiting` threads wait, 10,000 by default, past which the
+  script's call is an error, and a thread waits for one thing at a time: a wait a script went
+  around, resuming the thread itself, is dropped.
 - A wait with no driver is a `YIELD` error. States are the main thread's, as Async code is: one
   made on another thread works, with no driver, and its scripts don't wait.
 - The `task` library, which the State opens when `LuauOptions.Tasks` is on, as it is by default,
