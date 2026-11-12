@@ -1,9 +1,10 @@
 name: Stability
 
 # Nightly and by hand: the C++ tests under ASan with UBSan and under TSan, built with Clang, Luau
-# too; each fuzzer for 10 minutes with libFuzzer, its corpus kept from run to run; and the soak, for
-# 30 minutes, then the container's fuzzer, for 10, on linux-x64's Release library. A fuzzer's
-# finding is kept as an artifact.
+# too; the package's own tests, `fb test luau`, over a library built with ASan and UBSan by GCC;
+# each fuzzer for 10 minutes with libFuzzer, its corpus kept from run to run; and the soak, for 30
+# minutes, then the container's fuzzer, for 10, on linux-x64's Release library. A fuzzer's finding
+# is kept as an artifact. Windows has no sanitizer run: MinGW's GCC has none.
 
 on:
   schedule:
@@ -58,6 +59,39 @@ jobs:
             -DFBL_SANITIZE=${{ matrix.sanitize }} -DFBL_FB_TESTS=OFF
           cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure -E '^tools\.'
+
+  # The package's tests over a library built with ASan and UBSan. fb's test program isn't built
+  # with them, so their runtimes, GCC's shared ones, are loaded before it; LeakSanitizer watches
+  # the whole process.
+  package-sanitized:
+    name: sanitize the package's tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install GCC and Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 ninja-build
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Build and test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+            -DFBL_SANITIZE=address,undefined -DFBL_BUILD_TESTS=OFF
+          cmake --build build --parallel 2 --target luau_native
+          fb test -o build/luau_tests luau
+          cd luau
+          LD_PRELOAD="$(g++-14 -print-file-name=libasan.so):$(g++-14 -print-file-name=libubsan.so)" \
+            ../build/luau_tests
 
   fuzz:
     name: fuzz ${{ matrix.fuzzer }}

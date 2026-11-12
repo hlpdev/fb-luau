@@ -593,3 +593,9 @@ Written while the PC was kept free for the user: none of it built or run until t
   checker, which forgets and checks two modules each iteration. It judges the kept State's own
   memory, collected whole at each sample, at 8 bytes an iteration, beside the process's at 64.
   ctest's run is judged by its exit code, which a failed iteration sets, not by a line it prints.
+- **The package's tests under ASan and UBSan (120):** stability.yml's `package-sanitized` job
+  builds the library alone with them, by GCC, whose runtimes are shared, builds `fb test luau`'s
+  program with `fb test -o`, and runs it with the runtimes preloaded, as fb's program isn't built
+  with them, and LeakSanitizer on. GCC rather than the C++ tests' Clang, as Clang's runtime for a
+  shared library is one more thing to preload; run in WSL's Ubuntu with GCC 15 before it landed,
+  all 202 tests passed. Windows has none, as MinGW's GCC has no sanitizers; the plan says so.

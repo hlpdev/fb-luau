@@ -825,9 +825,12 @@ docs/                    plan.md, decisions.md, guide.md
   container is checked in FutureBlitz, so its fuzzer is a FutureBlitz program, fuzz/containers,
   which changes saved containers at random for as long as it's given.
 - **Leaks and sanitizers:** the C++ tests under ASan and UBSan, with LeakSanitizer, and under
-  TSan for States on several threads at once; every State's memory back to 0 at its close, by
-  its allocator's count; and FutureBlitz's own leak report, which `fb test` fails on, for the
-  objects and functions a State held.
+  TSan for States on several threads at once; the package's own tests, `fb test luau`, over a
+  library built with ASan and UBSan by GCC, whose shared runtimes are loaded before fb's test
+  program, which isn't built with them; every State's memory back to 0 at its close, by its
+  allocator's count; and FutureBlitz's own leak report, which `fb test` fails on, for the
+  objects and functions a State held. All of it is on Linux: Windows has no sanitizer run, as
+  MinGW's GCC has none, and macOS's are left to Linux's.
 - **A soak:** tests/soak, a program that makes and closes States, loads scripts, calls both ways,
   makes and drops userdata, tables, threads, and buffers, waits on a scheduler, and runs scripts
   that hit their memory limits and time budgets, for 30 minutes, sampling the process's memory
