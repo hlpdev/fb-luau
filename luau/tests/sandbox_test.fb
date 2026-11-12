@@ -211,52 +211,79 @@ Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws Lu
     Try victim.Run(r"local bus = require('./bus') bus.fire()", "@victim.luau")
 End Function
 
-/// What a test keeps of one script's to give another: a thread and a function.
+/// What a test keeps of one script's to give another: a thread.
 Class Kept
     Field Thread: LuauThread? = Null
-    Field Wrapped: LuauFunction? = Null
 End Class
 
 @Test
-Function AnotherScriptsThreadCantBeDrivenNorRead() Throws LuauError
+Function AThreadHandedOverIsTheirsButItsFunctionsArentReached() Throws LuauError
+    // A thread a script hands to another's code is theirs to resume or close, as a function it
+    // hands over is theirs to call; its functions, at its levels, still aren't reached.
     Local lua = LuauState()
-    Local waits = lua.Start()
     Local kept = Kept()
-    Try lua.SetFunction("keep", Function(thread: LuauThread, wrapped: LuauFunction)
+    Try lua.SetFunction("keep", Function(thread: LuauThread)
         kept.Thread = thread
-        kept.Wrapped = wrapped
     End Function)
-    Try lua.SetFunction("takenThread", Function(): LuauThread Throws LuauError
+    Try lua.SetFunction("taken", Function(): LuauThread Throws LuauError
         Local thread = kept.Thread
         If thread == Null Then Throw LuauError(LuauErrorKind.RUNTIME, "none kept")
         Return thread
     End Function)
-    Try lua.SetFunction("takenFunction", Function(): LuauFunction Throws LuauError
-        Local wrapped = kept.Wrapped
-        If wrapped == Null Then Throw LuauError(LuauErrorKind.RUNTIME, "none kept")
-        Return wrapped
-    End Function)
     Local owner = Try lua.NewScript("@owner.luau")
-    Local thief = Try lua.NewScript("@thief.luau")
-    Try owner.Run(
-        r"local t = coroutine.create(function() coroutine.yield() end) coroutine.resume(t) " +
-        r"keep(t, coroutine.wrap(function() coroutine.yield(1) end))", "@owner.luau")
-    For use In [r"coroutine.resume(t)", r"coroutine.close(t)", r"task.cancel(t)", r"task.spawn(t)",
-                r"task.defer(t)", r"task.delay(1, t)", r"debug.info(t, 1, 'f')", r"w()"]
-        Expect(Try thief.Evaluate<Bool>(r"local t = takenThread() local w = takenFunction() " +
-                                        "return not pcall(function() " + use + " end)",
-                                        "@thief.luau"), use)
-    End For
-    // Its status is anyone's to read, and a script's own threads go as ever.
-    Expect(Try thief.Evaluate<String>(r"return coroutine.status(takenThread())", "@thief.luau") ==
-           "suspended")
-    Expect(Try thief.Evaluate<Int>(r"local mine = coroutine.create(function(a) local b = coroutine.yield(a) return a + b end) " +
-                                   r"coroutine.resume(mine, 1) local _, sum = coroutine.resume(mine, 2) " +
-                                   r"local w = coroutine.wrap(function() return 3 end) " +
-                                   r"return sum + w()", "@thief.luau") == 6)
-    Expect(Try owner.Evaluate<Bool>(r"return (coroutine.resume(takenThread()))", "@owner.luau"))
-    lua.Close()
-    ExpectThrows<LuauError>(waits.Wait())
+    Local other = Try lua.NewScript("@other.luau")
+    Try owner.Run(r"local t = coroutine.create(function() coroutine.yield() end) " +
+                  r"coroutine.resume(t) keep(t)", "@owner.luau")
+    Expect(!(Try other.Evaluate<Bool>(r"return (pcall(debug.info, taken(), 1, 'f'))",
+                                      "@other.luau")))
+    Expect(Try other.Evaluate<Bool>(r"return (coroutine.resume(taken()))", "@other.luau"))
+    Expect(Try other.Evaluate<String>(r"return coroutine.status(taken())", "@other.luau") == "dead")
+End Function
+
+@Test
+Function AModulesCoroutinesWorkForTheScriptsThatRequireIt() Throws LuauError
+    // Each module has an environment of its own: its generator, a helper that resumes what it's
+    // given, and a signal that keeps a thread and spawns it later all work for a script.
+    Local files: Map<String, String> = {
+        "words.luau": r"return { each = function(list) return coroutine.wrap(function() " +
+                      r"for _, w in list do coroutine.yield(w) end end) end }",
+        "helpers.luau": r"return { run = function(f, ...) local co = coroutine.create(f) " +
+                        r"return coroutine.resume(co, ...) end, " +
+                        r"close = function(co) return coroutine.close(co) end }",
+        "signal.luau": r"local Signal = {} Signal.__index = Signal " +
+                       r"function Signal.new() return setmetatable({ waiting = {} }, Signal) end " +
+                       r"function Signal.Wait(self) table.insert(self.waiting, coroutine.running()) " +
+                       r"return coroutine.yield() end " +
+                       r"function Signal.Fire(self, ...) local waiting = self.waiting " +
+                       r"self.waiting = {} for _, t in waiting do task.spawn(t, ...) end end " +
+                       r"return Signal"
+    }
+    Local options = LuauOptions()
+    options.Modules = Function(path: String): String? => files.Get(path)
+    Local lua = Try LuauState(options)
+    Local script = Try lua.NewScript("@mod.luau")
+    Expect(Try script.Evaluate<Int>(r"local words = require('./words') local n = 0 " +
+                                    r"for w in words.each({ 'a', 'b', 'c' }) do n += 1 end return n",
+                                    "@mod.luau") == 3)
+    Expect(Try script.Evaluate<Int>(r"local helpers = require('./helpers') " +
+                                    r"local _, v = helpers.run(function(a) return a * 2 end, 21) " +
+                                    r"local co = coroutine.create(function() coroutine.yield() end) " +
+                                    r"coroutine.resume(co) helpers.close(co) " +
+                                    r"return coroutine.status(co) == 'dead' and v or 0",
+                                    "@mod.luau") == 42)
+    Expect(Try script.Evaluate<Int>(r"local Signal = require('./signal') local s = Signal.new() " +
+                                    r"local got = 0 task.spawn(function() got = s:Wait() end) " +
+                                    r"s:Fire(5) return got", "@mod.luau") == 5)
+End Function
+
+@Test
+Function AWrappedCoroutineGetsEveryArgumentFromTheProgram() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run(r"f = coroutine.wrap(function(a, b, c) return a + b + c end) ran = false " +
+                r"task.spawn(coroutine.wrap(function() ran = true end))")
+    Local f = Try lua.Get<LuauFunction>("f")
+    Expect(Try f.Call<Int>(1, 2, 3) == 6)
+    Expect(Try lua.Get<Bool>("ran"))
 End Function
 
 @Test

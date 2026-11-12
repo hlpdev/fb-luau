@@ -13,6 +13,7 @@
 #include <cstring>
 #include <exception>
 #include <format>
+#include <limits>
 #include <luacode.h>
 #include <lualib.h>
 #include <Luau/CodeGen.h>
@@ -271,44 +272,6 @@ int set_environment(lua_State* stack) {
 
 namespace fbl {
 
-bool is_callers_thread(lua_State* stack, lua_State* co) {
-    if (co == stack) {
-        return true;
-    }
-    luaL_checkstack(stack, 3, "a thread's environment");
-    if (lua_checkstack(co, 1) == 0) {
-        luaL_error(stack, "not enough memory");
-    }
-    // Its main function: the deepest on its stack, or, not started, its function's slot.
-    lua_Debug info{};
-    bool found = false;
-    for (int level = 0; lua_getinfo(co, level, "f", &info) != 0; level++) {
-        if (found) {
-            lua_remove(co, -2);
-        }
-        found = true;
-    }
-    if (!found) {
-        if (lua_gettop(co) == 0 || lua_type(co, 1) != LUA_TFUNCTION) {
-            return true;
-        }
-        lua_pushvalue(co, 1);
-    }
-    lua_xmove(co, stack, 1);
-    if (lua_iscfunction(stack, -1) != 0) {
-        lua_pop(stack, 1);
-        return true;
-    }
-    lua_getfenv(stack, -1);
-    if (!push_caller_environment(stack)) {
-        lua_pop(stack, 2);
-        return true;
-    }
-    const bool same = lua_rawequal(stack, -1, -2) != 0;
-    lua_pop(stack, 3);
-    return same;
-}
-
 void check_deadline(lua_State* stack) {
     auto* state = static_cast<fbl::state_t*>(lua_callbacks(stack)->userdata);
     if (state == nullptr || state->deadline == std::chrono::steady_clock::time_point{} ||
@@ -392,7 +355,8 @@ int guarded_debug(lua_State* stack) {
     }
     if (own) {
         // A negative level stays as it is, which Luau refuses, as it does its own.
-        if (lua_type(stack, index) == LUA_TNUMBER && lua_tointeger(stack, index) >= 0) {
+        if (lua_type(stack, index) == LUA_TNUMBER && lua_tointeger(stack, index) >= 0 &&
+            lua_tointeger(stack, index) < std::numeric_limits<int>::max()) {
             lua_pushinteger(stack, lua_tointeger(stack, index) + 1);
             lua_replace(stack, index);
         } else if (traceback && lua_type(stack, index) == LUA_TNONE) {
@@ -404,69 +368,6 @@ int guarded_debug(lua_State* stack) {
     lua_insert(stack, 1);
     lua_call(stack, lua_gettop(stack) - 1, LUA_MULTRET);
     return lua_gettop(stack);
-}
-
-// coroutine.resume and coroutine.close, Luau's own, their upvalue, refusing a thread of another
-// script's environment, as a script that kept another's could end or drive it.
-int guarded_coroutine(lua_State* stack) {
-    if (lua_type(stack, 1) == LUA_TTHREAD &&
-        !fbl::is_callers_thread(stack, lua_tothread(stack, 1))) {
-        luaL_error(stack, "a thread of another script's can't be resumed or closed");
-    }
-    const int count = lua_gettop(stack);
-    lua_pushvalue(stack, lua_upvalueindex(1));
-    lua_insert(stack, 1);
-    lua_call(stack, count, LUA_MULTRET);
-    return lua_gettop(stack);
-}
-
-// What a function coroutine.wrap made is called as: Luau's, its first upvalue, refused when the
-// function it wraps, its second, is of another environment than the caller's.
-int guarded_wrapped(lua_State* stack) {
-    lua_pushvalue(stack, lua_upvalueindex(2));
-    if (lua_iscfunction(stack, -1) == 0) {
-        lua_getfenv(stack, -1);
-        if (push_caller_environment(stack) && lua_rawequal(stack, -1, -2) == 0) {
-            luaL_error(stack, "a thread of another script's can't be resumed");
-        }
-        lua_settop(stack, -3);
-    }
-    lua_pop(stack, 1);
-    const int count = lua_gettop(stack);
-    lua_pushvalue(stack, lua_upvalueindex(1));
-    lua_insert(stack, 1);
-    lua_call(stack, count, LUA_MULTRET);
-    return lua_gettop(stack);
-}
-
-// coroutine.wrap: Luau's, its upvalue, whose function is wrapped in guarded_wrapped.
-int guarded_wrap(lua_State* stack) {
-    luaL_checktype(stack, 1, LUA_TFUNCTION);
-    lua_settop(stack, 1);
-    lua_pushvalue(stack, lua_upvalueindex(1));
-    lua_pushvalue(stack, 1);
-    lua_call(stack, 1, 1);
-    lua_pushvalue(stack, 1);
-    lua_pushcclosurek(stack, guarded_wrapped, "wrap", 2, nullptr);
-    return 1;
-}
-
-// Puts the guarded resume, close, and wrap in the coroutine library, when the State has it.
-void guard_coroutines(lua_State* stack) {
-    lua_getglobal(stack, LUA_COLIBNAME);
-    if (lua_type(stack, -1) != LUA_TTABLE) {
-        lua_pop(stack, 1);
-        return;
-    }
-    for (const char* name : { "resume", "close" }) {
-        lua_getfield(stack, -1, name);
-        lua_pushcclosurek(stack, guarded_coroutine, name, 1, nullptr);
-        lua_setfield(stack, -2, name);
-    }
-    lua_getfield(stack, -1, "wrap");
-    lua_pushcclosurek(stack, guarded_wrap, "wrap", 1, nullptr);
-    lua_setfield(stack, -2, "wrap");
-    lua_pop(stack, 1);
 }
 
 // Puts guarded_debug in place of debug.info and debug.traceback, when the State has the library.
@@ -508,7 +409,6 @@ int set_up(lua_State* stack) {
     open(stack, *state, FBL_LIBRARY_MATH, LUA_MATHLIBNAME, luaopen_math);
     open(stack, *state, FBL_LIBRARY_DEBUG, LUA_DBLIBNAME, luaopen_debug);
     guard_debug(stack);
-    guard_coroutines(stack);
     open(stack, *state, FBL_LIBRARY_UTF8, LUA_UTF8LIBNAME, luaopen_utf8);
     open(stack, *state, FBL_LIBRARY_BIT32, LUA_BITLIBNAME, luaopen_bit32);
     open(stack, *state, FBL_LIBRARY_BUFFER, LUA_BUFFERLIBNAME, luaopen_buffer);

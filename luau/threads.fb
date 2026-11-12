@@ -630,7 +630,6 @@ Function ThreadAt(slots: LuauSlots, index: Int32, name: String): LuauThread Thro
     Local type = slots.TypeAt(index)
     If type == FBL_TYPE_THREAD
         Local given = Try LuauThread.FromLuau(slots, index)
-        Try ThreadIsCallers(slots, index, name)
         Local status = given.Status
         If status != LuauThreadStatus.SUSPENDED
             Throw LuauError(LuauErrorKind.RUNTIME,
@@ -648,16 +647,6 @@ Function ThreadAt(slots: LuauSlots, index: Int32, name: String): LuauThread Thro
     Local made = Try LuauThread.FromLuau(slots, slots.Count() - 1)
     slots.Remove(slots.Count() - 1)
     Return made
-End Function
-
-/// Nothing when the thread in slot `index` is the calling script's own, by its main function's
-/// environment, as a script that kept another's thread could otherwise end or drive it.
-Function ThreadIsCallers(slots: LuauSlots, index: Int32, name: String) Throws LuauError
-    Local callers = fbl_thread_is_callers(slots.Owner.Live(), slots.Frame, index)
-    If callers == 0
-        Throw LuauError(LuauErrorKind.RUNTIME, "'{name}' can't take a thread of another script's")
-    End If
-    If callers < 0 Then Throw LuauError(LuauErrorKind.MEMORY, "not enough memory")
 End Function
 
 /// The seconds a script asks a task function to wait, from slot `index`, nil as none, kept to what
@@ -733,7 +722,6 @@ End Function
 Function TaskCancel(slots: LuauSlots): Int32
     Try
         Local thread = Try slots.Argument<LuauThread>(0, "cancel")
-        Try ThreadIsCallers(slots, 0, "cancel")
         Try thread.Close()
         Return slots.NoResult()
     Catch error

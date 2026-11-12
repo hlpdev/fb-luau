@@ -12,7 +12,6 @@ Package Extern "C" Lib "luau_native"
     Function fbl_thread_current(state: UInt64, frame: Int32): Int32
     Function fbl_thread_status(state: UInt64, frame: Int32, slot: Int32): Int32
     Function fbl_thread_waits_in(state: UInt64, frame: Int32, slot: Int32): Int64
-    Function fbl_thread_is_callers(state: UInt64, frame: Int32, slot: Int32): Int32
     Function fbl_thread_id(state: UInt64, frame: Int32, slot: Int32): UInt64
     Function fbl_thread_can_yield(state: UInt64, frame: Int32): Int32
     Function fbl_thread_resume(state: UInt64, frame: Int32, slot: Int32, raise: Int32,

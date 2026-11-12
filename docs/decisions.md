@@ -468,3 +468,21 @@ Written while the PC was kept free for the user: none of it built or run until t
   fuzzer fails when it moves in an input, and every C++ test's State checks it's 0 as it closes,
   so the shim's first rule is a finding though the export gives a status the API has. The new
   fuzz targets and the exports not yet fuzzed are 0.1.1's.
+
+## The fifth review, on dev/review-5 (2026-11-12)
+
+- **The thread fence of 101 is out whole (123):** coroutine.resume, close, wrap, and finally, and
+  task.spawn, defer, delay, and cancel are Luau's and the package's own again, with no check of
+  whose thread it is. It refused ordinary module code (require gives each module an environment
+  of its own, so a module's generator, a helper resuming what it's given, and a Signal's Wait),
+  it was bypassed wherever the guarded function had no Luau caller, and the wrapped call popped
+  one value too many with no caller. What stays: debug.info's levels and thread argument checked
+  by environment, and runners refused. A thread a script hands to another's code is theirs to
+  resume or close, as a function it hands over is theirs to call; mods that mustn't touch each
+  other get a State each (125). fbl_thread_is_callers is gone.
+- **A check that reaches a `type function` is refused (124),** a "TypeFunction" diagnostic at
+  each, found in the parse before the solver, so none is run: a type function's print, types.*,
+  and nested calls ran in the host's strings, arena, and native stack, which no limit held. The
+  heap limit of 109 stays as a second fence.
+- **An own level of INT_MAX isn't shifted (128),** which would overflow; Luau refuses it.
+
