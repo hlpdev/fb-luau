@@ -233,3 +233,27 @@ TEST_CASE("a time budget past what the clock holds is no overflow") {
     const test_state_t lua(options);
     CHECK(lua.run("local n = 0 for i = 1, 1000 do n += i end") == FBL_OK);
 }
+
+TEST_CASE("loadstring refuses a source past the memory left, and keeps to the budget") {
+    fbl_state_options_t options = default_options();
+    options.load_string = true;
+    options.memory_limit = int64_t{ 2 } * 1024 * 1024;
+    options.time_budget = 20000;
+    const test_state_t lua(options);
+    CHECK(lua.run("loadstring(string.rep('x', 1200000))") ==
+          FBL_RUNTIME);
+    CHECK(lua.run("loadstring(string.rep('local a = 1 ', 2))") == FBL_OK);
+    CHECK(lua.run("while true do loadstring('return 1') end") == FBL_TIMEOUT);
+}
+
+TEST_CASE("freezing reaches every table in the globals' tables") {
+    const test_state_t lua;
+    REQUIRE(lua.run("Config = { Graphics = { Shadows = true, Modes = { 'low' } } } "
+                    "Config.Self = Config") == FBL_OK);
+    REQUIRE(fbl_sandbox_freeze(lua.handle) == FBL_OK);
+    CHECK(lua.run("Config.Graphics.Shadows = false") == FBL_RUNTIME);
+    CHECK(lua.run("table.insert(Config.Graphics.Modes, 'high')") == FBL_RUNTIME);
+    CHECK(lua.run("assert(Config.Graphics.Shadows and Config.Self == Config)") == FBL_OK);
+    // A script's own tables are its own.
+    CHECK(lua.run("local t = {} t.x = 1") == FBL_OK);
+}

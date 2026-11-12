@@ -11,9 +11,11 @@
 extern "C" {
 #endif
 
-// Freezes the State's globals and every library in them, and the string metatable, and marks the
-// globals safe for Luau's fast paths: from then on nothing changes them. Freezing it again does
-// nothing. A status.
+// Freezes the State's globals, and every table reachable from them through tables' fields, every
+// library and a program's `Config.Graphics` alike, but not through metatables or functions, and
+// the string metatable, and marks the globals safe for Luau's fast paths: from then on nothing
+// changes them. A table scripts share and write is given by a function or an object instead.
+// Freezing it again does nothing. A status.
 FBL_API int32_t fbl_sandbox_freeze(uint64_t state);
 
 // Whether the State is frozen: 1 or 0, or -1 for a handle that isn't a State's.

@@ -189,3 +189,20 @@ TEST_CASE("an error with no value never gives its slot to another reference") {
     }
     CHECK(fbl_frame_close(lua.handle, frame));
 }
+
+TEST_CASE("with a memory limit, garbage alone doesn't reach it") {
+    fbl_state_options_t options = default_options();
+    options.memory_limit = int64_t{ 4 } * 1024 * 1024;
+    const test_state_t lua(options);
+    // What's live is 60% of the limit, and a loop makes ten times the limit in garbage.
+    REQUIRE(lua.run("kept = buffer.create(2500000)") == FBL_OK);
+    CHECK(lua.run("for i = 1, 4000 do local t = table.create(1000, i) end") == FBL_OK);
+}
+
+TEST_CASE("after a call meets the memory limit, a call that needs little runs") {
+    fbl_state_options_t options = default_options();
+    options.memory_limit = int64_t{ 2 } * 1024 * 1024;
+    const test_state_t lua(options);
+    CHECK(lua.run("local t = {} for i = 1, 1e7 do t[i] = { i } end") == FBL_MEMORY);
+    CHECK(lua.run("local t = { 1, 2, 3 } assert(#t == 3)") == FBL_OK);
+}

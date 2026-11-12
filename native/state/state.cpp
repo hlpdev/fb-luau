@@ -126,6 +126,8 @@ int collect_garbage(lua_State* stack) {
     return 1;
 }
 
+void check_deadline(lua_State* stack);
+
 // Pushes the environment of the function at `level` above the C function running, or the
 // globals' for a C function's, as a C function's own is its creator's globals.
 void push_caller_environment(lua_State* stack, int level) {
@@ -150,6 +152,13 @@ int load_string(lua_State* stack) {
     size_t length = 0;
     const char* source = luaL_checklstring(stack, 1, &length);
     const char* name = luaL_optstring(stack, 2, "=loadstring");
+    // The compiler's memory isn't the State's, so a source bigger than what the limit leaves is
+    // refused before it's compiled.
+    if (state != nullptr && state->memory_limit > 0 &&
+        std::cmp_greater(length, state->memory_limit - state->memory_used)) {
+        luaL_error(stack, "a source of %llu bytes is more than the State's memory has left",
+                   static_cast<unsigned long long>(length));
+    }
     lua_settop(stack, 2);
     luaL_checkstack(stack, 4, "loadstring");
     push_caller_environment(stack, 1);
@@ -161,6 +170,8 @@ int load_string(lua_State* stack) {
     if (bytecode == nullptr) {
         luaL_error(stack, "not enough memory to compile");
     }
+    // A compile can't be interrupted, so the budget's looked at once it's done.
+    check_deadline(stack);
     lua_State* loader = lua_newthread(stack);
     lua_pushvalue(stack, 3);
     lua_xmove(stack, loader, 1);
@@ -221,12 +232,8 @@ int set_environment(lua_State* stack) {
     return 1;
 }
 
-// The interrupt, at Luau's safe points: past the running call's deadline, it raises the timeout,
-// and again at each one after, so a pcall can't keep the script going, until the call returns.
-void interrupt(lua_State* stack, int gc) {
-    if (gc >= 0) {
-        return;
-    }
+// Raises the timeout when the running call is past its deadline.
+void check_deadline(lua_State* stack) {
     auto* state = static_cast<fbl::state_t*>(lua_callbacks(stack)->userdata);
     if (state == nullptr || state->deadline == std::chrono::steady_clock::time_point{} ||
         std::chrono::steady_clock::now() < state->deadline) {
@@ -235,6 +242,15 @@ void interrupt(lua_State* stack, int gc) {
     state->timed_out = true;
     luaL_error(stack, "the call went past its time budget of %lld microseconds",
                static_cast<long long>(state->time_budget.count()));
+}
+
+// The interrupt, at Luau's safe points: past the running call's deadline, it raises the timeout,
+// and again at each one after, so a pcall can't keep the script going, until the call returns.
+void interrupt(lua_State* stack, int gc) {
+    if (gc >= 0) {
+        return;
+    }
+    check_deadline(stack);
 }
 
 // Opens one of Luau's libraries, `name` by `function`, when the State's options have its bit.
@@ -503,7 +519,17 @@ int32_t settle(state_t& state, lua_State* thread, int status) noexcept {
     // An error the interrupt raised, or any the timeout led to, is the timeout.
     const int32_t kind =
         state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
-    return take_error(state, thread, kind);
+    take_error(state, thread, kind);
+    collect_after(state, kind);
+    return kind;
+}
+
+void collect_after(state_t& state, int32_t kind) noexcept {
+    // Past the limit, the collector stops, and every allocation fails until it runs: an outermost
+    // call that met the limit collects all of it before it returns.
+    if (kind == FBL_MEMORY && state.depth == 0 && state.memory_limit > 0) {
+        lua_gc(state.main, LUA_GCCOLLECT, 0);
+    }
 }
 
 int32_t take_error(state_t& state, lua_State* thread, int32_t kind,
@@ -590,6 +616,13 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
             return 0;
         }
         state->current = state->main;
+        // Luau collects toward a heap of twice what's live, and never because an allocation
+        // failed, so with a limit, garbage alone would reach it once what's live passed half of
+        // it: the collector aims at a quarter more than what's live, and works twice as hard.
+        if (state->memory_limit > 0) {
+            lua_gc(state->main, LUA_GCSETGOAL, 125);
+            lua_gc(state->main, LUA_GCSETSTEPMUL, 400);
+        }
         try {
             const std::scoped_lock lock(slots_mutex);
             // Room first, so nothing's taken when it can't be had: a new slot, and a free one for

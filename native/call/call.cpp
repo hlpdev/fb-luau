@@ -120,6 +120,7 @@ int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, boo
     if (reset) {
         lua_resetthread(co);
     }
+    collect_after(state, kind);
     return status == LUA_YIELD ? FBL_YIELD : kind;
 }
 

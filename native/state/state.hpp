@@ -147,6 +147,10 @@ int protect(state_t& state, lua_State* thread, int arguments, int results,
         [](lua_State* stack, void* data) { return (*static_cast<Work*>(data))(stack); }, &work);
 }
 
+// After an error of `kind`: a MEMORY error, when no call's running, collects everything, as the
+// collector stops past the limit, and the State then has room again.
+void collect_after(state_t& state, int32_t kind) noexcept;
+
 // What a protect()'s status is to the program: FBL_OK, or the error, kept as the State's, its
 // value taken off `thread`'s stack.
 int32_t settle(state_t& state, lua_State* thread, int status) noexcept;

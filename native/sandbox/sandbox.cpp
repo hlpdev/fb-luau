@@ -7,9 +7,46 @@
 
 namespace {
 
-// Freezes `state`'s main globals, under lua_cpcall, which luaL_sandbox needs memory for.
+// Freezes `state`'s main globals, under lua_cpcall, which luaL_sandbox needs memory for, and then
+// every table reachable from them through tables' fields, each once, as luaL_sandbox freezes only
+// those in the globals themselves: a program's `Config.Graphics` too. Metatables and functions'
+// upvalues aren't followed.
 int freeze(lua_State* stack) {
     luaL_sandbox(stack);
+    // The tables seen, as keys, and those still to go through, by number from 1.
+    lua_newtable(stack);
+    const int seen = lua_gettop(stack);
+    lua_newtable(stack);
+    const int queue = lua_gettop(stack);
+    lua_pushvalue(stack, LUA_GLOBALSINDEX);
+    lua_pushboolean(stack, 1);
+    lua_rawset(stack, seen);
+    lua_pushvalue(stack, LUA_GLOBALSINDEX);
+    lua_rawseti(stack, queue, 1);
+    int queued = 1;
+    for (int next = 1; next <= queued; next++) {
+        lua_rawgeti(stack, queue, next);
+        const int table = lua_gettop(stack);
+        lua_pushnil(stack);
+        while (lua_next(stack, table) != 0) {
+            if (lua_istable(stack, -1)) {
+                lua_pushvalue(stack, -1);
+                lua_rawget(stack, seen);
+                const bool known = !lua_isnil(stack, -1);
+                lua_pop(stack, 1);
+                if (!known) {
+                    lua_setreadonly(stack, -1, 1);
+                    lua_pushvalue(stack, -1);
+                    lua_pushboolean(stack, 1);
+                    lua_rawset(stack, seen);
+                    lua_pushvalue(stack, -1);
+                    lua_rawseti(stack, queue, ++queued);
+                }
+            }
+            lua_pop(stack, 1);
+        }
+        lua_pop(stack, 1);
+    }
     return 0;
 }
 
