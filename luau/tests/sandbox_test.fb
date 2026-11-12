@@ -194,9 +194,10 @@ Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws Lu
     Local victim = Try lua.NewScript("@victim.luau")
     Try spy.Run(r"local bus = require('./bus') bus.on(function() " +
                 r"if how == 'fenv' then return getfenv(level) end " +
-                r"return debug.info(level, 'f') end)", "@spy.luau")
+                r"if how == 'info' then return debug.info(level, 'f') end " +
+                r"return debug.info(tostring(level), 'f') end)", "@spy.luau")
     For level In [2, 3]
-        For how In ["fenv", "info"]
+        For how In ["fenv", "info", "string"]
             Try spy.Run("how = '" + how + "' level = {level}")
             Local error =
                 ExpectThrows<LuauError>(victim.Run(r"local bus = require('./bus') bus.fire()",
@@ -208,4 +209,84 @@ Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws Lu
     // Its own level is its own.
     Try spy.Run("how = 'fenv' level = 1")
     Try victim.Run(r"local bus = require('./bus') bus.fire()", "@victim.luau")
+End Function
+
+/// What a test keeps of one script's to give another: a thread and a function.
+Class Kept
+    Field Thread: LuauThread? = Null
+    Field Wrapped: LuauFunction? = Null
+End Class
+
+@Test
+Function AnotherScriptsThreadCantBeDrivenNorRead() Throws LuauError
+    Local lua = LuauState()
+    Local waits = lua.Start()
+    Local kept = Kept()
+    Try lua.SetFunction("keep", Function(thread: LuauThread, wrapped: LuauFunction)
+        kept.Thread = thread
+        kept.Wrapped = wrapped
+    End Function)
+    Try lua.SetFunction("takenThread", Function(): LuauThread Throws LuauError
+        Local thread = kept.Thread
+        If thread == Null Then Throw LuauError(LuauErrorKind.RUNTIME, "none kept")
+        Return thread
+    End Function)
+    Try lua.SetFunction("takenFunction", Function(): LuauFunction Throws LuauError
+        Local wrapped = kept.Wrapped
+        If wrapped == Null Then Throw LuauError(LuauErrorKind.RUNTIME, "none kept")
+        Return wrapped
+    End Function)
+    Local owner = Try lua.NewScript("@owner.luau")
+    Local thief = Try lua.NewScript("@thief.luau")
+    Try owner.Run(
+        r"local t = coroutine.create(function() coroutine.yield() end) coroutine.resume(t) " +
+        r"keep(t, coroutine.wrap(function() coroutine.yield(1) end))", "@owner.luau")
+    For use In [r"coroutine.resume(t)", r"coroutine.close(t)", r"task.cancel(t)", r"task.spawn(t)",
+                r"task.defer(t)", r"task.delay(1, t)", r"debug.info(t, 1, 'f')", r"w()"]
+        Expect(Try thief.Evaluate<Bool>(r"local t = takenThread() local w = takenFunction() " +
+                                        "return not pcall(function() " + use + " end)",
+                                        "@thief.luau"), use)
+    End For
+    // Its status is anyone's to read, and a script's own threads go as ever.
+    Expect(Try thief.Evaluate<String>(r"return coroutine.status(takenThread())", "@thief.luau") ==
+           "suspended")
+    Expect(Try thief.Evaluate<Int>(r"local mine = coroutine.create(function(a) local b = coroutine.yield(a) return a + b end) " +
+                                   r"coroutine.resume(mine, 1) local _, sum = coroutine.resume(mine, 2) " +
+                                   r"local w = coroutine.wrap(function() return 3 end) " +
+                                   r"return sum + w()", "@thief.luau") == 6)
+    Expect(Try owner.Evaluate<Bool>(r"return (coroutine.resume(takenThread()))", "@owner.luau"))
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function
+
+@Test
+Function ADefaultStateEndsARunawayScript() Throws LuauError
+    // Without asking, a State's memory and each call's time are limited.
+    Local options = LuauOptions()
+    Expect(options.MemoryLimit == 256 * 1024 * 1024 && options.TimeBudget == 10.Seconds)
+    Local lua = LuauState()
+    Local hoard = ExpectThrows<LuauError>(lua.Run("local t = {{}} for i = 1, 1e9 do " +
+                                                  "t[i] = string.rep('x', 4096) .. i end"))
+    Expect(hoard?.Kind == LuauErrorKind.MEMORY)
+    Local spin = ExpectThrows<LuauError>(lua.Run("while true do end"))
+    Expect(spin?.Kind == LuauErrorKind.TIMEOUT)
+    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
+End Function
+
+@Test
+Function TheSandboxPresetHasWhatItSays() Throws LuauError
+    Local options = LuauOptions.Sandbox()
+    Expect(options.MemoryLimit == 64 * 1024 * 1024 && options.TimeBudget == 50.Milliseconds)
+    Expect(options.MostWaiting == 1000 && options.Libraries == LuauLibraries.ALL)
+    Expect(options.CollectGarbage == LuauCollectGarbage.COUNT)
+    Expect(!options.LoadString && !options.Environments)
+    Expect(options.NativeCode == LuauNativeCode.OFF)
+    Local lua = Try LuauState(options)
+    Expect(Try lua.Evaluate<Bool>("return loadstring == nil and getfenv == nil and setfenv == nil"))
+    Expect(ExpectThrows<LuauError>(lua.Run("while true do end"))?.Kind == LuauErrorKind.TIMEOUT)
+    Expect(ExpectThrows<LuauError>(lua.Run("local t = {{}} for i = 1, 1e9 do " +
+                                           "t[i] = string.rep('x', 1048576) .. i end"))?.Kind ==
+           LuauErrorKind.MEMORY)
+    Local _script = Try lua.NewScript()
+    Expect(lua.IsFrozen)
 End Function

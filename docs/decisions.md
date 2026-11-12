@@ -407,3 +407,72 @@ Written while the PC was kept free for the user: none of it built or run until t
   are out: the Throws Error lambda, the Dog that couldn't list LuauObject, the drivers' array
   instead of a Map of Weak, and the compile test, now a run that Register's panic names.
   `@LuauAction` stays, as it says what a Method is.
+
+## The fourth review, on dev/review-4 (2026-11-12)
+
+- **A level given as a numeric string is checked as its integer (100),** as Luau takes one.
+- **Any thread's levels go through the environment check, and a thread belongs to its main
+  function's environment (101):** coroutine.resume, close, and a wrapped coroutine's call, and
+  task.spawn, defer, delay, and cancel given a thread, refuse another script's; its status is
+  anyone's to read. The coroutine library's resume, close, and wrap are the shim's, over Luau's.
+  With no scripts of their own, every thread's environment is the shared one, and nothing
+  changes.
+- **The bytecode example's game has its public key compiled in (102),** `Embed("game.pub")`, and
+  the build is given its private key from outside what it writes; keys/build.key is the
+  example's own, which a real game's never is. A key of the wrong length stays a panic.
+- **A turn resumes the entry it collected (103),** by RefEquals, never a newer wait of the same
+  thread's.
+- **A stale wait of a thread's own is dropped wherever a wait is checked (104),** in CanWait, so an
+  Async program function a thread calls after a script went around its wait isn't "waits
+  already".
+- **A turn's clock starts where its time is read (105);** the plan says a wait made outside a turn
+  is at most two ticks late.
+- **A driver destroyed with no heir gives its waits to ThreadError (106),** as HandedOver does.
+- **The tests (107):** the hog's bystanders spin 10 ms each, so one is resumed with the tick's
+  budget nearly spent, which a shared deadline would end; 98's second half asserts `done`.
+- **A native stack guard, found on the way:** writing 61's test, string.gsub's callbacks nested in
+  each other ended the test process with a stack overflow, 0xC00000FD, at about 135 levels on
+  Windows's 1 MB main thread, Release too, short of Luau's 200 C calls: any script could end a
+  game. The shim's interrupt, which every Luau call reaches, now raises a stack overflow error
+  128 KB short of the thread's stack's end, which each thread asks its platform for once
+  (VirtualQuery's reservation, pthread_getattr_np, pthread_get_stackaddr_np); where it can't,
+  past 384 KB from the call's outermost entry. A fixed 384 KB from the entry, tried first, stopped
+  Luau's own pm.luau, 60 nested gsubs, at about 50. On a thread with a small stack, a script nests
+  less: the thread's stack is the limit, not Luau's 200 C calls. It also makes 61's failure, a
+  resume refused at Luau's 200 C calls, unreachable from a script where the stack is small, so
+  61's test is this one's.
+- **An Async program function's String argument is a copy (108),** noted in the guide, with
+  LuauValue or LuauTable for large ones.
+- **Checking runs a mod's type functions under two limits (109):** Luau 0.746 always parses
+  `type function`, and its solver runs the body in a VM whose heap had no limit. LuauChecker
+  takes `typeFunctionMemory`, 64 MB by default, Luau's DebugLuauTypeFunctionRuntimeHeapLimit,
+  which is the process's: the smallest any checker asks for is every checker's, lowered only
+  while no check runs (a shared lock each check holds). A time limit of 0, "as long as it
+  takes", is refused, so a loop in a type function always ends. The C API's fbl_check_new takes
+  the heap limit.
+- **The modded game survives each bad mod (110):** its check and load are caught for it alone,
+  as a LuauError, and a mod that fails is dropped with the tick hooks it gave; four more mods
+  show it, one for each way a mod failed to load before (a MEMORY error, a loop with its
+  checking off, an error after hooking the tick, and two init files), which ctest's regular
+  expression expects, beside the good ones playing.
+- **Sandboxed by default, as the approved plan said (112):** LuauOptions' MemoryLimit is 256 MB
+  and TimeBudget 10 seconds unless the program sets them, 0 being none by its own choice, so a
+  runaway script can't take a program with it unasked; the rest of the sandbox was already the
+  default. `LuauOptions.Sandbox()` is the mods' preset: 64 MB, 50 ms, 1,000 waits, and the
+  defaults' libraries, collectgarbage, loadstring, getfenv, and native code said again, so a
+  mod keeps them whatever the defaults become. Every library stays, each being safe for a
+  script of its own. The modded game starts from it; the conformance runner sets no limits, as
+  Luau's has none.
+- **The guide says what a pcall catches and whose memory it is (113):** a script's pcall catches
+  "not enough memory", as Luau's does, but not a timeout; the memory limit is the State's, so a
+  hoarding mod fails the others' calls, and a State for each mod is how to give each its own.
+- **An object of a Class with its own `==` is documented (114),** in the guide and objects.fb,
+  until 1.3.3 lets finding 2 be fixed.
+- **Compiling ahead sets Luau's flags (117),** as every entry that reaches Luau does, so bytes
+  compiled before any State are a State's, and a compile on one thread doesn't race the first
+  State on another. The bytecode tests' first case compares bytes from before a State with
+  bytes from after.
+- **An exception at the shim's edge is counted (118),** `fbl_core_escaped`, the process's: every
+  fuzzer fails when it moves in an input, and every C++ test's State checks it's 0 as it closes,
+  so the shim's first rule is a finding though the export gives a status the API has. The new
+  fuzz targets and the exports not yet fuzzed are 0.1.1's.

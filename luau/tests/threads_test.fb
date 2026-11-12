@@ -527,14 +527,16 @@ Function AHogEndsOnlyItselfAndTheOthersFinish() Throws LuauError
     Local lua = Try LuauState(options)
     Local world = Scheduler()
     world.Run(lua.Start())
-    // The hog spins just short of the budget, then waits, each tick; the bystanders each wait
-    // ten ticks.
+    // The hog spins just short of the budget, then waits, each tick; the bystanders each spin
+    // 10 ms a tick for ten ticks, so one is resumed with the tick's budget nearly spent, which
+    // one shared deadline would end.
     Try lua.Run("finished = 0 " +
-                "task.spawn(function() while true do local t = os.clock() " +
-                "while os.clock() - t < 0.025 do end task.wait() end end) " +
-                "for i = 1, 5 do task.spawn(function() for j = 1, 10 do task.wait() end " +
+                "task.spawn(function() while true do task.wait() local t = os.clock() " +
+                "while os.clock() - t < 0.025 do end end end) " +
+                "for i = 1, 5 do task.spawn(function() for j = 1, 10 do task.wait() " +
+                "local t = os.clock() while os.clock() - t < 0.01 do end end " +
                 "finished += 1 end) end")
-    For tick = 1 To 40
+    For tick = 1 To 120
         world.Tick(0.1)
     End For
     Expect(Try lua.Get<Int>("finished") == 5)
@@ -625,11 +627,72 @@ Function AWaitAScriptWentAroundIsDropped() Throws LuauError
     Expect(Try lua.Evaluate<Bool>("return got == nil"))
     // The limit isn't held by the dropped entry: two more waits fit.
     Try lua.Run("task.spawn(function() task.wait(1) end) task.spawn(function() task.wait(1) end)")
+    For tick = 1 To 12
+        world.Tick(0.1)
+    End For
     // A thread a script resumed past its wait, that waits again, replaces its old entry.
     Try lua.Run("u = coroutine.create(function() task.wait(5) task.wait(0.1) done = true end) " +
                 "coroutine.resume(u) coroutine.resume(u)")
     For tick = 1 To 5
         world.Tick(0.1)
     End For
+    Expect(Try lua.Get<Bool>("done"))
     lua.Close()
+End Function
+
+@Test
+Function AWaitAnotherThreadReplacedInTheTurnIsntResumed() Throws LuauError
+    // X and Y are due in one turn; X, first, resumes Y past its wait, and Y waits five seconds
+    // anew: the turn's entry for Y's old wait doesn't resume the new one early.
+    Local lua = LuauState()
+    Local world = Scheduler()
+    world.Run(lua.Start())
+    Try lua.Run("stage = 0 " +
+                "local y = coroutine.create(function() task.wait(0.1) stage = 1 task.wait(5) stage = 2 end) " +
+                "task.spawn(function() task.wait(0.1) coroutine.resume(y) end) " +
+                "coroutine.resume(y)")
+    For tick = 1 To 10
+        world.Tick(0.1)
+    End For
+    Expect(Try lua.Get<Int>("stage") == 1)
+    lua.Close()
+End Function
+
+@Test
+Function AThreadWithAStaleWaitCanCallAnAsyncFunction() Throws LuauError
+    // A script resumes its thread around a wait, and the thread then calls an Async program
+    // function: the stale wait doesn't make it "wait already".
+    Local lua = LuauState()
+    Local world = Scheduler()
+    world.Run(lua.Start())
+    Try lua.SetAsync("double", Function(n: Int) => Doubled(n))
+    Try lua.Run("got = 0 " +
+                "local t = coroutine.create(function() task.wait(5) got = double(21) end) " +
+                "coroutine.resume(t) coroutine.resume(t)")
+    // The Async function runs on the main scheduler, and its waiting thread's driver on world.
+    For tick = 1 To 5
+        Scheduler.Main.Step()
+        world.Tick(0.1)
+    End For
+    Expect(Try lua.Get<Int>("got") == 42)
+    lua.Close()
+End Function
+
+@Test
+Function AScriptNestingCCallsMeetsAStackOverflowErrorNotACrash() Throws LuauError
+    // string.gsub's callbacks nested in each other take native stack at each level; a thread's
+    // stack can run out before Luau's 200 C calls do, which would end the process. The State
+    // raises a stack overflow error first, which the script's pcall catches, and goes on.
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Run(
+        "local function deep(n) if n == 0 then return end " +
+        "string.gsub('x', 'x', function() deep(n - 1) end) end deep(300)"))
+    Expect(error != Null && error.Message.Contains("stack overflow"), error?.Message ?? "")
+    Expect(Try lua.Evaluate<Bool>("local function deep(n) if n == 0 then return end " +
+                                  "string.gsub('x', 'x', function() deep(n - 1) end) end " +
+                                  "return not pcall(deep, 300)"))
+    // Sixty levels, which Luau's own tests nest, are fine.
+    Try lua.Run("local function deep(n) if n == 0 then return end " +
+                "string.gsub('x', 'x', function() deep(n - 1) end) end deep(60)")
+    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
 End Function

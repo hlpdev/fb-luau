@@ -63,6 +63,10 @@ FBL_API const char* fbl_core_error(void);
 // they can't be read.
 FBL_API int64_t fbl_core_resident(void);
 
+// How many exceptions got as far as an exported function's catch, in the process, which none
+// should: every one is a bug of the library's, which tests and fuzzers watch this for.
+FBL_API int64_t fbl_core_escaped(void);
+
 #ifdef __cplusplus
 }
 #endif

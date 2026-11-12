@@ -6,8 +6,10 @@
 #include <array>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <Luau/Ast.h>
 #include <Luau/BuiltinDefinitions.h>
+#include <Luau/Common.h>
 #include <Luau/Config.h>
 #include <Luau/ConfigResolver.h>
 #include <Luau/Error.h>
@@ -20,12 +22,17 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+// Luau's heap limit for type functions' VMs, the process's.
+// NOLINTNEXTLINE(readability-identifier-naming): Luau's name.
+LUAU_FASTINT(DebugLuauTypeFunctionRuntimeHeapLimit)
 
 namespace {
 
@@ -320,6 +327,27 @@ struct checker_t {
     std::vector<diagnostic_t> diagnostics;
 };
 
+// The heap's limit of every type function's VM, Luau's and the process's. A check's type functions
+// read it as they run, so each check holds this shared, and a checker that lowers it waits for
+// them.
+std::shared_mutex type_function_heap;
+
+// Lowers the type functions' heap limit to `bytes`, where it's higher, or none.
+void limit_type_functions(int bytes) {
+    {
+        const std::shared_lock reading(type_function_heap);
+        const int now = FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value;
+        if (now > 0 && now <= bytes) {
+            return;
+        }
+    }
+    const std::unique_lock writing(type_function_heap);
+    const int now = FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value;
+    if (now <= 0 || now > bytes) {
+        FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value = bytes;
+    }
+}
+
 std::mutex checkers_mutex;
 // The checkers, by their handles, made as they're first asked for, which can't throw where it
 // can't be caught.
@@ -480,16 +508,21 @@ std::optional<std::string> text_of(const char* text) {
 
 } // namespace
 
-uint64_t fbl_check_new(int32_t mode, double seconds) try {
+uint64_t fbl_check_new(int32_t mode, double seconds, int64_t heap) try {
     if (mode < FBL_CHECK_STRICT || mode > FBL_CHECK_NOCHECK) {
         fbl::fail(fbl::formatted("{} isn't a checker's mode", mode));
         return 0;
     }
-    if (!(seconds >= 0) || seconds > 1e9) {
+    if (!(seconds > 0) || seconds > 1e9) {
         fbl::fail(fbl::formatted("{} seconds isn't a check's time limit", seconds));
         return 0;
     }
+    if (heap <= 0 || heap > std::numeric_limits<int>::max()) {
+        fbl::fail(fbl::formatted("{} bytes isn't a type function's heap limit", heap));
+        return 0;
+    }
     fbl::set_flags();
+    limit_type_functions(static_cast<int>(heap));
     const std::array<Luau::Mode, 3> modes = {
         Luau::Mode::Strict,
         Luau::Mode::Nonstrict,
@@ -624,6 +657,7 @@ int32_t fbl_check_run(uint64_t checker, const char* module) try {
         fbl::fail(fbl::formatted("'{}' isn't a module's path from the root", *path));
         return -1;
     }
+    const std::shared_lock running(type_function_heap);
     found->files.clear_wanted();
     found->diagnostics.clear();
     const std::string base = fbl::joined(*parts);

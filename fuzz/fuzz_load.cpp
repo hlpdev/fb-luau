@@ -35,6 +35,7 @@ void run(const uint8_t* data, size_t size) {
 
 // NOLINTNEXTLINE(readability-identifier-naming): libFuzzer names it.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    const no_escape_t watched;
     run(data, size);
     expect_nothing_left();
     return 0;

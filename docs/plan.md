@@ -420,8 +420,9 @@ end
   coroutine's of a call of the program's. A driver is a coroutine that, at each of its
   scheduler's ticks, reads the scheduler's time (fb 1.3.2's `Scheduler.Current.Time()`) and
   resumes what's due, what's left due going first the next tick. No wait is a timer: a wait made
-  in the driver's turn is due its seconds from the time then, and one made outside it, from the
-  driver's next turn, so a wait is never early, and at most a tick late. The State's time budget
+  in the driver's turn is due its seconds from the time then, and at most a tick late; one made
+  outside it, in a call of the program's or a thread's first resume, from the driver's next turn,
+  and at most two ticks late. A wait is never early. The State's time budget
   decides only whether another thread is resumed in a tick; each resume has the budget of its
   own, so a script that spins ends only itself. A thread's Start ends with its thread, giving what
   it still drives to the State's driver, or, with none, to ThreadError. `lua.Start()` runs until
@@ -627,7 +628,10 @@ End For
   its name, is `any`, as is what a LuauFunction, or a member added by hand, takes and gives. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
   the checker's default.
 - `Check` takes a time limit per module, as Luau's does, so a module that makes the checker work
-  too long gives a diagnostic saying so, not a hang.
+  too long gives a diagnostic saying so, not a hang; there's always one. Checking runs a module's
+  code, its `type function`s, in a VM of the solver's own, under that time limit and a heap
+  limit, 64 MB by default, and no other: Luau's heap limit is the process's, so the smallest
+  any checker asks for is every checker's.
 - It's for mod tooling: a game's mod checker, its editor support, or a command. Running mods
   doesn't need it, but it's in the same library, so a game that checks mods as it loads them can.
 

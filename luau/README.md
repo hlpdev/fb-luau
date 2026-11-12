@@ -20,8 +20,10 @@ Print(Try lua.Evaluate<Int>("return add(2, 3)"))      // 5
 - Values that cross by their types, records as tables, tables and functions as handles, and
   functions both ways, throwing ones too, with Luau's tracebacks kept.
 - Classes registered by compile-time reflection, exposing only what's marked.
-- A sandbox by default: frozen shared globals, globals of each script's own, a memory limit, a
-  time budget for each call, and no file or OS access unless the program gives it.
+- A sandbox by default, without asking: a memory limit of 256 MB and a time budget of 10
+  seconds a call, globals of each script's own over shared ones frozen at the first script, no
+  loadstring, getfenv, setfenv, or native code, and no file or OS access unless the program
+  gives it. `LuauOptions.Sandbox()` adds what mods want: 64 MB, 50 ms a call, and 1,000 waits.
 - Luau's threads on FutureBlitz's schedulers, so a script's `task.wait(2)` waits as an Await
   does, and an Async Function a script calls is waited for, once the program has called
   `lua.Start()`, which runs a State's waits until it closes.

@@ -10,6 +10,7 @@
 
 // NOLINTNEXTLINE(readability-identifier-naming): libFuzzer names it.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    const no_escape_t watched;
     int64_t length = 0;
     int32_t status = FBL_OTHER;
     // The compile options, from the input's first byte, each from 0 to 2.

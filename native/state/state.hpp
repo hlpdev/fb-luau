@@ -21,6 +21,16 @@ namespace fbl {
 // Luau thread, and Luau's own limit, LUAI_MAXCCALLS, is 200.
 constexpr int max_depth = 64;
 
+// The native stack a call into a State leaves the thread: a script that nests C calls,
+// string.gsub's callbacks in each other say, meets a stack overflow error this far from the
+// thread's stack's end, rather than run out of it, which ends the process. Room for a level
+// between two of Luau's calls, a program function a script calls, and raising the error.
+constexpr uintptr_t native_stack_reserve = uintptr_t{ 128 } * 1024;
+
+// Where the platform doesn't say where a thread's stack ends, the most a call may take from its
+// outermost entry, under the smallest thread stack a target gives by default, macOS's 512 KB.
+constexpr uintptr_t most_native_stack = uintptr_t{ 384 } * 1024;
+
 // Where a frame's values are: the thread whose stack has them, and how many values that stack had
 // below them, so its slot 0 is at stack index base + 1.
 struct frame_t {
@@ -58,6 +68,8 @@ struct state_t {
     int64_t native_functions = 0;
     // The bytes the code generator holds, as its allocation callback counts them.
     int64_t native_memory_used = 0;
+    // The lowest the native stack may go in a call, or 0 outside one.
+    uintptr_t stack_floor = 0;
     // For the tests: which allocation from now fails, counting from 0, once, or -1 for none; and
     // which of the shim's failure points from now raises, as an allocation's failing would, since
     // Luau's own pages hold small objects without asking the allocator.
@@ -230,6 +242,11 @@ private:
 // Whether a thread is one the program's calls run on, which nothing else resumes, and which can't
 // yield to anything that waits.
 bool is_runner(lua_State* thread) noexcept;
+
+// Whether the thread `co` is of the caller's environment: its main function's environment, as a
+// coroutine's is its function's, is the nearest Luau function's calling on `stack`; true when no
+// script's code calls, or the thread's main function is C, as the program's are.
+bool is_callers_thread(lua_State* stack, lua_State* co);
 
 // Marks a thread as one that runs to its end, as a runner does, like a module's as it loads.
 void mark_runner(lua_State* thread) noexcept;

@@ -11,6 +11,7 @@ Import std.collections
 Import std.core
 Import std.os
 Import std.text
+Import std.time
 Import luau
 
 // The scripts, as they are in Luau's repository.
@@ -53,6 +54,9 @@ Const NativeOnly: String[] = ["integers_regspill.luau", "native.luau"]
 // Runs one script with native code `native`: Null when it gave "OK", or what went wrong.
 Function Ran(name: String, source: UInt8[], native: LuauNativeCode): String?
     Local options = LuauOptions()
+    // No limits, as Luau's runner has none.
+    options.MemoryLimit = 0
+    options.TimeBudget = 0.Seconds
     options.CollectGarbage = LuauCollectGarbage.FULL
     options.LoadString = True
     options.Environments = True

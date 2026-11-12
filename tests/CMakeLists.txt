@@ -140,7 +140,8 @@ if(FBL_FB_TESTS)
       "negative-native-memory=a native code cap of -1 bytes is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "state-started-twice=the Luau State's driver runs already"
-      "checker-time-limit=a checker's time limit of"
+      "checker-time-limit=a checker's time limit of 0"
+      "checker-heap-limit=0 bytes isn't a type function's heap limit"
       "action-gives=Acting.Count is marked @LuauAction, but isn't"
       "throwing-shape=Throwing.Take is marked @LuauExpose, but isn't"
       "shadowed=Shadowed.Harm is marked @LuauExpose, but isn't")
@@ -196,7 +197,9 @@ if(FBL_FB_TESTS)
   add_test(NAME examples.modded_game
            COMMAND "${FBL_FB}" --color never run "${PROJECT_SOURCE_DIR}/examples/modded_game")
   set_tests_properties(examples.modded_game PROPERTIES
-                       PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*its waits ended: True")
+                       PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*greedy is loaded.*hoarder isn't loaded: MEMORY.*looping isn't loaded: TIMEOUT.*spawner is loaded.*thrower isn't loaded: RUNTIME.*the thrower gives up.*twofold isn't loaded: RUNTIME.*2 files.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*its waits ended: True")
+  # No tick of the thrower's, whose hook went with it.
+  set_tests_properties(examples.modded_game PROPERTIES FAIL_REGULAR_EXPRESSION "thrower ticks")
 
   # @LuauExpose on a Method that gives nothing, @LuauAction's: since fb 1.3.1 it compiles, and
   # Register names it in a panic.

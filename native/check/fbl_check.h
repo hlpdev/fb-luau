@@ -24,8 +24,11 @@ extern "C" {
 #define FBL_CHECK_WARNING 1
 
 // A new checker, whose modules without a "--!" line are of `mode`, and which checks each module
-// for at most `seconds`, or for as long as it takes for 0; or 0, with fbl_core_error saying why.
-FBL_API uint64_t fbl_check_new(int32_t mode, double seconds);
+// for at most `seconds`, above 0; or 0, with fbl_core_error saying why. Checking runs a module's
+// type functions, its code, in a VM of the checker's own, which the time limit stops, and whose
+// heap is at most `heap` bytes, above 0, at most 2 GB: Luau's limit is the process's, so the
+// smallest any checker's asked for is every checker's, from when it's made.
+FBL_API uint64_t fbl_check_new(int32_t mode, double seconds, int64_t heap);
 
 // Lets go of a checker. A handle that isn't a checker's does nothing.
 FBL_API void fbl_check_free(uint64_t checker);

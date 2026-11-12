@@ -45,6 +45,18 @@ int32_t run(const test_state_t& lua, const std::vector<uint8_t>& bytecode, doubl
 
 } // namespace
 
+// First, as it's the one made before any State in the process, which Catch runs in order.
+TEST_CASE("source compiled before any State is compiled as after one") {
+    const std::string_view source =
+        "local t = { 1, 2, 3 }\n"
+        "local function sum(...) local n = 0 for _, v in ... do n += v end "
+        "return n end\n"
+        "return sum(ipairs(t)) + #`{t[1]}` + vector.create(1, 2, 3).x\n";
+    const std::vector<uint8_t> before = compiled(source);
+    const test_state_t lua;
+    CHECK(compiled(source) == before);
+}
+
 TEST_CASE("source compiled ahead loads and runs in a State") {
     const test_state_t lua;
     const std::vector<uint8_t> bytecode =

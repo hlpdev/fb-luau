@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <exception>
 #include <format>
 #include <string>
@@ -30,5 +31,9 @@ int32_t escaped() noexcept;
 // but the ones Luau calls experimental. Once in the process, whichever thread asks first; each
 // State asks before it's made, as the flags are globals every State reads.
 void set_flags() noexcept;
+
+// The lowest address this thread's native stack may be used down to, with `reserve` bytes left
+// below it, or 0 when the platform doesn't say where the stack ends. Found once a thread.
+uintptr_t stack_floor(uintptr_t reserve) noexcept;
 
 } // namespace fbl

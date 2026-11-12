@@ -93,19 +93,27 @@ Public Class LuauChecker
     /// between its parts, like "mods/doors/init.luau" or "mods/.luaurc", or Null when there's no
     /// such file; an error it throws is the check's. A module without a `--!` line is checked as
     /// `mode`, and each for at most `timeLimit`, 10 seconds for Null, past which it gives a
-    /// diagnostic of "TimeLimit" rather than run on; 0 checks for as long as it takes.
+    /// diagnostic of "TimeLimit" rather than run on.
+    ///
+    /// Checking runs a module's code: a `type function`'s body, which Luau's solver runs in a VM
+    /// of its own as it checks. The time limit stops it, and its heap is at most
+    /// `typeFunctionMemory` bytes, 64 MB by default, past which the type function fails, a
+    /// diagnostic; no other limit of a State's applies. Luau's heap limit is the process's, so
+    /// the smallest any checker's asked for is every checker's, from when it's made, which waits
+    /// for any check running on another thread.
     ///
     /// # Panics
     ///
-    /// For a time limit below 0.
+    /// For a time limit that isn't above 0, and a heap limit that isn't above 0 or is past 2 GB.
     @PanicsAtCaller
     Public New(reader: Func(String): String? Throws Error,
-               mode: LuauCheckMode = LuauCheckMode.NONSTRICT, timeLimit: Duration? = Null)
+               mode: LuauCheckMode = LuauCheckMode.NONSTRICT, timeLimit: Duration? = Null,
+               typeFunctionMemory: Int64 = 64 * 1024 * 1024)
         Local limit = timeLimit ?? 10.Seconds
-        If limit < 0.Seconds Then Panic("a checker's time limit of {limit} is below 0")
+        If limit <= 0.Seconds Then Panic("a checker's time limit of {limit} isn't above 0")
         Self.reader = reader
         Local modes = [FBL_CHECK_STRICT, FBL_CHECK_NONSTRICT, FBL_CHECK_NOCHECK]
-        handle = fbl_check_new(modes[mode As Int], limit.TotalSeconds)
+        handle = fbl_check_new(modes[mode As Int], limit.TotalSeconds, typeFunctionMemory)
         If handle == 0 Then Panic(LastError())
     End New
 

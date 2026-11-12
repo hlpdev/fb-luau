@@ -28,6 +28,9 @@ uint8_t* fbl_bytecode_compile(const uint8_t* source, int64_t length, int32_t opt
             return nullptr;
         }
     }
+    // Luau's flags as a State has them, which the compiler reads too, whether or not a State's
+    // been made.
+    fbl::set_flags();
     lua_CompileOptions options{};
     options.optimizationLevel = optimization;
     options.debugLevel = debug;

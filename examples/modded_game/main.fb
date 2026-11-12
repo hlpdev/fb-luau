@@ -1,8 +1,8 @@
 // A toy game with mods, the shape a game's modding takes: the game registers what mods reach and
 // sets what they call, checks each mod against that API with Luau's type checker before it loads
 // it, runs each in a script of its own, sandboxed, with a memory limit and a time budget, and
-// drives their waits on its own scheduler, a tick at a time. A mod that breaks the rules is
-// stopped, and the game goes on.
+// drives their waits on its own scheduler, a tick at a time. A mod that breaks the rules, as it's
+// checked, as it loads, or in a call of the game's, is dropped, and the game goes on.
 
 Import std.collections
 Import std.core
@@ -43,12 +43,41 @@ End Function
 // What each mod's on_tick gave, by its mod, which the game calls each tick.
 Class Ticks
     Field Handlers: (String, LuauFunction)[] = []
+
+    // Drops what `mod` gave.
+    Method Drop(mod: String)
+        Local kept: (String, LuauFunction)[] = []
+        For handler In Handlers
+            If handler.0 != mod Then kept.Add(handler)
+        End For
+        Handlers = kept
+    End Method
 End Class
 
+// Checks `mod`, then loads it in a script of its own: why it isn't loaded, or Null when it is.
+Function Loaded(lua: LuauState, checker: LuauChecker, mod: String): String? Throws LuauError
+    Local errors = 0
+    For found In Try checker.Check(mod)
+        If found.Severity != LuauSeverity.ERROR Then Continue
+        Print("[checker] {found}")
+        errors++
+    End For
+    If errors > 0 Then Return "{errors} errors"
+    Local script = Try lua.NewScript("@{mod}/init.luau")
+    Try script.Run(ModFile("{mod}/init.luau") ?? "", "@{mod}/init.luau")
+    Return Null
+End Function
+
+// An error's first line, as a game's log would have it.
+Function FirstLine(text: String): String
+    Local lines = text.Split("\n")
+    Return lines.Count == 0 ? text : lines[0]
+End Function
+
 Function Play() Throws LuauError
-    Local options = LuauOptions()
+    // What mods want, with a smaller memory limit than its 64 MB, as these mods are small.
+    Local options = LuauOptions.Sandbox()
     options.MemoryLimit = 16 * 1024 * 1024
-    options.TimeBudget = 50.Milliseconds
     options.Modules = Function(path: String): String? => ModFile(path)
     options.Print = Function(line: String)
         Print("[mod] {line}")
@@ -82,21 +111,22 @@ Function Play() Throws LuauError
     Local checker = LuauChecker(Function(path: String): String? => ModFile(path),
                                 LuauCheckMode.STRICT)
     Try checker.AddDefinitions(lua.Definitions(), "game")
-    For mod In ["broken", "doors", "greedy", "spawner"]
-        Local errors = 0
-        For found In Try checker.Check(mod)
-            If found.Severity != LuauSeverity.ERROR Then Continue
-            Print("[checker] {found}")
-            errors++
-        End For
-        If errors > 0
-            Print("[game] {mod} isn't loaded: {errors} errors")
-            Continue
-        End If
+    // Each mod's check and load are its own: one that fails is dropped, with what it gave the
+    // game, and the rest go on.
+    For mod In ["broken", "doors", "greedy", "hoarder", "looping", "spawner", "thrower", "twofold"]
         current = mod
-        Local script = Try lua.NewScript("@{mod}/init.luau")
-        Try script.Run(ModFile("{mod}/init.luau") ?? "", "@{mod}/init.luau")
-        Print("[game] {mod} is loaded")
+        Local why: String? = Null
+        Try
+            why = Try Loaded(lua, checker, mod)
+        Catch error As LuauError
+            why = "{error.Kind}, {FirstLine(error.Message)}"
+        End Try
+        If why == Null
+            Print("[game] {mod} is loaded")
+        Else
+            ticks.Drop(mod)
+            Print("[game] {mod} isn't loaded: {why}")
+        End If
     End For
 
     // The game's loop: each tick calls the mods' handlers. A handler that fails is dropped, and

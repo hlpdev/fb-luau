@@ -26,10 +26,12 @@ Const Context = "fb-luau bytecode, format 2"
 /// Source compiled into Luau's bytecode ahead, which a State runs without compiling it. Luau runs
 /// bytecode as it's given, checking nothing, so bytecode crosses a file system only in [Save]'s
 /// container, signed by the build step with an Ed25519 private key that never ships, which [Load]
-/// checks in the game with its public key before Luau sees a byte. The public key is no secret:
-/// anyone can read it out of the game, and still can't sign; the private key is the whole of it,
-/// and stays with the build. A container a mod can replace, in a pak say, is then as safe as
-/// one that can't be. A mod is source, always: loading bytecode a mod gave would trust the mod
+/// checks in the game with its public key before Luau sees a byte. The key that checks is compiled
+/// into the game, an Embed or a Const, never read from where the containers are, which a mod
+/// that replaces a container could replace too. The key that signs never leaves the build
+/// machine: it's never in the repository, nor written beside what ships. The public key is no
+/// secret: anyone can read it out of the game, and still can't sign. A container a mod can
+/// replace, in a pak say, is then as safe as one that can't be. A mod is source, always: loading bytecode a mod gave would trust the mod
 /// with the process; and for scripts embedded in the executable, compiling their source at start
 /// is as good as a container.
 ///

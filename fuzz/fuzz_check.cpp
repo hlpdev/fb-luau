@@ -9,12 +9,14 @@
 
 // NOLINTNEXTLINE(readability-identifier-naming): libFuzzer names it.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    const no_escape_t watched;
     // The input is the main module, then, after its first NUL, the module it requires as "./b".
     const std::string_view input(reinterpret_cast<const char*>(data), size);
     const size_t split = input.find('\0');
     const std::string_view main = input.substr(0, split);
     const std::string_view other = split == std::string_view::npos ? "" : input.substr(split + 1);
-    const uint64_t checker = fbl_check_new(static_cast<int32_t>(size % 3), 0.25);
+    const uint64_t checker =
+        fbl_check_new(static_cast<int32_t>(size % 3), 0.25, int64_t{ 16 } * 1024 * 1024);
     if (checker == 0) {
         finding("a checker wasn't made");
     }

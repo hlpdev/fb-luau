@@ -1,14 +1,17 @@
 // A game's build step and its game, as two modes of one program, as they'd be two programs: the
 // build compiles the game's own scripts into containers signed with the build's Ed25519 private
 // key, which never ships, and writes them where the game reads them, as it would write its paks;
-// the game has only the public key, checks each container's signature before Luau sees a byte,
-// and runs it. Anyone can read the public key out of the game and still can't sign a container. A
-// mod is source, always: only the game's own scripts are shipped as bytecode.
+// the game has only the public key, compiled into it, and checks each container's signature
+// before Luau sees a byte. A mod that can replace a container can't replace the key that checks
+// it, and anyone can read the public key out of the game and still can't sign. A mod is source,
+// always: only the game's own scripts are shipped as bytecode.
 //
-// `fb run examples/bytecode -- build <folder>`, then `fb run examples/bytecode -- game <folder>`.
-// The build makes its key the first time, into the folder's build.key, which a real game keeps
-// out of its repository and gives only to its build; the public key it writes, game.pub, is what
-// the game ships with.
+// `fb run examples/bytecode -- build <private key> <folder>`, then
+// `fb run examples/bytecode -- game <folder>`.
+//
+// keys/build.key is this example's private key, and game.pub its public key, which the game
+// embeds. A real game's private key never leaves the machine that builds it, is never in its
+// repository, and is never written beside what it ships: the build is given it.
 
 Import std.collections
 Import std.core
@@ -21,13 +24,13 @@ Import luau
 // The game's own scripts, which the build compiles.
 Const Scripts = EmbedFolder("scripts")
 
+// The key that checks the game's containers: the build's public key, compiled into the game.
+Const PublicKey = Embed("game.pub")
+
 // The build step: each script compiled, named by its path, and saved in a signed container.
-Function Build(folder: Path) Throws Error
-    If !Dir.Exists(folder) Then Try Dir.Create(folder)
-    Local keyFile = folder / Path("build.key")
-    If !File.Exists(keyFile) Then Try File.WriteBytes(keyFile, Ed25519.NewPrivateKey())
+Function Build(keyFile: Path, folder: Path) Throws Error
     Local privateKey = Try File.ReadBytes(keyFile)
-    Try File.WriteBytes(folder / Path("game.pub"), Ed25519.PublicKeyOf(privateKey))
+    If !Dir.Exists(folder) Then Try Dir.Create(folder)
     For entry In Scripts
         Local source = String.FromUtf8(entry.1) ?? ""
         Local code = Try LuauBytecode.Compile(source, "@scripts/" + entry.0)
@@ -36,14 +39,13 @@ Function Build(folder: Path) Throws Error
     Print("built {Scripts.Count} containers")
 End Function
 
-// The game: each container checked with the public key, loaded, then run.
+// The game: each container checked with the public key it was compiled with, loaded, then run.
 Function Play(folder: Path) Throws Error
-    Local publicKey = Try File.ReadBytes(folder / Path("game.pub"))
     Local lua = LuauState()
     Local doorBytes = Try File.ReadBytes(folder / Path("door.luau.bytecode"))
-    Local door = Try LuauBytecode.Load(doorBytes, publicKey)
+    Local door = Try LuauBytecode.Load(doorBytes, PublicKey)
     Local greet = Try LuauBytecode.Load(Try File.ReadBytes(folder / Path("greet.luau.bytecode")),
-                                        publicKey)
+                                        PublicKey)
     Try lua.Set("door", Try lua.Evaluate<LuauTable>(door))
     Try lua.Set("greet", Try lua.Evaluate<LuauFunction>(greet))
     Print(Try lua.Evaluate<String>("return greet('player')"))
@@ -51,23 +53,25 @@ Function Play(folder: Path) Throws Error
     // A container someone changed isn't loaded.
     Local changed = doorBytes.Clone()
     changed[changed.Count / 2] = changed[changed.Count / 2] ^ 255
-    Local refused = Try? LuauBytecode.Load(changed, publicKey)
+    Local refused = Try? LuauBytecode.Load(changed, PublicKey)
     Print(refused == Null ? "a changed container is refused" : "a changed container loaded")
     // So is one a mod signed with a key of its own: the game's public key isn't its.
     Local modKey = Ed25519.NewPrivateKey()
     Local forged = (Try LuauBytecode.Compile("return 'forged'", "@scripts/door.luau")).Save(modKey)
-    Local refusedForged = Try? LuauBytecode.Load(forged, publicKey)
+    Local refusedForged = Try? LuauBytecode.Load(forged, PublicKey)
     Print(refusedForged == Null ? "a container signed by another key is refused" : "it loaded")
 End Function
 
 Local arguments = Process.Arguments()
 Local mode = arguments.Count > 0 ? arguments[0] : "game"
-Local folder = Path(arguments.Count > 1 ? arguments[1] : "bytecode-out")
 Try
-    If mode == "build"
-        Try Build(folder)
+    If mode == "build" && arguments.Count > 2
+        Try Build(Path(arguments[1]), Path(arguments[2]))
+    ElseIf mode == "game" && arguments.Count > 1
+        Try Play(Path(arguments[1]))
     Else
-        Try Play(folder)
+        Print("build <private key> <folder>, or game <folder>")
+        Process.Exit(2)
     End If
 Catch error
     Print("the {mode} failed: {error.Message}")
