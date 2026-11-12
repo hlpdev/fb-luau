@@ -641,6 +641,11 @@ End For
   module's code, which the solver would run with the host's memory and native stack, so a check
   that reaches one is refused, a "TypeFunction" diagnostic at each, and none is run; Luau's heap
   limit for one, 64 MB by default and the process's, stays as a second fence.
+- Checkers on two threads take turns. Luau's Analysis isn't safe on two threads at once: its
+  types write the process's own, a counter each Error type is numbered from, as a checker's
+  made and as it checks. So one lock, the process's, is held by everything of a checker's that
+  reaches it, making one, a check, definitions, enforcing, forgetting, and freeing one, and the
+  type functions' heap limit is set under it. A State's scripts don't take it.
 - It's for mod tooling: a game's mod checker, its editor support, or a command. Running mods
   doesn't need it, but it's in the same library, so a game that checks mods as it loads them can.
 

@@ -6,7 +6,10 @@
 // hasn't been given, the program gives each, or says there's none, and checks again, until it
 // wants none. Its modules are found as require finds them, by the same rules: paths from the
 // files' root, "./" and "../" from the requiring module, "@self", and a .luaurc's aliases, and
-// nothing above the root. A checker is used by one thread at a time.
+// nothing above the root. A checker is used by one thread at a time, and checkers on two threads
+// take turns: Luau's type checker isn't safe on two threads at once, so a check, and making,
+// freeing, enforcing, forgetting, or giving definitions to a checker, waits for one on another
+// thread. Giving files and reading diagnostics don't.
 
 #include "core/fbl_core.h"
 

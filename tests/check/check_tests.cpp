@@ -102,6 +102,56 @@ std::vector<diagnostic_t> checked(const checker_t& checker, const std::string& m
     return {};
 }
 
+// Checks `module` over `files` as `checked` does, without Catch2's macros, which aren't for other
+// threads: how many diagnostics it gave, or -1.
+int32_t count_quietly(uint64_t checker, const std::string& module,
+                      const std::map<std::string, std::string>& files) {
+    int32_t wanted = fbl_check_run(checker, module.c_str());
+    for (int round = 0; round < 100 && wanted > 0; round++) {
+        for (int32_t index = 0; index < wanted; index++) {
+            const char* path = fbl_check_wanted(checker, index);
+            if (path == nullptr) {
+                return -1;
+            }
+            const auto found = files.find(path);
+            const std::string_view text =
+                found == files.end() ? std::string_view() : std::string_view(found->second);
+            if (fbl_check_give(checker, path, bytes_of(text), static_cast<int64_t>(text.size()),
+                               found == files.end() ? 0 : 1) != FBL_OK) {
+                return -1;
+            }
+        }
+        wanted = fbl_check_run(checker, module.c_str());
+    }
+    return wanted == 0 ? fbl_check_count(checker) : -1;
+}
+
+// Two modules that make the solver work, a type error in each: the first requires a module whose
+// function it calls wrongly, the second a table it reads past.
+std::map<std::string, std::string> first_files() {
+    return {
+        {
+            "first.luau",
+            "--!strict\nlocal util = require('./util')\nlocal n: number = "
+            "util.open('x')\nprint(n)\n",
+        },
+        {
+            "util.luau",
+            "--!strict\nreturn { open = function(n: number): number return n + 1 end }\n",
+        },
+    };
+}
+std::map<std::string, std::string> second_files() {
+    return {
+        {
+            "second.luau",
+            "--!strict\nlocal shelf = require('./shelf')\nlocal s: string = "
+            "shelf.count\nprint(s)\n",
+        },
+        { "shelf.luau", "--!strict\nreturn { count = 3, items = { 'a', 'b' } }\n" },
+    };
+}
+
 // How many of `diagnostics` are named `name`.
 size_t count_named(const std::vector<diagnostic_t>& diagnostics, std::string_view name) {
     size_t count = 0;
@@ -291,6 +341,96 @@ TEST_CASE("checkers made and run on many threads at once, first in a process, ea
     CHECK(worked == 16);
 }
 
+TEST_CASE("two checkers check on two threads at once, for a while, each right") {
+    // Luau's Analysis writes the process's own as it checks, so checks on two threads take
+    // turns; run under ThreadSanitizer, this is where one that didn't would show. Each forgets
+    // and checks again, so each round parses and solves.
+    REQUIRE(count_quietly(checker_t().handle(), "first", first_files()) == 1);
+    REQUIRE(count_quietly(checker_t().handle(), "second", second_files()) == 1);
+    std::atomic<bool> go = false;
+    std::array<std::atomic<int>, 2> rounds{};
+    std::array<std::atomic<int>, 2> wrong{};
+    std::vector<std::thread> threads;
+    threads.reserve(2);
+    for (size_t each = 0; each < 2; each++) {
+        threads.emplace_back([&go, &rounds, &wrong, each] {
+            const uint64_t checker = fbl_check_new(FBL_CHECK_STRICT, 60, heap_limit);
+            while (!go.load()) {
+                std::this_thread::yield();
+            }
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+            while (std::chrono::steady_clock::now() < until) {
+                fbl_check_forget(checker);
+                const int32_t count = each == 0 ? count_quietly(checker, "first", first_files())
+                                                : count_quietly(checker, "second", second_files());
+                rounds.at(each)++;
+                wrong.at(each) += count == 1 ? 0 : 1;
+            }
+            fbl_check_free(checker);
+        });
+    }
+    go = true;
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+    CHECK(rounds[0] > 0);
+    CHECK(rounds[1] > 0);
+    CHECK(wrong[0] == 0);
+    CHECK(wrong[1] == 0);
+}
+
+TEST_CASE("a check on one thread and a State's scripts on another each work") {
+    // A State's VM and compiler and the checker's Analysis are two parts of Luau; under
+    // ThreadSanitizer, this is where anything they share unlocked would show.
+    std::atomic<bool> go = false;
+    std::atomic<bool> checking = true;
+    std::atomic<int> runs = 0;
+    std::atomic<int> failed = 0;
+    std::thread scripts([&go, &checking, &runs, &failed] {
+        const fbl_state_options_t options = default_options();
+        int32_t status = FBL_OTHER;
+        const uint64_t state = fbl_state_new(&options, &status);
+        if (state == 0) {
+            failed++;
+            return;
+        }
+        while (!go.load()) {
+            std::this_thread::yield();
+        }
+        const std::string_view source =
+            "local t = {} for i = 1, 200 do t[i] = tostring(i) .. 'x' end "
+            "assert(#table.concat(t) > 0) local n: number = #t return n";
+        do {
+            const int32_t frame = fbl_frame_open(state);
+            int32_t ran = fbl_load_source(state, frame, bytes_of(source),
+                                          static_cast<int64_t>(source.size()), "=script");
+            if (ran == FBL_OK) {
+                ran = fbl_call_function(state, frame, 0, 0);
+            }
+            fbl_frame_close(state, frame);
+            runs++;
+            failed += ran == FBL_OK ? 0 : 1;
+        } while (checking.load());
+        fbl_state_close(state);
+    });
+    const checker_t checker(FBL_CHECK_STRICT);
+    go = true;
+    int checks = 0;
+    int wrong = 0;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+    while (std::chrono::steady_clock::now() < until) {
+        fbl_check_forget(checker.handle());
+        wrong += count_quietly(checker.handle(), "first", first_files()) == 1 ? 0 : 1;
+        checks++;
+    }
+    checking = false;
+    scripts.join();
+    CHECK(checks > 0);
+    CHECK(wrong == 0);
+    CHECK(runs > 0);
+    CHECK(failed == 0);
+}
+
 TEST_CASE("a check's modules share its time limit") {
     // A module whose time is the solver's, its operators' type functions, timed whole on this
     // machine, then eight of them under half that: given the limit each, as Luau gives it, the
@@ -336,7 +476,8 @@ TEST_CASE("a check that reaches a type function is refused, and none is run") {
         "while true do end",
         "local s = string.rep('x', 33554432) for i = 1, 1e9 do print(s) end",
         "for i = 1, 1e9 do types.unionof(types.singleton(tostring(i)), types.number) end",
-        "local function deep(n) if n > 0 then string.gsub('x', 'x', function() deep(n - 1) end) "
+        "local function deep(n) if n > 0 then string.gsub('x', 'x', function() deep(n - 1) "
+        "end) "
         "end end deep(1000)",
     };
     for (const std::string_view body : bodies) {
@@ -481,8 +622,8 @@ TEST_CASE("each case of the corpus gives what luau-analyze gives") {
             }
         }
         const checker_t checker;
-        // Each diagnostic's line, in any order: luau-analyze names a cycle's modules by its root's
-        // name and by their full paths, so it gives them in an order of its own there.
+        // Each diagnostic's line, in any order: luau-analyze names a cycle's modules by its
+        // root's name and by their full paths, so it gives them in an order of its own there.
         std::multiset<std::string> got;
         for (const diagnostic_t& diagnostic : checked(checker, "main", files)) {
             got.insert(diagnostic.module + ":" + std::to_string(diagnostic.numbers[0]) + ":" +

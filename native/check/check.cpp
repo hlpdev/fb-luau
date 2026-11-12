@@ -25,7 +25,6 @@
 #include <mutex>
 #include <new>
 #include <optional>
-#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -395,15 +394,18 @@ private:
     std::thread m_thread;
 };
 
-// The heap's limit of every type function's VM, Luau's and the process's. A check's type functions
-// read it as they run, so each check holds this shared, and a checker that lowers it waits for
-// them. MinGW's winpthreads sets up a std::shared_mutex's lock on its first use, which fails for
-// some of the threads that first use it at once (a lock_shared that gives EINVAL, which a release
-// build passes over and then unlocks what it never held); so it's first used once, alone, under
-// the guard of the static that makes it.
-std::shared_mutex& type_function_heap() {
+// Luau's Analysis isn't safe on two threads at once: its types write the process's own, like
+// the counter each Error type takes its number from, as a checker's made and wherever its solver
+// needs one, and the type functions' heap limit is the process's. So everything of a checker's
+// that reaches it, making one, a check, definitions, enforcing, forgetting, and freeing one,
+// holds this, and a check on another thread waits its turn. It's recursive, as a checker's freed
+// under it wherever its last holder lets it go, which can be inside a call that holds it. MinGW's
+// winpthreads sets up a static lock on its first use, which has failed for some of the threads
+// that first use one at once; so it's first used once, alone, under the guard of the static that
+// makes it.
+std::recursive_mutex& analysis() {
     struct warmed_t {
-        std::shared_mutex mutex;
+        std::recursive_mutex mutex;
         warmed_t() {
             mutex.lock();
             mutex.unlock();
@@ -413,21 +415,21 @@ std::shared_mutex& type_function_heap() {
     return made.mutex;
 }
 
-// Lowers the type functions' heap limit to `bytes`, where it's higher, or none.
+// Lowers the type functions' heap limit to `bytes`, where it's higher, or none, under analysis.
 void limit_type_functions(int bytes) {
-    {
-        const std::shared_lock reading(type_function_heap());
-        const int now = FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value;
-        if (now > 0 && now <= bytes) {
-            return;
-        }
-    }
-    const std::unique_lock writing(type_function_heap());
     const int now = FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value;
     if (now <= 0 || now > bytes) {
         FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value = bytes;
     }
 }
+
+// Frees a checker under analysis, whichever thread lets it go last.
+struct freed_t {
+    void operator()(checker_t* checker) const {
+        const std::scoped_lock lock(analysis());
+        std::default_delete<checker_t>{}(checker);
+    }
+};
 
 std::mutex checkers_mutex;
 // The checkers, by their handles, made as they're first asked for, which can't throw where it
@@ -701,13 +703,18 @@ uint64_t fbl_check_new(int32_t mode, double seconds, int64_t heap) try {
         return 0;
     }
     fbl::set_flags();
-    limit_type_functions(static_cast<int>(heap));
     const std::array<Luau::Mode, 3> modes = {
         Luau::Mode::Strict,
         Luau::Mode::Nonstrict,
         Luau::Mode::NoCheck,
     };
-    auto checker = std::make_shared<checker_t>(modes.at(static_cast<size_t>(mode)), seconds);
+    std::shared_ptr<checker_t> checker;
+    {
+        const std::scoped_lock making(analysis());
+        limit_type_functions(static_cast<int>(heap));
+        checker = std::unique_ptr<checker_t, freed_t>(
+            new checker_t(modes.at(static_cast<size_t>(mode)), seconds));
+    }
     const std::scoped_lock lock(checkers_mutex);
     const uint64_t handle = ++next_checker;
     checkers().emplace(handle, std::move(checker));
@@ -721,6 +728,8 @@ uint64_t fbl_check_new(int32_t mode, double seconds, int64_t heap) try {
 }
 
 void fbl_check_free(uint64_t checker) try {
+    // Let go after the map's lock, as it waits for analysis, which a check on another thread can
+    // hold for its time.
     std::shared_ptr<checker_t> gone;
     const std::scoped_lock lock(checkers_mutex);
     const auto found = checkers().find(checker);
@@ -746,6 +755,7 @@ int32_t fbl_check_definitions(uint64_t checker, const uint8_t* text, int64_t len
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): C's bytes, as chars.
     const std::string_view source(length == 0 ? "" : reinterpret_cast<const char*>(text),
                                   static_cast<size_t>(length));
+    const std::scoped_lock loading(analysis());
     Luau::GlobalTypes& globals = found->frontend.globals;
     Luau::unfreeze(globals.globalTypes);
     const Luau::LoadDefinitionFileResult result = found->frontend.loadDefinitionFile(
@@ -783,6 +793,7 @@ int32_t fbl_check_enforce(uint64_t checker, int32_t enforced) try {
     if (found == nullptr) {
         return FBL_MISUSE;
     }
+    const std::scoped_lock clearing(analysis());
     found->enforced = enforced != 0;
     found->configs.enforce(found->enforced);
     // What was checked before was checked by other rules.
@@ -827,6 +838,7 @@ int32_t fbl_check_forget(uint64_t checker) try {
     if (found == nullptr) {
         return FBL_MISUSE;
     }
+    const std::scoped_lock clearing(analysis());
     found->files.forget();
     found->frontend.clear();
     found->diagnostics.clear();
@@ -853,7 +865,7 @@ int32_t fbl_check_run(uint64_t checker, const char* module) try {
         fbl::fail(fbl::formatted("'{}' isn't a module's path from the root", *path));
         return -1;
     }
-    const std::shared_lock running(type_function_heap());
+    const std::scoped_lock checking(analysis());
     found->files.clear_wanted();
     found->diagnostics.clear();
     // A run of another module, or of one whose check finished, starts its own time limit.

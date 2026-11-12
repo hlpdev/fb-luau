@@ -619,3 +619,15 @@ Written while the PC was kept free for the user: none of it built or run until t
 - **61 has its test:** a resume from an error handler past Luau's 200 C calls fails before the
   thread runs, and the thread is ended, as the header says, not left suspended; without the
   fix the test fails.
+- **Checkers take turns (138):** ThreadSanitizer found Luau's Analysis writing a static counter,
+  each Error type's number, with no lock, as two checkers were made on two threads; Luau makes an
+  Error type wherever its solver needs one, so two checks at once race there too, whatever the
+  shim locks around making one. So Analysis is taken as not safe on two threads at all: one lock,
+  the process's, recursive, is held by everything of a checker's that reaches it, making one, a
+  check, definitions, enforcing, forgetting, and freeing one, which is done by the checker's
+  deleter wherever its last holder lets it go. The type functions' heap limit, which had a lock of
+  its own, is set under it. Checks on two threads run one after the other, and LuauChecker's docs
+  say so; giving files and reading diagnostics don't wait. A check's time limit starts once it
+  holds the lock, so waiting its turn isn't counted against it. Two tests run under TSan: two
+  threads checking two modules at once for 1.5 seconds, and a check beside a State's scripts on
+  another thread.

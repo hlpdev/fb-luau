@@ -114,6 +114,10 @@ End Struct
 /// until [Forget]. Running mods doesn't need it, but a game that checks mods as it loads them
 /// can, with `LuauState.Definitions` for the API it gives them.
 ///
+/// Checkers on two threads take turns: Luau's type checker isn't safe on two threads at once,
+/// so a check, or making a checker, waits for a check running on another thread. A State's
+/// scripts don't wait for it.
+///
 /// # Examples
 ///
 /// ```
