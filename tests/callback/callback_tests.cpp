@@ -1,4 +1,5 @@
 #include "fbl.h"
+#include "state/state.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -18,6 +19,7 @@ constexpr int64_t nested = 3;
 constexpr int64_t where = 4;
 constexpr int64_t silent = 5;
 constexpr int64_t deep = 6;
+constexpr int64_t make = 7;
 
 // What the test's callback has called, for the nesting test.
 int depth_reached = 0;
@@ -64,6 +66,14 @@ int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
         fbl_callback_where(state, frame);
         return FBL_RUNTIME;
     case silent:
+        fbl_frame_truncate(state, frame, 0);
+        return FBL_OK;
+    case make:
+        // Makes a function of the program's, which it lets go at once.
+        fbl_frame_truncate(state, frame, 0);
+        if (fbl_callback_function(state, frame, add, "made") != FBL_OK) {
+            return FBL_OTHER;
+        }
         fbl_frame_truncate(state, frame, 0);
         return FBL_OK;
     case deep: {
@@ -212,4 +222,56 @@ TEST_CASE("a script's code run by the program's get or set, which opens frames, 
     CHECK(fbl_table_set(lua.handle, frame, 0, 1, 2) == FBL_RUNTIME);
     CHECK(lua.error_message().ends_with("deep failed"));
     CHECK(fbl_frame_close(lua.handle, frame));
+}
+
+TEST_CASE("every function made and collected inside one call is given back") {
+    const test_state_t lua;
+    REQUIRE(fbl_callback_set(test_callback));
+    set_function(lua, "make", make);
+    const fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    const int64_t before = state->live_functions;
+    CHECK(lua.run("for i = 1, 100000 do make() end") == FBL_OK);
+    REQUIRE(fbl_state_collect(lua.handle) == FBL_OK);
+    CHECK(state->live_functions == before);
+    CHECK(state->released.size() == 100000);
+}
+
+TEST_CASE("a function whose making fails at any allocation is nothing to the program") {
+    const test_state_t lua;
+    REQUIRE(fbl_callback_set(test_callback));
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    const int64_t before = state->live_functions;
+    int64_t made = 0;
+    int64_t failed = 0;
+    const int32_t frame = fbl_frame_open(lua.handle);
+    for (int round = 0; round < 10; round++) {
+        for (int64_t failing = 0; failing < 8; failing++) {
+            // At each of its making's points, and each of the allocations it asks for.
+            state->failing_point = failing % 4;
+            state->failing_allocation = failing;
+            const int32_t status = fbl_callback_function(lua.handle, frame, add, "made");
+            state->failing_allocation = -1;
+            state->failing_point = -1;
+            if (status == FBL_OK) {
+                made++;
+            } else {
+                CHECK((status == FBL_MEMORY || status == FBL_RUNTIME));
+                failed++;
+            }
+            fbl_frame_truncate(lua.handle, frame, 0);
+        }
+    }
+    CHECK(fbl_frame_close(lua.handle, frame));
+    CHECK(failed > 0);
+    REQUIRE(fbl_state_collect(lua.handle) == FBL_OK);
+    CHECK(state->live_functions == before);
+    CHECK(state->released.size() == static_cast<size_t>(made));
+    std::array<int64_t, 128> taken{};
+    while (fbl_callback_released(lua.handle, taken.data(), 128) > 0) {
+    }
+    CHECK(state->released.empty());
+    set_function(lua, "late", add);
+    CHECK(lua.run("assert(late(1, 2) == 3)") == FBL_OK);
 }

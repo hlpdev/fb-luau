@@ -46,6 +46,11 @@ struct state_t {
     std::thread::id owner;
     int64_t memory_limit = 0;
     int64_t memory_used = 0;
+    // For the tests: which allocation from now fails, counting from 0, once, or -1 for none; and
+    // which of the shim's failure points from now raises, as an allocation's failing would, since
+    // Luau's own pages hold small objects without asking the allocator.
+    int64_t failing_allocation = -1;
+    mutable int64_t failing_point = -1;
     // Each outermost call's time budget, and when the one running ends, or none.
     std::chrono::microseconds time_budget{ 0 };
     std::chrono::steady_clock::time_point deadline;
@@ -154,6 +159,15 @@ int32_t run_protected(state_t& state, lua_State* thread, int arguments, int resu
     return settle(state, thread, protect(state, thread, arguments, results, work));
 }
 
+// Makes room in `queue`, the numbers of what Luau has collected that the program hasn't taken,
+// for one more than those and the `live` ones, so a destructor never needs memory. It throws
+// std::bad_alloc, or std::length_error.
+void make_room(std::vector<int64_t>& queue, int64_t live);
+
+// Queues a collected number, in room make_room() kept; that there's none is a bug, which aborts a
+// Debug build, and loses the number in another.
+void keep_released(std::vector<int64_t>& queue, int64_t number) noexcept;
+
 // The userdata tag of a program's function's number, whose destructor gives it back.
 constexpr int function_tag = 1;
 
@@ -191,6 +205,10 @@ int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, boo
 // itself, and whose metatable, frozen and locked, reads what it hasn't from the main thread's
 // globals, which `main` has room on its stack to give. It raises when there's no memory.
 void push_environment(lua_State* stack, lua_State* main);
+
+// For the tests: raises "not enough memory" when it's the State's failing_point, in a work that
+// makes something in steps, between them.
+void failure_point(lua_State* stack, const state_t& state);
 
 // Freezes the State's globals, unless they are: a status.
 int32_t frozen(state_t& state) noexcept;

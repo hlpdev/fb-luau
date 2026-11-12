@@ -11,10 +11,13 @@
 
 namespace {
 
-// What a program's object is in Luau: a userdata of its number and its type's.
+// What a program's object is in Luau: a userdata of its number and its type's, and whether its
+// making finished, which its last step says, so one whose making failed halfway is nothing to the
+// program.
 struct object_box_t {
     int64_t object;
     int32_t type;
+    bool committed;
 };
 
 // An object's userdata's destructor, run as Luau collects it: it keeps the object's number for
@@ -23,12 +26,10 @@ struct object_box_t {
 void released(lua_State* thread, void* data) {
     auto* state = static_cast<fbl::state_t*>(lua_callbacks(thread)->userdata);
     const auto* box = static_cast<const object_box_t*>(data);
-    if (state == nullptr) {
+    if (state == nullptr || !box->committed) {
         return;
     }
-    if (state->released_objects.size() < state->released_objects.capacity()) {
-        state->released_objects.push_back(box->object);
-    }
+    fbl::keep_released(state->released_objects, box->object);
     state->live_objects--;
 }
 
@@ -223,24 +224,31 @@ int32_t fbl_udata_new(uint64_t state, int32_t frame, int64_t object, int32_t typ
         return fbl::misuse(fbl::formatted("type {} isn't registered", type));
     }
     try {
-        // Room for its number when it's collected, before it can be.
-        found.state->released_objects.reserve(static_cast<size_t>(found.state->live_objects + 1));
+        // Room for its number when it's collected, and for every number not yet taken.
+        fbl::make_room(found.state->released_objects, found.state->live_objects);
     } catch (const std::exception&) {
         return fbl::record_error(*found.state, FBL_MEMORY, "not enough memory");
     }
     const int objects = found.state->objects_ref;
-    auto work = [object, type, ref, objects](lua_State* stack) {
+    const fbl::state_t* const making = found.state;
+    auto work = [object, type, ref, objects, making](lua_State* stack) {
         auto* box = static_cast<object_box_t*>(
             lua_newuserdatatagged(stack, sizeof(object_box_t), fbl::object_tag));
         box->object = object;
         box->type = type;
+        box->committed = false;
+        fbl::failure_point(stack, *making);
         lua_getref(stack, ref);
         lua_setmetatable(stack, -2);
+        fbl::failure_point(stack, *making);
         lua_getref(stack, objects);
         lua_pushnumber(stack, static_cast<double>(object));
         lua_pushvalue(stack, -3);
         lua_rawset(stack, -3);
+        fbl::failure_point(stack, *making);
         lua_pop(stack, 1);
+        // Its last step: nothing after it fails.
+        box->committed = true;
         return 1;
     };
     const int32_t status = fbl::run_protected(*found.state, found.frame->thread, 0, 1, work);

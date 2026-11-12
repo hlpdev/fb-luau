@@ -238,6 +238,8 @@ Public Class LuauState
     @PanicsAtCaller
     Public Method Collect()
         If fbl_state_collect(Live()) != FBL_OK Then Panic(LastError())
+        // Outside a call, it lets go of what Luau collected now, as the end of a call does.
+        Closed(Opened())
     End Method
 
     /// Compiles and runs `source`, as the chunk `name`, which its errors and tracebacks show: Luau

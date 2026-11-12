@@ -174,3 +174,14 @@ Function ACycleAcrossTheEdgeGoesWhenTheStateCloses() Throws LuauError
     lua.Close()
     player.Bag = Null
 End Function
+
+@Test
+Function ObjectsMadeAndCollectedInOneCallAreLetGo() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Door>()
+    Try lua.SetFunction("spawn", Function(): Door => Door())
+    Try lua.Run("for i = 1, 100000 do spawn() end")
+    lua.Collect()
+    Expect(lua.Objects.Count == 0, "{lua.Objects.Count}")
+    Expect(lua.ObjectTypes.Count == 0)
+End Function

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -54,6 +55,11 @@ void* allocate(void* data, void* block, size_t old_size, size_t new_size) {
         return nullptr;
     }
     const auto wants = static_cast<int64_t>(new_size);
+    if (state->failing_allocation >= 0 && wants > had) {
+        if (state->failing_allocation-- == 0) {
+            return nullptr;
+        }
+    }
     if (state->memory_limit > 0 && wants > had &&
         state->memory_used + (wants - had) > state->memory_limit) {
         return nullptr;
@@ -312,6 +318,23 @@ void close_state(fbl::state_t* state) {
 } // namespace
 
 namespace fbl {
+
+void failure_point(lua_State* stack, const state_t& state) {
+    if (state.failing_point >= 0 && state.failing_point-- == 0) {
+        luaL_error(stack, "not enough memory");
+    }
+}
+
+void make_room(std::vector<int64_t>& queue, int64_t live) {
+    queue.reserve(queue.size() + static_cast<size_t>(live) + 1);
+}
+
+void keep_released(std::vector<int64_t>& queue, int64_t number) noexcept {
+    assert(queue.size() < queue.capacity() && "no room kept for a collected number");
+    if (queue.size() < queue.capacity()) {
+        queue.push_back(number);
+    }
+}
 
 int64_t memory_of_all_states() noexcept {
     return all_memory.load();

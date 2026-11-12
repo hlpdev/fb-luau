@@ -1,4 +1,5 @@
 #include "fbl.h"
+#include "state/state.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -15,6 +16,17 @@ namespace {
 // sees what Luau called it with.
 int32_t udata_callback(uint64_t state, int32_t frame, int64_t function) {
     const int32_t count = fbl_frame_count(state, frame);
+    if (function == 4) {
+        // Makes object `n`'s userdata, which it lets go at once.
+        double number = 0;
+        fbl_frame_number(state, frame, 0, &number);
+        fbl_frame_truncate(state, frame, 0);
+        if (fbl_udata_new(state, frame, static_cast<int64_t>(number), 1) != FBL_OK) {
+            return FBL_OTHER;
+        }
+        fbl_frame_truncate(state, frame, 0);
+        return FBL_OK;
+    }
     if (function == 3) {
         // __namecall: the method's name is first.
         int64_t length = 0;
@@ -137,4 +149,56 @@ TEST_CASE("a type is registered once, and its own fields stay its own") {
     set_object(lua, "thing", 3);
     // __len is the callback's function 1, which gives its count of arguments.
     CHECK(lua.run("assert(#thing >= 1)") == FBL_OK);
+}
+
+TEST_CASE("every object made and collected inside one call is given back") {
+    const test_state_t lua;
+    register_thing(lua);
+    int32_t frame = fbl_frame_open(lua.handle);
+    REQUIRE(fbl_callback_function(lua.handle, frame, 4, "make") == FBL_OK);
+    REQUIRE(fbl_frame_set_global(lua.handle, frame, bytes_of("make"), 4, 0) == FBL_OK);
+    REQUIRE(fbl_frame_close(lua.handle, frame));
+    const fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    CHECK(lua.run("for i = 1, 100000 do make(i) end") == FBL_OK);
+    REQUIRE(fbl_state_collect(lua.handle) == FBL_OK);
+    CHECK(state->live_objects == 0);
+    CHECK(released_objects(lua).size() == 100000);
+    static_cast<void>(frame);
+}
+
+TEST_CASE("an object whose making fails at any allocation is nothing to the program") {
+    const test_state_t lua;
+    register_thing(lua);
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    int64_t made = 0;
+    int64_t failed = 0;
+    int64_t number = 0;
+    const int32_t frame = fbl_frame_open(lua.handle);
+    for (int round = 0; round < 10; round++) {
+        for (int64_t failing = 0; failing < 8; failing++) {
+            // At each of its making's points, and each of the allocations it asks for.
+            state->failing_point = failing % 4;
+            state->failing_allocation = failing;
+            const int32_t status = fbl_udata_new(lua.handle, frame, ++number, 1);
+            state->failing_allocation = -1;
+            state->failing_point = -1;
+            if (status == FBL_OK) {
+                made++;
+            } else {
+                CHECK((status == FBL_MEMORY || status == FBL_RUNTIME));
+                failed++;
+            }
+            fbl_frame_truncate(lua.handle, frame, 0);
+        }
+    }
+    CHECK(fbl_frame_close(lua.handle, frame));
+    CHECK(failed > 0);
+    REQUIRE(fbl_state_collect(lua.handle) == FBL_OK);
+    CHECK(state->live_objects == 0);
+    CHECK(released_objects(lua).size() == static_cast<size_t>(made));
+    CHECK(state->released_objects.empty());
+    set_object(lua, "late", 1000);
+    CHECK(lua.run("assert(late.x == 2)") == FBL_OK);
 }
