@@ -51,6 +51,16 @@ find_program(FBL_PYTHON NAMES python3 python DOC "Python 3, for the tools' check
 # The export check passes on the library, and refuses one that exports more than its C API, so
 # it's known to look.
 if(FBL_SH)
+  # The check that Luau's tag is still its commit stops a configure when it isn't.
+  add_test(NAME tools.luau_commit
+           COMMAND "${CMAKE_COMMAND}" -DSOURCE=${luau_SOURCE_DIR} -DEXPECTED=${FBL_LUAU_COMMIT}
+                   -P "${PROJECT_SOURCE_DIR}/cmake/luau_commit.cmake")
+  add_test(NAME tools.luau_commit_moved
+           COMMAND "${CMAKE_COMMAND}" -DSOURCE=${luau_SOURCE_DIR}
+                   -DEXPECTED=0000000000000000000000000000000000000000
+                   -P "${PROJECT_SOURCE_DIR}/cmake/luau_commit.cmake")
+  set_tests_properties(tools.luau_commit_moved PROPERTIES
+                       PASS_REGULAR_EXPRESSION "Luau's tag has moved")
   add_test(NAME tools.check_exports
            COMMAND "${FBL_SH}" "${PROJECT_SOURCE_DIR}/tools/check-exports.sh" fbl_
                    "$<TARGET_FILE:luau_native>")

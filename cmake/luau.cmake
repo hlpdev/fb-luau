@@ -2,6 +2,9 @@
 # by hand: this tag, its conformance scripts run again through the package, and docs/decisions.md
 # says what changed.
 set(FBL_LUAU_VERSION "0.746")
+# The commit the tag named when the package was pinned to it: a tag can be moved, and the configure
+# stops when this one has been.
+set(FBL_LUAU_COMMIT "12a6ba75883272c79b66b59815efef4c574196f6")
 
 # Its libraries alone, static and position-independent, to be linked into luau_native. As C++,
 # Luau's default: LUAU_EXTERN_C would make its errors longjmps, which skip C++ destructors.
@@ -25,6 +28,8 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(luau)
+include("${CMAKE_CURRENT_LIST_DIR}/luau_commit.cmake")
+fbl_check_luau_commit("${luau_SOURCE_DIR}" "${FBL_LUAU_COMMIT}")
 
 # What luau_native is made of, in the order they link.
 set(fbl_luau_libraries Luau.Require Luau.Analysis Luau.Config Luau.CodeGen Luau.Compiler
