@@ -519,4 +519,7 @@ Written while the PC was kept free for the user: none of it built or run until t
 - **The guard's "fine" depth is twenty (131):** fb test runs on threads of 512 KB on macOS,
   where the guard stops about fifty levels of nested gsubs, fewer in a debug build, as it
   should; the guard's own test is in tests/state.
+- **The guard's own test runs on 256 KB (133):** 512 KB held 190 of a Release build's levels on
+  Linux, about 2 KB each, so nothing stopped them. On 256 KB the guard leaves 128 KB, which 190
+  levels pass in any build whose level takes over 700 bytes, short of Luau's 200 C calls.
 
