@@ -330,8 +330,11 @@ TEST_CASE("a finalizer one script leaves on a runner doesn't run in another's ca
     REQUIRE(lua.run("hits = 0 coroutine.finally(coroutine.running(), function() hits += 1 end)") ==
             FBL_OK);
     REQUIRE(lua.run("before = hits") == FBL_OK);
+    // A call that fails resets the runner it ran on, which would run a finalizer still there in
+    // that other script's call; one that succeeds, too, from the fix on.
     for (int call = 0; call < 3; call++) {
         CHECK(lua.run("local x = 1") == FBL_OK);
+        CHECK(lua.run("error('another script fails')") == FBL_RUNTIME);
     }
     CHECK(lua.run("assert(hits == before, hits)") == FBL_OK);
 }

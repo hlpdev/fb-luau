@@ -24,6 +24,10 @@ LUAU_FASTFLAG(LuauCyclicRequireShortCircuit)
 
 namespace {
 
+// The module a chunk that isn't named for a path requires as: one at the root, so "./x" is
+// the root's "x".
+constexpr std::string_view root_module = "=";
+
 fbl::state_t& state_of(void* context) {
     return *static_cast<fbl::state_t*>(context);
 }
@@ -138,7 +142,10 @@ bool is_require_allowed(lua_State* stack, void* context, const char* /*requirer*
     const char* path = lua_tolstring(stack, 1, &length);
     if (path != nullptr) {
         const std::string_view given(path, length);
-        const size_t parts = static_cast<size_t>(std::ranges::count(given, '/')) + 1;
+        // A backslash is a separator to the walk too, so it's counted as one.
+        const size_t parts = static_cast<size_t>(std::ranges::count_if(
+                                 given, [](char each) { return each == '/' || each == '\\'; })) +
+                             1;
         if (length > fbl::most_path_bytes || parts > fbl::most_path_parts) {
             luaL_error(stack, "a require's path is at most %d parts and %d bytes",
                        static_cast<int>(fbl::most_path_parts),
@@ -157,12 +164,17 @@ luarequire_NavigateResult reset(lua_State* /*stack*/, void* context, const char*
     state.require_walk = {};
     const std::string_view name = requirer;
     if (!name.starts_with('@')) {
-        // A chunk of another name requires from the root, as a module there.
-        state.require_walk.parts = { std::string(name) };
+        // A chunk of another name, the program's own code's, or one loadstring made, whose name a
+        // script picks, requires from the root, as a module there; its name is never a path.
+        state.require_walk.parts = { std::string(root_module) };
         return NAVIGATE_SUCCESS;
     }
+    // A path's parts are checked, as require's argument's are, before anything's read.
+    if (name.size() > fbl::most_path_bytes) {
+        return NAVIGATE_NOT_FOUND;
+    }
     std::optional<std::vector<std::string>> parts = fbl::module_parts(name.substr(1));
-    if (!parts) {
+    if (!parts || fbl::is_too_long(*parts)) {
         return NAVIGATE_NOT_FOUND;
     }
     state.require_walk.parts = std::move(*parts);
@@ -237,6 +249,8 @@ std::string config_file(const fbl::state_t& state) {
 
 luarequire_ConfigStatus get_config_status(lua_State* stack, void* context) {
     fbl::state_t& state = state_of(context);
+    // The search for a .luaurc climbs a folder at a time, which the budget holds to.
+    fbl::check_deadline(stack);
     const std::string file = config_file(state);
     return read_file(state, stack, file).has_value() ? CONFIG_PRESENT_JSON : CONFIG_ABSENT;
 }
@@ -272,21 +286,75 @@ private:
     fbl::state_t& m_state;
 };
 
-// Raises the error on top of the requiring thread's stack, first clearing the placeholder Luau's
-// require made for the module `key`, when it made one, so the next require loads it anew.
+// Clears the placeholder Luau's require made for the module `key`: from the modules and the
+// provided flags, so the next require loads it anew, and frozen again, as a cyclic requirer holds
+// it. Nothing here allocates, with the room load reserved, so it runs as an error goes by.
+void cleared(lua_State* stack, const char* key) {
+    const int top = lua_gettop(stack);
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_MODULES");
+    if (lua_type(stack, -1) == LUA_TTABLE) {
+        lua_getfield(stack, -1, key);
+        if (lua_type(stack, -1) == LUA_TTABLE) {
+            lua_setreadonly(stack, -1, 1);
+        }
+        lua_pop(stack, 1);
+        lua_pushnil(stack);
+        lua_setfield(stack, -2, key);
+    }
+    lua_settop(stack, top);
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_CYCLIC_PLACEHOLDER_PROVIDED");
+    if (lua_type(stack, -1) == LUA_TTABLE) {
+        lua_pushnil(stack);
+        lua_setfield(stack, -2, key);
+    }
+    lua_settop(stack, top);
+}
+
+// Raises the error on top of the requiring thread's stack, first clearing the placeholder for the
+// module `key`, when there's one.
 [[noreturn]] void failed(lua_State* stack, bool placeholder, const char* key) {
     if (placeholder) {
-        for (const char* table : { "_MODULES", "_CYCLIC_PLACEHOLDER_PROVIDED" }) {
-            lua_getfield(stack, LUA_REGISTRYINDEX, table);
-            if (lua_type(stack, -1) == LUA_TTABLE) {
-                lua_pushnil(stack);
-                lua_setfield(stack, -2, key);
-            }
-            lua_pop(stack, 1);
-        }
+        cleared(stack, key);
     }
     lua_error(stack);
 }
+
+// Fills the placeholder for the module `key`, when a cyclic require was given it, from the module's
+// table on top, and puts it in the table's place: here, where a failure clears it, rather than in
+// Luau's require after load, where one partway would leave it half filled and writable.
+void filled(lua_State* stack, const char* key) {
+    const int result = lua_gettop(stack);
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_CYCLIC_PLACEHOLDER_PROVIDED");
+    bool provided = false;
+    if (lua_type(stack, -1) == LUA_TTABLE) {
+        lua_getfield(stack, -1, key);
+        provided = lua_toboolean(stack, -1) != 0;
+    }
+    lua_settop(stack, result);
+    if (!provided) {
+        return;
+    }
+    lua_getfield(stack, LUA_REGISTRYINDEX, "_MODULES");
+    lua_getfield(stack, -1, key);
+    const int placeholder = lua_gettop(stack);
+    if (lua_type(stack, placeholder) != LUA_TTABLE) {
+        lua_settop(stack, result);
+        return;
+    }
+    lua_setreadonly(stack, placeholder, 0);
+    for (int iterator = 0; (iterator = lua_rawiter(stack, result, iterator)) != -1;) {
+        lua_rawset(stack, placeholder);
+    }
+    if (lua_getmetatable(stack, result) == 0) {
+        lua_pushnil(stack);
+    }
+    lua_setmetatable(stack, placeholder);
+    lua_setreadonly(stack, placeholder, 1);
+    lua_replace(stack, result);
+    lua_settop(stack, result);
+}
+
+void loaded(lua_State* stack, lua_State* module, const char* loadname, bool placeholder);
 
 // Runs a module, on a thread of its own whose globals are an environment of its own, and leaves
 // its one value on the requiring thread's stack, a table frozen through its fields; its errors are
@@ -308,7 +376,8 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
     if (bytecode == nullptr) {
         luaL_error(stack, "not enough memory to compile");
     }
-    luaL_checkstack(stack, 4, "loading a module");
+    // Room for the placeholder's clearing too, which mustn't allocate as an error goes by.
+    luaL_checkstack(stack, 12, "loading a module");
     if (lua_checkstack(state.main, 1) == 0) {
         luaL_error(stack, "not enough memory");
     }
@@ -329,6 +398,21 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
         luarequire_createplaceholder(stack);
         placeholder = true;
     }
+    // From here, an error of any kind clears the placeholder, the memory's too.
+    try {
+        loaded(stack, module, loadname, placeholder);
+    } catch (...) {
+        if (placeholder) {
+            cleared(stack, loadname);
+        }
+        throw;
+    }
+    return 1;
+}
+
+// Runs the module, and leaves its one value on the requiring thread's stack, frozen, in place of
+// the module's thread.
+void loaded(lua_State* stack, lua_State* module, const char* loadname, bool placeholder) {
     const int status = lua_resume(module, stack, 0);
     if (status == LUA_YIELD) {
         lua_resetthread(module);
@@ -356,9 +440,11 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
     // What a module gives every script that requires it is frozen, so none changes another's.
     if (lua_type(stack, -1) == LUA_TTABLE) {
         fbl::freeze_tables(stack, lua_gettop(stack));
+        if (placeholder) {
+            filled(stack, loadname);
+        }
     }
     lua_remove(stack, -2);
-    return 1;
 }
 
 void configure(luarequire_Configuration* config) {

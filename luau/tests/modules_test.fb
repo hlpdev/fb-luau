@@ -109,3 +109,44 @@ Function WithoutModulesRequireSaysSo() Throws LuauError
     Local error = ExpectThrows<LuauError>(lua.Run("require('./doors')", "@main.luau"))
     Expect(error != Null && error.Message.Contains("the program gives no modules"))
 End Function
+
+@Test
+Function ALoadstringChunksNameIsntWhereRequireLooks() Throws LuauError
+    Local asked: String[] = []
+    Local options = LuauOptions()
+    options.LoadString = True
+    options.Modules = Function(path: String): String?
+        asked.Add(path)
+        Return Null
+    End Function
+    Local lua = Try LuauState(options)
+    For name In ["../../../x", "C:/x", "@../../x", "@C:/x"]
+        Try? lua.Run("local f = loadstring(\"return require('./y')\", '" + name + "') f()")
+        Try? lua.Run("local f = loadstring(\"return require('@self/y')\", '" + name + "') f()")
+    End For
+    For path In asked
+        Expect(!path.Contains("..") && !path.Contains(":") && !path.StartsWith("x/"), path)
+    End For
+    // A name of a million parts is refused before it's walked.
+    Local error = ExpectThrows<LuauError>(lua.Run(
+        "local f = loadstring(\"return require('@self/y')\", '@' .. string.rep('a/', 1e6)) f()"))
+    Expect(error != Null)
+End Function
+
+@Test
+Function AModulesMetatableIsFrozenWithIt() Throws LuauError
+    Local files: Map<String, String> = {
+        "m.luau": r"local impl = { greet = function() return 'hi' end } return setmetatable({}, { __index = impl })"
+    }
+    Local options = LuauOptions()
+    options.Modules = Function(path: String): String? => files.Get(path)
+    Local lua = Try LuauState(options)
+    Local error = ExpectThrows<LuauError>(lua.Run(
+        r"getmetatable(require('./m')).__index = { greet = function() return 'evil' end }",
+        "@main.luau"))
+    Expect(error != Null)
+    Local through = ExpectThrows<LuauError>(lua.Run(
+        r"getmetatable(require('./m')).__index.greet = function() return 'evil' end", "@main.luau"))
+    Expect(through != Null)
+    Expect(Try lua.Evaluate<String>(r"return require('./m').greet()", "@main.luau") == "hi")
+End Function

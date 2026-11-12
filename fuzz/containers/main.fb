@@ -8,6 +8,7 @@
 
 Import std.collections
 Import std.core
+Import std.crypto
 Import std.math
 Import std.os
 Import std.time
@@ -23,7 +24,9 @@ Const Scripts: String[] = [
     "local v = vector.create(1, 2, 3) return v * 2, buffer.create(8)",
     r"type Point = { x: number, y: number } local p: Point = { x = 1, y = 2 } return p.x + p.y"
 ]
-Const Key = "the fuzzer's own key, as long as one has to be"
+// The fuzzer's build key, an Ed25519 private key.
+Const PrivateKey: UInt8[] = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9, 8, 7,
+                             6, 5, 4, 3, 2, 1, 0, 9, 8]
 
 // The first `count` of `bytes`.
 Function Prefix(bytes: UInt8[], count: Int): UInt8[]
@@ -71,11 +74,11 @@ End Function
 
 Local arguments = Process.Arguments()
 Local seconds = arguments.Count > 0 ? (Int.Parse(arguments[0]) ?? 5) : 5
-Local key = Key.Bytes
+Local publicKey = Ed25519.PublicKeyOf(PrivateKey)
 Local containers: UInt8[][] = []
 For index = 0 Until Scripts.Count
     Local code = Try LuauBytecode.Compile(Scripts[index], "@script{index}.luau")
-    containers.Add(code.Save(key))
+    containers.Add(code.Save(PrivateKey))
 End For
 Local random = Random(0x5EED)
 Local clock = Stopwatch.StartNew()
@@ -84,7 +87,7 @@ While clock.Elapsed.TotalSeconds < seconds
     Local which = random.Int(0, containers.Count - 1)
     Local original = containers[which]
     Local changed = Changed(original, containers[random.Int(0, containers.Count - 1)], random)
-    Local loaded = Try? LuauBytecode.Load(changed, key)
+    Local loaded = Try? LuauBytecode.Load(changed, publicKey)
     inputs++
     If changed == original
         If loaded == Null Then Panic("a container as it was signed was refused")

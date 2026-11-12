@@ -103,10 +103,16 @@ Function Run(name: String) Throws LuauError
             Local lua = LuauState()
             Local data = Try lua.NewBuffer(4)
             data.Read(0, 1099511627776)
-        // Bytecode signed with a key too short to be a secret.
+        // Bytecode signed with what isn't an Ed25519 private key, and checked with what isn't a
+        // public one.
         Case "short-key"
             Local code = Try LuauBytecode.Compile("return 1")
             Local _saved = code.Save("short".Bytes)
+        Case "short-public-key"
+            Local _loaded = Try LuauBytecode.Load([1, 2, 3], "short".Bytes)
+        // A chunk's name with a NUL, which Luau would cut it at.
+        Case "nul-name"
+            Local _code = Try LuauBytecode.Compile("return 1", String.FromUtf8([97, 0, 98]) ?? "")
         // A memory limit below 0.
         Case "negative-limit"
             Local options = LuauOptions()
@@ -116,6 +122,11 @@ Function Run(name: String) Throws LuauError
         Case "negative-budget"
             Local options = LuauOptions()
             options.TimeBudget = Duration.FromNanoseconds(-5)
+            Local _lua = Try LuauState(options)
+        // A native code cap below 0.
+        Case "negative-native-memory"
+            Local options = LuauOptions()
+            options.NativeMemory = -1
             Local _lua = Try LuauState(options)
         // A compile option out of its range.
         Case "optimization"

@@ -133,8 +133,11 @@ if(FBL_FB_TESTS)
       "closed-builder=the Luau State is closed"
       "builder-other-state=a LuauFunction of another Luau State"
       "negative-limit=a memory limit of -1 bytes is below 0"
-      "short-key=a key of 5 bytes is too short to sign with"
+      "short-key=an Ed25519 private key is 32 bytes, not 5"
+      "short-public-key=an Ed25519 public key is 32 bytes, not 5"
+      "nul-name=a chunk's name can't hold a NUL"
       "negative-budget=a time budget of -1 microseconds is below 0"
+      "negative-native-memory=a native code cap of -1 bytes is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "state-started-twice=the Luau State's driver runs already"
       "checker-time-limit=a checker's time limit of"
@@ -143,9 +146,11 @@ if(FBL_FB_TESTS)
       "shadowed=Shadowed.Harm is marked @LuauExpose, but isn't")
   # The examples, which run as programs do.
   add_test(NAME examples.bytecode
-           COMMAND "${FBL_FB}" --color never run "${PROJECT_SOURCE_DIR}/examples/bytecode")
+           COMMAND "${CMAKE_COMMAND}" -DFB=${FBL_FB} -DPROGRAM=${PROJECT_SOURCE_DIR}/examples/bytecode
+                   -DOUT=${PROJECT_BINARY_DIR}/bytecode-example
+                   -P "${CMAKE_CURRENT_SOURCE_DIR}/run_bytecode_example.cmake")
   set_tests_properties(examples.bytecode PROPERTIES
-                       PASS_REGULAR_EXPRESSION "hello, player.*door opened.*a changed container is refused")
+                       PASS_REGULAR_EXPRESSION "built 2 containers.*hello, player.*door opened.*a changed container is refused.*signed by another key is refused")
 
   # The guide's programs, each run as its own.
   if(FBL_PYTHON)
@@ -193,12 +198,12 @@ if(FBL_FB_TESTS)
   set_tests_properties(examples.modded_game PROPERTIES
                        PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*its waits ended: True")
 
-  # A marked Method of a shape that doesn't compile when it's registered: @LuauExpose on one that
-  # gives nothing, which the exposing loop's Where line on its result names.
+  # @LuauExpose on a Method that gives nothing, @LuauAction's: since fb 1.3.1 it compiles, and
+  # Register names it in a panic.
   add_test(NAME luau.compile.expose-nothing
-           COMMAND "${FBL_FB}" --color never check "${CMAKE_CURRENT_SOURCE_DIR}/compile")
+           COMMAND "${FBL_FB}" --color never run "${CMAKE_CURRENT_SOURCE_DIR}/compile")
   set_tests_properties(luau.compile.expose-nothing PROPERTIES
-                       PASS_REGULAR_EXPRESSION "its Method 'Nothing' has nothing for R")
+                       PASS_REGULAR_EXPRESSION "Silent.Nothing is marked @LuauExpose, but isn't")
   foreach(case IN LISTS fbl_panics)
     string(FIND "${case}" "=" split)
     string(SUBSTRING "${case}" 0 ${split} name)

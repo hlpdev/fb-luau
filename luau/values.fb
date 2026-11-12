@@ -254,6 +254,8 @@ Public Struct LuauSlots
         If fbl_thread_can_yield(Owner.Live(), Frame) == 1
             If Owner.DriverOf(Owner.CurrentDriver) != Null ||
                Owner.DriverOf(Owner.StateDriver) != Null
+                // The wait's own checks, before the program's function is called for it.
+                Try Owner.CanWait(Try Running())
                 Return
             End If
             Throw LuauError(LuauErrorKind.YIELD,
@@ -283,7 +285,10 @@ Public Struct LuauSlots
             where = Try? String.FromLuau(Self, Count() - 1) ?? ""
             Remove(Count() - 1)
         End If
-        Try Owner.Waited(LuauWaiting(Try Running(), task, where))
+        Local thread = Try Running()
+        Local waiting = LuauWaiting(thread, task, where)
+        waiting.Within = thread.WaitsIn()
+        Try Owner.Waited(waiting)
         Truncate(0)
         Return FBL_YIELD
     End Method

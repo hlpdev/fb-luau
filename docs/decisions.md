@@ -329,3 +329,81 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   five minutes, as the registry's index can lag the publish.
 - **The release's notes are a draft for the user** (fbengine-notes/luau/release-0.1.0.md): the
   tag, the GitHub release, and publishing are the user's to do.
+## The third review, on dev/review-3 (2026-11-12)
+
+Written while the PC was kept free for the user: none of it built or run until their go.
+
+- **Bytecode is signed by Ed25519, not an HMAC (79), a change to what was approved (plan question
+  4):** the HMAC's key both signs and checks, so the game shipped the key that signs. `Save` takes
+  the build's private key and `Load` the game's public key; the signature covers a fixed context
+  first; the format is 2. examples/bytecode is two modes, the build's and the game's, the game
+  with the public key only.
+- **The container's parser reads nothing before checking it's there (83),** and a name with a NUL
+  is refused at Compile and Load (84).
+- **Native code is off by default, and capped (80):** NativeCode's default is OFF; where on, the
+  generator is made with 256 KB blocks and `NativeMemory`'s cap, 16 MB by default, its memory
+  counted by its allocation callback and shown as `NativeMemoryUsed`; past it, code runs
+  interpreted. L10's "about the size of the bytecode it compiles" was wrong: Luau committed 4 MB
+  a State and allowed 256 MB.
+- **Native code is used only where it can run (82):** `isNativeExecutionEnabled` after `create`.
+- **Five tests unwind through native frames (81),** in ALL and with `--!native`: the budget, an
+  error caught and let go, the memory limit, a yield, and a traceback.
+- **A task's arguments stay in the State (85):** one table a wait, kept by reference, pushed at the
+  resume, counted to the State's limit; nothing of a script's arguments is copied to the program.
+- **A chunk's name, loadstring's too, reaches nothing above the root (86):** a chunk of any name
+  but a path's requires from the root, as a module "=" there; a path's name goes through the
+  parts and length checks, as require's argument does; the .luaurc search keeps to the budget.
+  The decision had loadstring mark a script's "@" name "=", so its chunk never named where
+  require looks; that changes how Luau shortens a long name in errors, which Luau's conformance
+  checks (errors.luau), and the checks are what keep a script within the root, so the name stays
+  as given. A script that names a chunk for a module's path requires from there, which reaches
+  only what the program gives every script.
+- **The waits' driver reads its scheduler's time (87),** fb 1.3.2's `Scheduler.Current.Time()`: no
+  timer coroutine, no quantum, no 1 s cap. A wait made in the driver's turn counts from the time
+  then; one made outside it, in a call of the program's or a thread's first resume, from the
+  driver's next turn, on its own scheduler. So a wait is never early, and at most a tick late.
+  A thread's Start, ending, gives what it still drives to the State's driver, or, with none,
+  ends each as a YIELD error to ThreadError.
+- **A driver checks its State after every resume and Report (88),** and gives CLOSED once
+  ThreadError closed it, not a panic.
+- **The tick's budget decides only whether another thread starts (89):** each resume has the
+  State's budget of its own, so a hog ends only itself; `fbl_state_turn`'s shared deadline isn't
+  used by the driver now.
+- **A tick inside a call of the program's is no turn (94):** `fbl_state_turn`'s 3 says whether a
+  call runs, and what's due goes the next tick.
+- **A level's function of another environment is refused (90),** by getfenv, setfenv, and
+  debug.info's "f", as a function given one is.
+- **Freezing follows metatables (91);** what a module's functions reach by upvalues stays its own,
+  and the docs say so.
+- **An Async function's wait is checked before the program's function is called (92).**
+- **lua.Start() runs until the State closes (93):** said in its doc, the guide, the READMEs, and the
+  plan; a program closes the State to end it.
+- **A require's placeholder is cleared and frozen on every way out (95),** by a catch that clears
+  and rethrows, and the load fills a cyclic requirer's placeholder itself, where a failure clears
+  it, rather than leave Luau's require to, where one partway would leave it writable.
+- **Kept errors are capped by a megabyte of text too (96).**
+- **A require's path counts backslashes as separators (97).**
+- **A wait entry belongs to its wait (98):** a thread's own wait keeps the function it waits in
+  (fbl_thread_waits_in), and is dropped at its turn when the thread isn't suspended in it, as when
+  a script resumed or closed it; a thread that waits again while its old entry is kept replaces
+  it.
+- **The two tests (99) can't stand as they were:** the wrong-self test took a type's handler from
+  the stack of the thread that called the Method, and the Method's call back into Luau runs on a
+  runner of its own, whose levels don't reach that thread, and review-2 refused another call's
+  thread to debug.info: the handler is on no stack a script can read, which is the fix. For the
+  same reason escape_test's walker stays at `found >= 1`. 54's finalizer test now fails without
+  its fix, a failing call resetting the runner. 61 has no test yet: it wants 200 nested C calls
+  ending in a program function that resumes.
+- **Objects by identity (2) still waits on fb:** fb 1.3.1's `Identity<T>` needs `T: Class`, and
+  LuauObject's Static defaults, an Interface's, can't say Self is one, convert their value to an
+  Object, or key by `Identity<Object>` (fbengine-notes/luau/interface_identity.fb, for the fb
+  lane). Written with `T: LuauObject & Class`, it didn't compile there; it's backed out, and the
+  Map is by the Class's own `==` and Hash meanwhile.
+- **Only the driver reads its scheduler's time:** `Scheduler.Current` is the main thread's, and a
+  State on a worker thread would reach it through a wait's call, so a wait made in a turn is due
+  from the turn's time plus the real time the turn's taken since, which is exact on the main
+  scheduler and late by that much on a hand-ticked one.
+- **fb 1.3.2,** in project.toml and every workflow. The workarounds fb 1.3.1's fixes made needless
+  are out: the Throws Error lambda, the Dog that couldn't list LuauObject, the drivers' array
+  instead of a Map of Weak, and the compile test, now a run that Register's panic names.
+  `@LuauAction` stays, as it says what a Method is.

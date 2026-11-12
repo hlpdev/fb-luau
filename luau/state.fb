@@ -79,8 +79,14 @@ Public Struct LuauOptions
     Public Field Libraries: LuauLibraries = LuauLibraries.ALL
     /// What collectgarbage its scripts have.
     Public Field CollectGarbage: LuauCollectGarbage = LuauCollectGarbage.COUNT
-    /// What it compiles to native code, as its code loads: MARKED by default.
-    Public Field NativeCode: LuauNativeCode = LuauNativeCode.MARKED
+    /// What it compiles to native code, as its code loads: OFF by default, as a script shouldn't
+    /// turn native code on for itself unasked; MARKED for what `--!native` and `@native` mark.
+    Public Field NativeCode: LuauNativeCode = LuauNativeCode.OFF
+    /// The most bytes its native code may take, 16 MB by default, which isn't the VM's memory and
+    /// doesn't count to MemoryLimit: past it, what's compiled from there runs in Luau's
+    /// interpreter, the same but slower. Code loaded again, as hot reload and ForgetModules load
+    /// it, takes more of it each time. A cap below 0 panics, where the State's made.
+    Public Field NativeMemory: Int64 = 16 * 1024 * 1024
     /// Whether its scripts have loadstring, which compiles source, never bytecode: False by
     /// default.
     Public Field LoadString: Bool = False
@@ -100,9 +106,10 @@ Public Struct LuauOptions
     /// ":", a "\", NUL, or a Windows device's name, or is past 1,024 bytes of 64 parts, so
     /// `root / Path(path)` stays under `root`. Its calls are the program's own file reading, in
     /// the script's call: a require asks for at most four files for its module and a ".luaurc"
-    /// for each folder it walks. A module's table is frozen through its fields, as every script
-    /// that requires it shares it. Null, the default, gives no modules, and `require` is an error
-    /// that says so.
+    /// for each folder it walks. A module's table is frozen through its fields and their
+    /// metatables, as every script that requires it shares it; what its functions reach by their
+    /// upvalues, a local table say, stays the module's own to change, for every script that
+    /// requires it. Null, the default, gives no modules, and `require` is an error that says so.
     Public Field Modules: (Func(String): String? Throws Error)? = Null
     /// Whether its scripts have the `task` library, Roblox's: True by default.
     Public Field Tasks: Bool = True
@@ -114,6 +121,9 @@ Public Struct LuauOptions
     /// default.
     Public Field MostWaiting: Int = 10000
 End Struct
+
+/// The most bytes of text a State keeps of errors, raised in one call or waiting for ThreadError.
+Const MostErrorBytes: Int64 = 1024 * 1024
 
 /// A Luau VM of the program's own, which runs scripts. It stays on the thread that made it, as
 /// every Class's objects do, and two States share nothing. It closes when nothing refers to it,
@@ -161,11 +171,14 @@ Public Class LuauState
     Package Field DeclaredGlobals: Map<String, LuauDeclared>
     /// Whether it has the `task` library, which Definitions declares.
     Package Field HasTasks: Bool = False
-    Package Field Drivers: Weak<LuauDriver>[]
+    Package Field Drivers: Map<Int, Weak<LuauDriver>>
+    Field nextDriver: Int = 0
     Package Field CurrentDriver: Int = 0
     Package Field StateDriver: Int = 0
     Package Field Turning: Bool = False
     Package Field MostWaiting: Int = 10000
+    /// How long a driver's tick may resume threads for: the State's time budget, or none for 0.
+    Package Field TickBudget: Duration
     /// The errors that ended threads nothing waits for, which go to ThreadError once no call runs.
     Package Field Failures: LuauError[]
     /// What gets an error that ends a thread nothing waits for.
@@ -185,7 +198,7 @@ Public Class LuauState
         Waits = {}
         DeclaredTypes = {}
         DeclaredGlobals = {}
-        Drivers = []
+        Drivers = {}
         Failures = []
         ThreadError = Function(error: LuauError)
             Reported(error)
@@ -194,6 +207,7 @@ Public Class LuauState
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
+        TickBudget = Duration.FromNanoseconds(0)
         Try? Printing(Null)
         Try
             Try TaskLibrary(Self)
@@ -227,7 +241,7 @@ Public Class LuauState
         Waits = {}
         DeclaredTypes = {}
         DeclaredGlobals = {}
-        Drivers = []
+        Drivers = {}
         Failures = []
         ThreadError = Function(error: LuauError)
             Reported(error)
@@ -235,7 +249,9 @@ Public Class LuauState
         Local given = options.ThreadError
         If given != Null Then ThreadError = given
         If options.MostWaiting < 0 Then Panic("{options.MostWaiting} threads can't wait at most")
+        If options.NativeMemory < 0 Then Panic("a native code cap of {options.NativeMemory} bytes is below 0")
         MostWaiting = options.MostWaiting
+        TickBudget = options.TimeBudget
         Local made = Made(options)
         If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
         If made.0 == 0 Then Panic(made.2)
@@ -609,7 +625,10 @@ Public Class LuauState
     /// program's, at the scheduler's ticks. Without it, or a thread's Start under the call, a
     /// script's wait is an error of YIELD. `s.Run(lua.Start())` puts it on a Scheduler of the
     /// program's own. It's the main thread's, as Async code is; a State on another thread has no
-    /// driver, and its scripts don't wait.
+    /// driver, and its scripts don't wait. Call it once, before a script's first wait.
+    ///
+    /// It runs until the State closes, waiting or not, so a Scheduler it runs on isn't idle, and
+    /// a program whose top-level code ends goes on, until the program closes the State.
     ///
     /// # Errors
     ///
@@ -698,6 +717,16 @@ Public Class LuauState
         End Get
     End Property
 
+    /// The bytes its native code takes, of its NativeMemory: 0 when it has none.
+    @PanicsAtCaller
+    Public Property NativeMemoryUsed: Int64
+        Get
+            Local used = fbl_state_native_memory(Live())
+            If used < 0 Then Panic(LastError())
+            Return used
+        End Get
+    End Property
+
     /// Its handle, panicking at the caller once it's closed.
     @PanicsAtCaller
     Package Method Live(): UInt64
@@ -753,38 +782,26 @@ Public Class LuauState
         End While
     End Method
 
-    /// A new driver, numbered from 1 and kept weakly, for a thread's Start, or the State's for
-    /// Null: its number is its place among the drivers, a gone one's again. They're in an array, not
-    /// a Map, as fb 1.3.0's Map of Weak keeps what Get gives (fbengine-notes/luau/weak_map_get_leak.fb).
+    /// A new driver, numbered and kept weakly, for a thread's Start, or the State's for Null.
     Package Method NewDriver(own: LuauThread?): LuauDriver
-        Local place = Drivers.Count
-        For index = 0 Until Drivers.Count
-            Local held: LuauDriver? = Drivers[index]
-            If held == Null
-                place = index
-                Break
-            End If
-        End For
-        Local driver = LuauDriver(Self, place + 1, own)
-        If place == Drivers.Count
-            Drivers.Add(driver)
-        Else
-            Drivers[place] = driver
-        End If
+        nextDriver++
+        Local driver = LuauDriver(Self, nextDriver, own)
+        Drivers[nextDriver] = driver
         Return driver
     End Method
 
     /// The driver numbered `number`, while its coroutine has it, or Null.
     Package Method DriverOf(number: Int): LuauDriver?
-        If number <= 0 || number > Drivers.Count Then Return Null
-        Local driver: LuauDriver? = Drivers[number - 1]
+        If number == 0 Then Return Null
+        Local kept = Drivers.Get(number)
+        If kept == Null Then Return Null
+        Local driver: LuauDriver? = kept
         Return driver
     End Method
 
     /// Lets go of driver `number`'s place, as it goes.
     Package Method Dropped(number: Int)
-        If number <= 0 || number > Drivers.Count Then Return
-        Drivers[number - 1] = Null
+        Drivers.Remove(number)
     End Method
 
     /// Keeps what a thread waits for, for the driver in its turn, or the State's own.
@@ -796,13 +813,11 @@ Public Class LuauState
     /// one, or before `lua.Start()`.
     Package Method Waited(waiting: LuauWaiting) Throws LuauError
         Local id = waiting.Thread.Id
-        If Waits.Contains(id)
-            Throw LuauError(LuauErrorKind.RUNTIME,
-                            "the thread waits already, for one thing at a time")
-        End If
-        If Waits.Count >= MostWaiting
-            Throw LuauError(LuauErrorKind.RUNTIME, "more than {MostWaiting} threads would wait")
-        End If
+        // A thread that waits itself, while a wait of its own is kept, went around that one, as
+        // a script's coroutine.resume does: the old one's dropped.
+        Local old = Waits.Get(id)
+        If old != Null && old.Within != 0 && waiting.Within != 0 Then Waits.Remove(id)
+        Try CanWait(waiting.Thread)
         Local driver = DriverOf(CurrentDriver) ?? DriverOf(StateDriver)
         If driver == Null
             Throw LuauError(LuauErrorKind.YIELD,
@@ -810,14 +825,48 @@ Public Class LuauState
                             "State's waits; lua.Start() runs them, or a thread's Start")
         End If
         waiting.Driver = driver.Number
-        waiting.Due = driver.Now + waiting.Seconds
+        // A wait made in the driver's turn counts from its scheduler's time at the turn, and what
+        // real time the turn's taken since, so it's never early on the main scheduler, whose time
+        // is the real clock's; one made outside it, as in a call of the program's or a thread's
+        // first resume, from the driver's next turn, on its own scheduler. Only the driver reads
+        // the scheduler's time, as a State on a worker thread can't.
+        If driver.InTurn
+            waiting.Due = driver.Now + driver.TurnTime() + waiting.Seconds
+        Else
+            waiting.Due = waiting.Seconds
+            waiting.Pending = True
+        End If
         Waits[id] = waiting
+    End Method
+
+    /// Nothing when `thread` can wait: it doesn't already, and fewer than MostWaiting do.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of RUNTIME for a thread that waits already, or past MostWaiting.
+    Package Method CanWait(thread: LuauThread) Throws LuauError
+        If Waits.Contains(thread.Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the thread waits already, for one thing at a time")
+        End If
+        If Waits.Count >= MostWaiting
+            Throw LuauError(LuauErrorKind.RUNTIME, "more than {MostWaiting} threads would wait")
+        End If
     End Method
 
     /// Keeps an error that ended a thread nothing waits for, the most recent 64, for Report.
     Package Method Failed(error: LuauError)
-        If Failures.Count >= 64 Then Failures.RemoveAt(0)
         Failures.Add(error)
+        // The most recent 64, and 1 MB of their text, the oldest dropped.
+        Local bytes: Int64 = 0
+        For kept In Failures
+            bytes += (kept.Message.Bytes.Count + kept.Traceback.Bytes.Count) As Int64
+        End For
+        While Failures.Count > 64 || (bytes > MostErrorBytes && Failures.Count > 1)
+            Local oldest = Failures[0]
+            bytes -= (oldest.Message.Bytes.Count + oldest.Traceback.Bytes.Count) As Int64
+            Failures.RemoveAt(0)
+        End While
     End Method
 
     /// Gives ThreadError the errors kept, once no call runs, nor a driver's turn.
@@ -836,10 +885,17 @@ Public Class LuauState
     Package Method Kept(message: String, error: Error)
         If !Raised.Contains(message) Then RaisedOrder.Add(message)
         Raised[message] = error
-        If RaisedOrder.Count > 64
+        // The most recent 64, and 1 MB of their messages, the oldest dropped, which loses only
+        // its Cause.
+        Local bytes: Int64 = 0
+        For kept In RaisedOrder
+            bytes += kept.Bytes.Count As Int64
+        End For
+        While RaisedOrder.Count > 64 || (bytes > MostErrorBytes && RaisedOrder.Count > 1)
+            bytes -= RaisedOrder[0].Bytes.Count As Int64
             Raised.Remove(RaisedOrder[0])
             RaisedOrder.RemoveAt(0)
-        End If
+        End While
     End Method
 
     /// T's registration, if it has one.
@@ -1022,7 +1078,8 @@ Function Made(options: LuauOptions): (UInt64, Int32, String)
                                       collect_garbage: options.CollectGarbage As Int32,
                                       native_code: options.NativeCode As Int32,
                                       load_string: options.LoadString,
-                                      environments: options.Environments, unused: [False, False])
+                                      environments: options.Environments, unused: [False, False],
+                                      native_memory: options.NativeMemory)
     Local status: Int32 = FBL_OK
     Local handle: UInt64
     Unsafe

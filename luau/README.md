@@ -23,14 +23,15 @@ Print(Try lua.Evaluate<Int>("return add(2, 3)"))      // 5
 - A sandbox by default: frozen shared globals, globals of each script's own, a memory limit, a
   time budget for each call, and no file or OS access unless the program gives it.
 - Luau's threads on FutureBlitz's schedulers, so a script's `task.wait(2)` waits as an Await
-  does, and an Async Function a script calls is waited for.
-- `require` over files the program gives, bytecode compiled ahead and signed with the program's
-  key, native code where Luau's code generator runs, and Luau's type checker, which checks a mod
-  against the API the program gives it.
+  does, and an Async Function a script calls is waited for, once the program has called
+  `lua.Start()`, which runs a State's waits until it closes.
+- `require` over files the program gives, bytecode compiled ahead and signed by the build's
+  Ed25519 key, native code where Luau's code generator runs, and Luau's type checker, which
+  checks a mod against the API the program gives it.
 
 [The guide](https://github.com/hlpdev/fb-luau/blob/master/docs/guide.md) goes through each part
 with a program that runs.
 
-Needs fb 1.3.0 or later, on Windows x64, Linux x64 and arm64, or macOS arm64 and x64. Apache-2.0;
+Needs fb 1.3.2 or later, on Windows x64, Linux x64 and arm64, or macOS arm64 and x64. Apache-2.0;
 in its library, Luau is MIT (notices/luau.txt), and on Windows MinGW-w64's winpthreads is MIT
 and BSD-style (notices/winpthreads.txt).

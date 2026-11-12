@@ -32,6 +32,7 @@ Package Const FBL_NATIVE_ALL: Int32 = 2
     Public Field load_string: Bool
     Public Field environments: Bool
     Public Field unused: Bool[2]
+    Public Field native_memory: Int64
 End Struct
 
 Package Extern "C" Lib "luau_native"
@@ -43,6 +44,7 @@ Package Extern "C" Lib "luau_native"
     Function fbl_state_memory_all(here: Int32): Int64
     Function fbl_state_native_supported(): Int32
     Function fbl_state_native_functions(state: UInt64): Int64
+    Function fbl_state_native_memory(state: UInt64): Int64
     Function fbl_state_memory(state: UInt64): Int64
     Function fbl_state_collect(state: UInt64): Int32
     Function fbl_state_error_kind(state: UInt64): Int32

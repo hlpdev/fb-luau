@@ -429,3 +429,207 @@ Function SpawningAThreadThatIsntSuspendedIsTheCallersError() Throws LuauError
         Expect(error != Null && error.Message.Contains("takes a suspended thread"), source)
     End For
 End Function
+
+@Test
+Function ATasksArgumentsStayInTheState() Throws LuauError
+    // A megabyte string, given 8,000 times to each of 10,000 delays, is Luau's once: the program
+    // keeps one table a delay, not 8 GB of copies.
+    Local options = LuauOptions()
+    options.MemoryLimit = 16 * 1024 * 1024
+    options.MostWaiting = 20000
+    Local lua = Try LuauState(options)
+    Local waits = lua.Start()
+    Local before = LuauProcessMemory()
+    // The tables count to the State's limit, which they reach partway, and the program's memory
+    // doesn't grow by what they hold.
+    Try
+        Try lua.Run("local s = string.rep('x', 2^20) local t = table.create(7999, s) " +
+                    "for i = 1, 10000 do task.delay(1e9, function() end, table.unpack(t)) end")
+    Catch error As LuauError
+        Expect(error.Kind == LuauErrorKind.MEMORY, error.Message)
+    End Try
+    Expect(LuauProcessMemory() - before < 256 * 1024 * 1024, "the program's memory grew")
+    // And they arrive, as they were given.
+    Try lua.Run(
+        "got = nil task.defer(function(a, b, c) got = a .. b .. tostring(c) end, 'x', 'y', nil)")
+    Scheduler.Main.Step()
+    Scheduler.Main.Step()
+    Expect(Try lua.Get<String>("got") == "xynil")
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function
+
+@Test
+Function AStartsDelaysGoToTheStatesDriverWhenItsThreadEnds() Throws LuauError
+    Local lua = LuauState()
+    Local world = Scheduler()
+    Local waits = lua.Start()
+    world.Run(waits)
+    Try lua.Run("function main() task.delay(2, function() ran = true end) task.wait(0.5) end")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    world.Run(done)
+    Local time: Float64 = 0.0
+    While time < 3.0
+        world.Tick(0.1)
+        time += 0.1
+    End While
+    Expect(done.IsDone())
+    Expect(Try lua.Get<Bool>("ran"))
+    lua.Close()
+    world.Tick(0.1)
+    Expect(world.IsIdle())
+End Function
+
+@Test
+Function AWaitMadeMidTickIsNeverEarlyNorMoreThanATickLate() Throws LuauError
+    Local lua = LuauState()
+    Local world = Scheduler()
+    Try lua.SetFunction("now", Function(): Float64 => world.Time().TotalSeconds)
+    Local waits = lua.Start()
+    world.Run(waits)
+    Try lua.Run(
+        "function main() task.wait(0.25) local a = now() task.wait(0.3) waited = now() - a end")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    world.Run(done)
+    For tick = 1 To 20
+        world.Tick(0.25)
+    End For
+    Local waited = Try lua.Get<Float64>("waited")
+    Expect(waited >= 0.3 && waited <= 0.55, "{waited}")
+    lua.Close()
+End Function
+
+@Test
+Function AStartWhoseThreadErrorClosesTheStateEndsClosed() Throws LuauError
+    Local options = LuauOptions()
+    Local closers: Weak<LuauState>[] = []
+    options.ThreadError = Function(error: LuauError)
+        For closer In closers
+            Local held: LuauState? = closer
+            held?.Close()
+        End For
+    End Function
+    Local lua = Try LuauState(options)
+    closers.Add(lua)
+    Try lua.Run("function main() task.spawn(function() error('x') end) coroutine.yield() end")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    For step = 1 To 5
+        Scheduler.Main.Step()
+    End For
+    Local error = ExpectThrows<LuauError>(done.Wait())
+    Expect(error != Null && error.Kind == LuauErrorKind.CLOSED)
+End Function
+
+@Test
+Function AHogEndsOnlyItselfAndTheOthersFinish() Throws LuauError
+    Local options = LuauOptions()
+    options.TimeBudget = 30.Milliseconds
+    Local lua = Try LuauState(options)
+    Local world = Scheduler()
+    world.Run(lua.Start())
+    // The hog spins just short of the budget, then waits, each tick; the bystanders each wait
+    // ten ticks.
+    Try lua.Run("finished = 0 " +
+                "task.spawn(function() while true do local t = os.clock() " +
+                "while os.clock() - t < 0.025 do end task.wait() end end) " +
+                "for i = 1, 5 do task.spawn(function() for j = 1, 10 do task.wait() end " +
+                "finished += 1 end) end")
+    For tick = 1 To 40
+        world.Tick(0.1)
+    End For
+    Expect(Try lua.Get<Int>("finished") == 5)
+    lua.Close()
+End Function
+
+@Test
+Function ATickInsideACallIsNoTurn() Throws LuauError
+    // The program's function steps the main scheduler while a script's call runs: the driver's
+    // turn then does nothing, rather than panic, and what's due goes the next tick.
+    Local lua = LuauState()
+    Local waits = lua.Start()
+    Try lua.SetFunction("step", Function()
+        Scheduler.Main.Step()
+    End Function)
+    Try lua.Run("task.defer(function() deferred = true end) step()")
+    Scheduler.Main.Step()
+    Scheduler.Main.Step()
+    Expect(Try lua.Get<Bool>("deferred"))
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function
+
+@Test
+Function AnAsyncFunctionIsntCalledPastTheWaitsLimit() Throws LuauError
+    Local options = LuauOptions()
+    options.MostWaiting = 3
+    Local lua = Try LuauState(options)
+    Local waits = lua.Start()
+    Local called = 0
+    Try lua.SetAsync("work", Function(): Task<Int>
+        called++
+        Return Doubled(1)
+    End Function)
+    // Three threads wait on work; the rest are refused before work is called for them.
+    Try lua.Run("for i = 1, 10 do task.spawn(function() pcall(work) end) end")
+    Expect(called <= 3, "{called}")
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function
+
+@Test
+Function ACallsKeptErrorsAreCappedByBytesToo() Throws LuauError
+    // 64 errors of a megabyte each, raised through the program in one call: what the call keeps
+    // of them is a megabyte, not 64.
+    Local options = LuauOptions()
+    options.MemoryLimit = 8 * 1024 * 1024
+    Local lua = Try LuauState(options)
+    Local states: Weak<LuauState>[] = []
+    Try lua.SetFunction("forEach", Function(f: LuauFunction) Throws Error
+        Try f.Invoke()
+    End Function)
+    Try lua.SetFunction("keptBytes", Function(): Int
+        For weak In states
+            Local held: LuauState? = weak
+            If held == Null Then Continue
+            Local bytes = 0
+            For message In held.RaisedOrder
+                bytes += message.Bytes.Count
+            End For
+            Return bytes
+        End For
+        Return -1
+    End Function)
+    states.Add(lua)
+    Local kept = Try lua.Evaluate<Int>("local big = string.rep('x', 2^20) " +
+                                       "for i = 1, 64 do pcall(forEach, function() error(big .. i, 0) end) end " +
+                                       "return keptBytes()")
+    Expect(kept > 0 && kept <= 2 * 1024 * 1024, "{kept}")
+End Function
+
+@Test
+Function AWaitAScriptWentAroundIsDropped() Throws LuauError
+    // The script resumes a thread that waits, which yields elsewhere: its wait's entry is dropped,
+    // not resumed into the later yield with the wait's values, and it doesn't count to the limit.
+    Local options = LuauOptions()
+    options.MostWaiting = 2
+    Local lua = Try LuauState(options)
+    Local world = Scheduler()
+    world.Run(lua.Start())
+    Try lua.Run("got = nil " +
+                "t = coroutine.create(function() task.wait(0.1) coroutine.yield('mine') got = 'late' end) " +
+                "coroutine.resume(t) " +
+                "coroutine.resume(t)")
+    For tick = 1 To 5
+        world.Tick(0.1)
+    End For
+    Expect(Try lua.Evaluate<Bool>("return got == nil"))
+    // The limit isn't held by the dropped entry: two more waits fit.
+    Try lua.Run("task.spawn(function() task.wait(1) end) task.spawn(function() task.wait(1) end)")
+    // A thread a script resumed past its wait, that waits again, replaces its old entry.
+    Try lua.Run("u = coroutine.create(function() task.wait(5) task.wait(0.1) done = true end) " +
+                "coroutine.resume(u) coroutine.resume(u)")
+    For tick = 1 To 5
+        world.Tick(0.1)
+    End For
+    lua.Close()
+End Function

@@ -2,6 +2,7 @@
 #include "fbl.h"
 #include "state/state.hpp"
 
+#include <cstdint>
 #include <lua.h>
 #include <lualib.h>
 
@@ -107,6 +108,28 @@ int32_t fbl_thread_status(uint64_t state, int32_t frame, int32_t slot) try {
 } catch (...) {
     fbl::escaped();
     return -1;
+}
+
+int64_t fbl_thread_waits_in(uint64_t state, int32_t frame, int32_t slot) try {
+    fbl::state_t* found = fbl::find_state(state);
+    const fbl::frame_t* in = found == nullptr ? nullptr : fbl::find_frame(*found, frame);
+    int index = 0;
+    lua_State* co = in == nullptr ? nullptr : thread_at(*in, slot, index);
+    if (co == nullptr) {
+        return 0;
+    }
+    lua_Debug info{};
+    if (lua_checkstack(co, 1) == 0 || lua_getinfo(co, 0, "f", &info) == 0) {
+        return 0;
+    }
+    const void* function = lua_topointer(co, -1);
+    lua_pop(co, 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the function's address, as a
+    // number.
+    return static_cast<int64_t>(reinterpret_cast<uintptr_t>(function));
+} catch (...) {
+    fbl::escaped();
+    return 0;
 }
 
 uint64_t fbl_thread_id(uint64_t state, int32_t frame, int32_t slot) try {

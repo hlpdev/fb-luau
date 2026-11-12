@@ -63,6 +63,10 @@ typedef struct fbl_state_options_t {
     bool load_string;
     bool environments;
     bool unused[2];
+    // The most bytes its native code may take, when it has any, which isn't the VM's and doesn't
+    // count to its memory limit: past it, what's compiled from there runs in Luau's interpreter.
+    // 0 for Luau's own cap.
+    int64_t native_memory;
 } fbl_state_options_t;
 
 // Makes a State, with Luau's flags set first, as its release's CLI sets them, and its libraries
@@ -83,7 +87,8 @@ FBL_API int32_t fbl_state_step(uint64_t state, int32_t kilobytes);
 // A turn of the program's driver of threads: 1 begins one, with the time budget for everything
 // it resumes, as one call has it, which only begins when no call runs; 0 ends it; a status. 2
 // gives 1 when the turn's budget is spent, 0 when it isn't, or -1 for a handle that isn't a
-// State's.
+// State's. 3 gives 1 while a call of the program's into the State runs, when a driver's turn
+// would resume threads inside it, and 0 when none does.
 FBL_API int32_t fbl_state_turn(uint64_t state, int32_t what);
 
 // How many States the process has open, on every thread, or, when `here` isn't 0, those of the
@@ -101,6 +106,10 @@ FBL_API int32_t fbl_state_native_supported(void);
 // How many of the State's functions it's compiled to native code, or -1 for a handle that isn't
 // a State's.
 FBL_API int64_t fbl_state_native_functions(uint64_t state);
+
+// The bytes the State's native code takes, of its native_memory, or -1 for a handle that isn't a
+// State's.
+FBL_API int64_t fbl_state_native_memory(uint64_t state);
 
 // The bytes the State's VM holds, or -1 for a handle that isn't a State's.
 FBL_API int64_t fbl_state_memory(uint64_t state);

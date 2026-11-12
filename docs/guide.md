@@ -270,11 +270,13 @@ Expect(bytes.ReadUInt32(0) == 0xDEADBEEF)
 
 ## Threads on the scheduler
 
-A script's `task.wait(2)` waits as an `Await Wait(2.Seconds)` does, while the program goes on. A
-`LuauThread`'s `Start()` runs it on the scheduler running the code, and `lua.Start()` runs what
-`task.spawn` and `task.delay` start. A Scheduler of the program's own, which a pause stops and
-whose `Tick` scales time, runs them where it's given them. `SetAsync` gives a script an Async
-Function: its thread waits for the Task.
+A script's `task.wait(2)` waits as an `Await Wait(2.Seconds)` does, while the program goes on.
+Something has to resume it: call `lua.Start()` once, before a script's first wait, and it runs
+every wait of the State's, `task.spawn`'s and `task.delay`'s too, at each tick of the scheduler
+it's on, until the State closes. A `LuauThread`'s `Start()` runs its own thread the same way, as
+an Async Function, whose Task is done when the thread ends. A Scheduler of the program's own,
+which a pause stops and whose `Tick` scales time, runs them where it's given them. `SetAsync`
+gives a script an Async Function: its thread waits for the Task.
 
 ```vb
 Import std.core
@@ -287,9 +289,12 @@ Async Function Fetched(name: String): String
 End Function
 
 Local lua = LuauState()
-Try lua.SetAsync("fetch", Function(name: String) => Fetched(name))
-Try lua.Run(r"function main() task.wait(1) result = fetch('ana') end")
 Local world = Scheduler()
+// Once, before any wait: the State's waits run on the world's ticks from here.
+world.Run(lua.Start())
+Try lua.SetAsync("fetch", Function(name: String) => Fetched(name))
+Try lua.Run(r"task.delay(0.5, function() delayed = true end)")
+Try lua.Run(r"function main() task.wait(1) result = fetch('ana') end")
 Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
 world.Run(done)
 Local time = 0.0
@@ -298,10 +303,14 @@ While !done.IsDone()
     time += 0.25
 End While
 Expect(time >= 1.0 && Try lua.Get<String>("result") == "ana's save")
+Expect(Try lua.Get<Bool>("delayed"))
+// The State's driver runs until the State closes, which ends it.
+lua.Close()
 ```
 
-A wait with nothing to run it, as in `lua.Run`, which runs on the program's own stack, is a
-`LuauError` of `YIELD`. A thread that waits is `WAITING`: the program follows it by its Task, not
+A wait before `lua.Start()`, with nothing to run it, is a `LuauError` of `YIELD` that says
+`lua.Start()` runs them; so is one inside a metamethod, or on a State made on a thread of the
+program's other than the main one, where nothing Async runs. A thread that waits is `WAITING`: the program follows it by its Task, not
 by `Resume`. A State closed while its threads wait ends every wait, and each Start's Task throws
 `CLOSED`.
 
@@ -377,28 +386,38 @@ Expect(Try doors.Evaluate<String>(files["mods/doors/init.luau"] ?? "", "@mods/do
 
 A game's own scripts can be compiled ahead, as its build does, into bytecode a State runs
 without compiling. Luau runs bytecode as it's given, checking nothing, so bytecode crosses a file
-system only in `Save`'s container, signed with the program's own key, which `Load` checks before
-Luau sees a byte. A mod is source, always.
+system only in `Save`'s container, signed by the build with an Ed25519 private key that never
+ships, which `Load` checks in the game with the public key before Luau sees a byte. The public
+key is no secret; the private key is the whole of it. A mod is source, always, and scripts
+embedded in the executable can as well be compiled from source as it starts.
 
 ```vb
+Import std.crypto
 Import std.test
 Import luau
 
-Local key = "the game's own secret, not this".Bytes
-Local shipped = (Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")).Save(key)
-Local loaded = Try LuauBytecode.Load(shipped, key)
+// The build's: Ed25519.NewPrivateKey() made it once, and the build keeps it.
+Local privateKey = Ed25519.NewPrivateKey()
+Local shipped = (Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")).Save(privateKey)
+
+// The game's, which ships with the public key only.
+Local publicKey = Ed25519.PublicKeyOf(privateKey)
+Local loaded = Try LuauBytecode.Load(shipped, publicKey)
 Expect(Try LuauState().Evaluate<Int>(loaded) == 42)
-Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, "another key, as long".Bytes)) != Null)
+Local another = Ed25519.PublicKeyOf(Ed25519.NewPrivateKey())
+Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, another)) != Null)
 ```
 
-examples/bytecode is a build step and its game, in one program.
+examples/bytecode is a build step and its game, as two modes of one program.
 
 ## Native code
 
-Where Luau's code generator is supported, x64 and arm64, a State compiles code to native code
-as it loads: by default what's marked, a chunk that starts with `--!native` and a function marked
-`@native`; with `LuauNativeCode.ALL`, everything. Where it isn't, the interpreter runs it, with
-the same results.
+Where Luau's code generator is supported, x64 and arm64, a State can compile code to native code
+as it loads. It's off by default, as a script shouldn't turn it on for itself; with
+`LuauNativeCode.MARKED`, a chunk that starts with `--!native` and a function marked `@native`
+are; with `LuauNativeCode.ALL`, everything. Its code takes memory of its own, outside the memory
+limit, up to `LuauOptions.NativeMemory`, 16 MB by default, past which code runs in the
+interpreter. Where the generator isn't supported, the interpreter runs it, with the same results.
 
 ```vb
 Import std.test

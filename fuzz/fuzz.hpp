@@ -37,6 +37,7 @@ inline fbl_state_options_t fuzz_options() {
         .load_string = true,
         .environments = true,
         .unused = {},
+        .native_memory = 0,
     };
 }
 

@@ -418,12 +418,17 @@ end
   a driver resumes them: a thread's Start is one, for its thread and what the threads it starts
   wait for, and `lua.Start()` is the State's, for the rest, `task.spawn`'s, `task.delay`'s, and a
   coroutine's of a call of the program's. A driver is a coroutine that, at each of its
-  scheduler's ticks, resumes what's due, with one time budget for all of it, what's left due
-  going first the next tick, and ends when nothing of its waits or the State closes. Its time is
-  what its timer has seen pass, a `Wait` of the soonest due, at most a second at a time, as a
-  timer started in a tick counts from its end: a wait is never early, and late by at most what
-  the scheduler's ticks overshoot. At most `LuauOptions.MostWaiting` threads wait, 10,000 by
-  default, past which the script's call is an error, and a thread waits for one thing at a time.
+  scheduler's ticks, reads the scheduler's time (fb 1.3.2's `Scheduler.Current.Time()`) and
+  resumes what's due, what's left due going first the next tick. No wait is a timer: a wait made
+  in the driver's turn is due its seconds from the time then, and one made outside it, from the
+  driver's next turn, so a wait is never early, and at most a tick late. The State's time budget
+  decides only whether another thread is resumed in a tick; each resume has the budget of its
+  own, so a script that spins ends only itself. A thread's Start ends with its thread, giving what
+  it still drives to the State's driver, or, with none, to ThreadError. `lua.Start()` runs until
+  the State closes, so a Scheduler it runs on isn't idle, and a program ends it by closing the
+  State. At most `LuauOptions.MostWaiting` threads wait, 10,000 by default, past which the
+  script's call is an error, and a thread waits for one thing at a time: a wait a script went
+  around, resuming the thread itself, is dropped.
 - A wait with no driver is a `YIELD` error. States are the main thread's, as Async code is: one
   made on another thread works, with no driver, and its scripts don't wait.
 - The `task` library, which the State opens when `LuauOptions.Tasks` is on, as it is by default,
@@ -471,8 +476,12 @@ Try doors.Run(source, "@mods/doors/init.luau")
   its own, its `_G`, which read through to the frozen ones by a locked metatable, so one mod can't
   change what another sees, or reach the shared table. What's shared is what the program gives
   every script, the frozen globals, and the State's modules: each runs once, and every script
-  that requires it gets its one table, frozen through its fields, so no mod changes it for
-  another. A State that's never frozen freezes at its first `NewScript`. A script's code is loaded on a thread whose globals are the script's, as Luau
+  that requires it gets its one table, frozen through its fields and their metatables, so no mod
+  changes it for another. What a module's functions reach by their upvalues, a local table say,
+  isn't frozen: it's the module's own state, which its functions change for every script that
+  requires it, so a module shared by mods shouldn't keep a mod's state there. A State that's
+  never frozen freezes at its first `NewScript`. A script's code is loaded on a thread whose
+  globals are the script's, as Luau
   resolves a chunk's globals as it loads from the loading thread's, not from the environment it's
   given.
 - The libraries, `LuauOptions.Libraries`, a `@Flags` Enum, are by default Luau's safe ones:
@@ -530,11 +539,12 @@ local util = require("@shared/util")
 ### Bytecode
 
 ```vb
-Const KEY = EmbedText("bytecode.key")              // the program's own secret
+// The build step's, with a key that never ships.
 Local code = Try LuauBytecode.Compile(source, "@rooms/door.luau")
-Local bytes = code.Save(KEY)                        // shipped with the game
+Local bytes = code.Save(privateKey)                 // Ed25519, into the game's paks
 
-Local loaded = Try LuauBytecode.Load(bytes, KEY)    // checks its tag, then trusts it
+// The game's, which has only the public key.
+Local loaded = Try LuauBytecode.Load(bytes, publicKey)   // checks its signature, then trusts it
 Try lua.Run(loaded)
 ```
 
@@ -542,9 +552,17 @@ Try lua.Run(loaded)
   bytecode from anywhere but its own compiler has no guarantees, and should be signed. So
   `Save` writes a container: a magic and its format, the Luau release that compiled it (the
   bytecode's version is its first byte), the compile options, the chunk's name, the bytecode, and
-  an HMAC-SHA256 of all of it by the program's key, of 16 bytes at least, std's `std.crypto`'s.
-  `Load` checks the tag first, in constant time, and gives a `LuauError` of `OTHER` for a wrong
-  one, a container of another Luau, or anything that isn't one, before Luau sees a byte.
+  an Ed25519 signature, std.crypto's, of a fixed context ("fb-luau bytecode, format 2") and all of
+  it, by the build's private key. `Load` checks the signature with the public key first, and
+  gives a `LuauError` of `OTHER` for a wrong one, a container of another Luau, or anything that
+  isn't one, before Luau sees a byte. (It was an HMAC, whose one key both signs and checks, so
+  the game shipped the key that signs; review finding 79.)
+- The public key is no secret: anyone can read it out of the game and still can't sign. The
+  private key is the whole of it, and stays with the build. So a container a mod can replace, in
+  a pak, is as safe as one it can't; and for scripts embedded in the executable, compiling their
+  source at start is as good as a container. The format's number goes up when the package's Luau
+  flags or build options change, and a State's Debug and Coverage options don't apply to bytecode
+  it's given, which has its own.
 - `lua.Run(code)`, `Evaluate<T>(code)`, and `Load(code)` run bytecode as they do source, and a
   `LuauScript`'s `Run` and `Evaluate` run it in the script's globals. A `LuauBytecode` is only
   ever `Compile`'s or `Load`'s, so one the program holds is its own.
@@ -555,11 +573,21 @@ Try lua.Run(loaded)
 
 ### Native code generation
 
-- `LuauOptions.NativeCode`: `OFF`, `MARKED` (the default: modules that start with `--!native`,
-  and functions with `@native`), or `ALL`. It's Luau's CodeGen, on x64 with AVX and on arm64;
-  where it isn't supported, code runs in the interpreter, the same, and
-  `LuauNativeCodeSupported()` says so. `lua.NativeFunctions` counts the functions a State has
-  compiled.
+- `LuauOptions.NativeCode`: `OFF` (the default, as a script shouldn't turn native code on for
+  itself unasked), `MARKED` (modules that start with `--!native`, and functions with `@native`),
+  or `ALL`. It's Luau's CodeGen, on x64 with AVX and on arm64; where it isn't supported, or Luau
+  can't get executable memory (a hardened runtime, SELinux), code runs in the interpreter, the
+  same, and `LuauNativeCodeSupported()` says so. `lua.NativeFunctions` counts the functions a
+  State has compiled.
+- Its code's memory isn't the VM's: it's capped by `LuauOptions.NativeMemory`, 16 MB by default,
+  in blocks of 256 KB, counted (`lua.NativeMemoryUsed`), and past the cap what's compiled from
+  there runs in the interpreter. Code loaded again, as hot reload and ForgetModules load it, takes
+  more of it each time, as the generator doesn't reuse freed code until the State closes. (Luau's
+  defaults were 4 MB committed for each State and up to 256 MB, outside the memory limit; review
+  finding 80.)
+- An error, a timeout, the memory limit, a yield, and a traceback each go through native frames
+  in a test on every target (81): where one fails on a target, native code is off there until it
+  doesn't, and LuauNativeCodeSupported says so.
 - It's made per State when the State is, before any code loads, as Luau needs, and compiles each
   chunk as it loads: source, bytecode, a module, and `loadstring`'s. What it can't compile runs in
   the interpreter. Registered types aren't given to the compiler as userdata types yet: every
@@ -810,7 +838,7 @@ and `fb doc luau --check`. Its flags are fbengine's: `--build`, `--base`, `--no-
   without a compiler, `fb test luau` against that Release library and the conformance program;
   a Debug build and ctest on each target; and the format job (clang-format, `fb fmt --check`,
   the bindings' and arity code's checks, `fb doc --check`). fb comes from the `install-fb`
-  action at the version `FB_VERSION` pins, 1.3.0, as fbengine's does.
+  action at the version `FB_VERSION` pins, 1.3.2, as fbengine's does.
 - **stability.yml**, nightly and by hand: ASan with UBSan, and TSan, over the stability tests;
   each fuzzer for 10 minutes; and the soak.
 - **targeted.yml**, by hand: a ctest pattern on the targets it names.
@@ -867,10 +895,9 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
 8. **An Error can't say its own Class's name as the program runs,** which the runtime knows, as
    an uncaught error's message shows it, so an error crossing into Luau is its Message alone, not
    `IOError: ...`.
-9. **A bug: beside an overload that takes a `Func()`, a lambda that throws an `IOError` fits no
-   overload,** though `Func() Throws Error` alone takes it, and a named Function that throws
-   does. A lambda given to `SetFunction` says `Throws Error` meanwhile
-   (fbengine-notes/luau/throws_overload.fb shows it).
+9. **Fixed in fb 1.3.1:** beside an overload that takes a `Func()`, a lambda that throws an
+   `IOError` fit no overload; a lambda given to `SetFunction` said `Throws Error`, and doesn't
+   now (fbengine-notes/luau/throws_overload.fb).
 10. **A Field or Property loop can't pick by an attribute,** only a Method loop can, so a loop's
     Where lines on F hold for every Field, and `Register<T>` can't expose only the Fields marked
     `@LuauExpose`; field-like members are `@LuauGet` and `@LuauSet` Methods meanwhile
@@ -878,28 +905,24 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
 11. **An Interface can't say what implements it is a Class** (no `Where Self: Class` in a default),
     so `LuauObject`'s defaults can't keep an object as an `Object`; it's boxed by its type, and
     reads back only as that type.
-12. **A bug: a `For Method` loop of `Func(): R` binds a Method that gives nothing, with R as
-    nothing,** so a Where line on R fails for it, and a loop over the Methods that give a value
-    can't be written beside those that don't; `@LuauAction` marks the second kind meanwhile
+12. **Fixed in fb 1.3.1:** a `For Method` loop of `Func(): R` bound a Method that gives nothing.
+    `@LuauAction` still marks a Method that gives nothing, as it says what it is; `@LuauExpose` on
+    one is now named in Register's panic rather than refused by the compiler
     (fbengine-notes/luau/void_result.fb).
-13. **A bug: a Scheduler's `Run(task)` moves only the task's own coroutine,** not the Async
-    coroutines it awaits, which spec 10 says it moves with it, so those stay on the scheduler
-    that started them. `Start` awaits each wait itself, so `s.Run(thread.Start())` moves its
-    `task.wait`s; but a function from `SetAsync` that the thread called before the Run, from
-    the main scheduler, stays there until it's done (fbengine-notes/luau/scheduler_run_nested.fb).
-14. **Nothing keys by identity:** a Map uses a Class's own `==` and `Hash`, `Weak<T>` isn't
-    Hashable, and there's no hash to go with `RefEquals`, so two equal objects of a Class with an
-    `==` of its own share one userdata, and one whose Hash changes while Luau has it gets a second
-    (review finding 2, open; fbengine-notes/luau/identity_key.fb).
-15. **A derived Class gets its base's Static defaults:** an Interface's Static default is the
-    base's for a Class that extends it, and one that gives Self clashes when the derived Class
-    lists the Interface, so a type extending a registered one crosses only as its base, and can't
-    be registered itself (fbengine-notes/luau/derived_static_default.fb).
+13. **Fixed in fb 1.3.1:** a Scheduler's `Run(task)` moved only the task's own coroutine. The
+    waits' driver no longer rests on it either way: it reads its scheduler's time each tick, by
+    fb 1.3.2's `Scheduler.Current.Time()` (fbengine-notes/luau/scheduler_run_nested.fb).
+14. **Nothing keys an Interface's implementer by identity:** fb 1.3.1 has `Identity<T>`, which
+    needs `T: Class`, and LuauObject's Static defaults, an Interface's, can't say Self is a Class
+    (gap 11), convert it to an Object, or key by `Identity<Object>`. So two equal objects of a
+    Class with an `==` of its own share one userdata, and one whose Hash changes while Luau has it
+    gets a second (review finding 2, open; fbengine-notes/luau/interface_identity.fb).
+15. **Fixed in fb 1.3.1:** a derived Class got its base's Static defaults, so a Class extending a
+    registered one couldn't list LuauObject. It can now, and is a type of its own; an object still
+    reads back only as the type it crossed as, by gap 11 (fbengine-notes/luau/derived_static_default.fb).
 16. **A For Method loop goes over one shape,** with a Where line, so a marked Method of a shape
     none of Register's loops expose is found by a loop for each shape up to 8 arguments, and named
-    in a panic at Register; one of more arguments, or that throws two kinds of error, isn't, and
-    `@LuauExpose` on one that gives nothing doesn't compile, by gap 12's bug, its message naming
-    the Method.
+    in a panic at Register; one of more arguments, or that throws two kinds of error, isn't.
 17. **`TypeName<T>()` has no module,** so a State keeps a type's registration by an id each type
     gets the first time it's registered, a generic Class's Static Atomic, not by its name.
 

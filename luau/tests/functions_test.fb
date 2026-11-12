@@ -82,8 +82,7 @@ End Function
 Function AnErrorThatComesBackOutHasItsCause() Throws LuauError
     Local lua = LuauState()
     Local thrown = IOError(IOErrorKind.NOT_FOUND, "gone")
-    // A lambda beside the overloads says Throws Error; fb's lane has why (throws_overload.fb).
-    Try lua.SetFunction("fail", Function() Throws Error
+    Try lua.SetFunction("fail", Function() Throws IOError
         Throw thrown
     End Function)
     Local error = ExpectThrows<LuauError>(lua.Run("local x = 1\nfail()", "@mods/b.luau"))
