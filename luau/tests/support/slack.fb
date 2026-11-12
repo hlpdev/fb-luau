@@ -1,0 +1,11 @@
+//! What the tests share about the real clock: no test's result depends on how fast the machine
+//! is, so a bound on wall-clock time, where one can't be avoided, goes through Slack.
+
+Import std.os
+Import std.time
+
+/// `bound`, or four times it on GitHub's runners, which are slower and shared with other jobs.
+Public Function Slack(bound: Duration): Duration
+    If Env.Get("GITHUB_ACTIONS") == "true" Then Return bound * 4
+    Return bound
+End Function

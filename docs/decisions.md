@@ -514,3 +514,17 @@ Written while the PC was kept free for the user: none of it built or run until t
   value: two objects a Class calls equal each have their own, and one whose Hash changes keeps
   its one. fb 1.3.3 in project.toml, every workflow, and the READMEs; the plan's gap 14 is fixed.
 
+## The sixth review, CI on dev/review-4 (2026-11-12)
+
+- **The shim links pthreads wherever it's linked (129):** the stack guard's pthread_getattr_np
+  and pthread_attr_getstack are in libpthread before glibc 2.34, so Threads::Threads is on the
+  shim's objects, which the library, its tests, and the fuzzers all link.
+- **No test's result depends on the machine's speed (130, 132):** a memory test takes its memory
+  in one step, one string.rep past the limit; a volume test has no time budget; the tick's
+  budget is tested by counting what a tick starts (at most six 4 ms resumes in 20 ms); the hog
+  test's margins are half its budget, and a wall-clock bound goes through luau/tests/support's
+  Slack, four times on GitHub's runners. The modded game's hoarder takes its memory in one step.
+- **The guard's "fine" depth is twenty (131):** fb test runs on threads of 512 KB on macOS,
+  where the guard stops about fifty levels of nested gsubs, fewer in a debug build, as it
+  should; the guard's own test is in tests/state.
+
