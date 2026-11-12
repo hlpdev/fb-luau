@@ -681,8 +681,8 @@ End Function
 @Test
 Function AScriptNestingCCallsMeetsAStackOverflowErrorNotACrash() Throws LuauError
     // string.gsub's callbacks nested in each other take native stack at each level; a thread's
-    // stack runs out before Luau's 200 C calls do, which would end the process. The State raises
-    // a stack overflow error first, which the script's pcall catches, and goes on.
+    // stack can run out before Luau's 200 C calls do, which would end the process. The State
+    // raises a stack overflow error first, which the script's pcall catches, and goes on.
     Local lua = LuauState()
     Local error = ExpectThrows<LuauError>(lua.Run(
         "local function deep(n) if n == 0 then return end " +
@@ -691,8 +691,8 @@ Function AScriptNestingCCallsMeetsAStackOverflowErrorNotACrash() Throws LuauErro
     Expect(Try lua.Evaluate<Bool>("local function deep(n) if n == 0 then return end " +
                                   "string.gsub('x', 'x', function() deep(n - 1) end) end " +
                                   "return not pcall(deep, 300)"))
-    // Twenty levels, which a script has use for, are fine.
+    // Sixty levels, which Luau's own tests nest, are fine.
     Try lua.Run("local function deep(n) if n == 0 then return end " +
-                "string.gsub('x', 'x', function() deep(n - 1) end) end deep(20)")
+                "string.gsub('x', 'x', function() deep(n - 1) end) end deep(60)")
     Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
 End Function

@@ -18,7 +18,9 @@
 #include <psapi.h>
 #elifdef __APPLE__
 #include <mach/mach.h>
+#include <pthread.h>
 #else
+#include <pthread.h>
 #include <unistd.h>
 #endif
 
@@ -26,9 +28,45 @@ namespace {
 
 thread_local std::string last_error;
 
+// Where this thread's native stack ends, its lowest address, or 0 when the platform doesn't say.
+uintptr_t stack_end() noexcept {
+#ifdef _WIN32
+    // The stack is one reservation, and its base is where it ends.
+    MEMORY_BASIC_INFORMATION region{};
+    if (VirtualQuery(&region, &region, sizeof(region)) == 0) {
+        return 0;
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
+    return reinterpret_cast<uintptr_t>(region.AllocationBase);
+#elifdef __APPLE__
+    pthread_t self = pthread_self();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
+    const auto top = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(self));
+    const size_t size = pthread_get_stacksize_np(self);
+    return top > size ? top - size : 0;
+#else
+    pthread_attr_t attributes;
+    if (pthread_getattr_np(pthread_self(), &attributes) != 0) {
+        return 0;
+    }
+    void* low = nullptr;
+    size_t size = 0;
+    const int got = pthread_attr_getstack(&attributes, &low, &size);
+    pthread_attr_destroy(&attributes);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
+    return got == 0 ? reinterpret_cast<uintptr_t>(low) : 0;
+#endif
+}
+
 } // namespace
 
 namespace fbl {
+
+uintptr_t stack_floor(uintptr_t reserve) noexcept {
+    // Linux finds the main thread's from /proc, so it's found once a thread.
+    thread_local const uintptr_t end = stack_end();
+    return end == 0 ? 0 : end + reserve;
+}
 
 // NOLINTNEXTLINE(bugprone-exception-escape): what it assigns second fits in any string as it is.
 bool fail(std::string_view message) noexcept {

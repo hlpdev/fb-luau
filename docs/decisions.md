@@ -426,8 +426,12 @@ Written while the PC was kept free for the user: none of it built or run until t
   each other ended the test process with a stack overflow, 0xC00000FD, at about 135 levels on
   Windows's 1 MB main thread, Release too, short of Luau's 200 C calls: any script could end a
   game. The shim's interrupt, which every Luau call reaches, now raises a stack overflow error
-  past 384 KB of native stack from the call's outermost entry (about 50 levels), under macOS's
-  512 KB secondary threads. It also makes 61's failure, a resume refused at Luau's 200 C calls,
-  unreachable from a script, so 61's test is this one's.
+  128 KB short of the thread's stack's end, which each thread asks its platform for once
+  (VirtualQuery's reservation, pthread_getattr_np, pthread_get_stackaddr_np); where it can't,
+  past 384 KB from the call's outermost entry. A fixed 384 KB from the entry, tried first, stopped
+  Luau's own pm.luau, 60 nested gsubs, at about 50. On a thread with a small stack, a script nests
+  less: the thread's stack is the limit, not Luau's 200 C calls. It also makes 61's failure, a
+  resume refused at Luau's 200 C calls, unreachable from a script where the stack is small, so
+  61's test is this one's.
 - **An Async program function's String argument is a copy (108),** noted in the guide, with
   LuauValue or LuauTable for large ones.

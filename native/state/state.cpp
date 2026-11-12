@@ -333,10 +333,11 @@ void interrupt(lua_State* stack, int gc) {
     // Every Luau call is a safe point, so a script nesting C calls is stopped by its native stack
     // before the thread's runs out, which would end the process.
     const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
-    if (state != nullptr && state->stack_base != 0) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
+    if (state != nullptr && state->stack_floor != 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a
+        // number.
         const auto here = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
-        if (here < state->stack_base && state->stack_base - here > fbl::most_native_stack) {
+        if (here < state->stack_floor) {
             luaL_error(stack, "stack overflow: the script's calls nest deeper than the program's "
                               "native stack holds");
         }
@@ -408,7 +409,8 @@ int guarded_debug(lua_State* stack) {
 // coroutine.resume and coroutine.close, Luau's own, their upvalue, refusing a thread of another
 // script's environment, as a script that kept another's could end or drive it.
 int guarded_coroutine(lua_State* stack) {
-    if (lua_type(stack, 1) == LUA_TTHREAD && !fbl::is_callers_thread(stack, lua_tothread(stack, 1))) {
+    if (lua_type(stack, 1) == LUA_TTHREAD &&
+        !fbl::is_callers_thread(stack, lua_tothread(stack, 1))) {
         luaL_error(stack, "a thread of another script's can't be resumed or closed");
     }
     const int count = lua_gettop(stack);
@@ -584,8 +586,14 @@ namespace fbl {
 
 entered_t::entered_t(state_t& state) noexcept : m_state(state), m_outermost(state.depth == 0) {
     if (m_outermost) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
-        m_state.stack_base = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a
+        // number.
+        const auto base = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
+        uintptr_t floor = fbl::stack_floor(native_stack_reserve);
+        if (floor == 0 || floor >= base) {
+            floor = base > most_native_stack ? base - most_native_stack : 1;
+        }
+        m_state.stack_floor = floor;
         m_state.timed_out = false;
         if (m_state.time_budget.count() > 0) {
             // now + budget, or the clock's last time point when that's past it.
@@ -604,7 +612,7 @@ entered_t::~entered_t() {
     m_state.depth--;
     if (m_outermost) {
         m_state.deadline = {};
-        m_state.stack_base = 0;
+        m_state.stack_floor = 0;
     }
 }
 

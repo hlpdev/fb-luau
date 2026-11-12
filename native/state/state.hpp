@@ -21,10 +21,14 @@ namespace fbl {
 // Luau thread, and Luau's own limit, LUAI_MAXCCALLS, is 200.
 constexpr int max_depth = 64;
 
-// The most native stack a call into a State may take, from its outermost entry: a script that
-// nests C calls, string.gsub's callbacks in each other say, meets a stack overflow error at it,
-// rather than run out of the thread's stack, which ends the process. Under the smallest thread
-// stack a target gives by default, macOS's 512 KB, with room for the program's own frames.
+// The native stack a call into a State leaves the thread: a script that nests C calls,
+// string.gsub's callbacks in each other say, meets a stack overflow error this far from the
+// thread's stack's end, rather than run out of it, which ends the process. Room for a level
+// between two of Luau's calls, a program function a script calls, and raising the error.
+constexpr uintptr_t native_stack_reserve = uintptr_t{ 128 } * 1024;
+
+// Where the platform doesn't say where a thread's stack ends, the most a call may take from its
+// outermost entry, under the smallest thread stack a target gives by default, macOS's 512 KB.
 constexpr uintptr_t most_native_stack = uintptr_t{ 384 } * 1024;
 
 // Where a frame's values are: the thread whose stack has them, and how many values that stack had
@@ -64,8 +68,8 @@ struct state_t {
     int64_t native_functions = 0;
     // The bytes the code generator holds, as its allocation callback counts them.
     int64_t native_memory_used = 0;
-    // Where the native stack was at the outermost call's entry, or 0 outside a call.
-    uintptr_t stack_base = 0;
+    // The lowest the native stack may go in a call, or 0 outside one.
+    uintptr_t stack_floor = 0;
     // For the tests: which allocation from now fails, counting from 0, once, or -1 for none; and
     // which of the shim's failure points from now raises, as an allocation's failing would, since
     // Luau's own pages hold small objects without asking the allocator.
