@@ -43,3 +43,15 @@ foreach(library IN LISTS fbl_luau_libraries)
     target_compile_options(${library} PRIVATE -fno-sanitize=float-cast-overflow)
   endif()
 endforeach()
+# Luau's b_rshift (VM/src/lbitlib.cpp:99, Luau 0.746) negates its count, and a script's
+# bit32.rshift(x, -2147483648), lshift's, or arshift's has it negate INT_MIN, which compilers
+# wrap; b_shift then negates it again (:73) and, unoptimized, shifts by what's still negative
+# (:78), which the processor takes modulo 32. The script gets a number either way; UBSan's
+# signed-integer-overflow and shift-exponent call it undefined. Luau's source isn't patched, so
+# those checks are off for that file alone, shift's whole, as GCC 15 keeps checking an exponent
+# with shift-exponent alone off; they stay on for the rest of Luau and for the shim.
+if(FBL_SANITIZE MATCHES "undefined")
+  set_source_files_properties(
+    "${luau_SOURCE_DIR}/VM/src/lbitlib.cpp" TARGET_DIRECTORY Luau.VM
+    PROPERTIES COMPILE_OPTIONS "-fno-sanitize=signed-integer-overflow,shift")
+endif()

@@ -189,6 +189,19 @@ Function ATableOfANaNKeyIsAConversionError() Throws LuauError
 End Function
 
 @Test
+Function Bit32sShiftsByTheEndsOfAnIntGiveNumbers() Throws LuauError
+    // Luau's b_shift negates a count of -2147483648, which compilers wrap; a count past 31 bits
+    // is Luau's own.
+    Try LuauState().Run(r"for _, x in { 0, 1, 0x80000000, 0xFFFFFFFF } do " +
+                        r"for _, f in { bit32.rshift, bit32.lshift, bit32.arshift } do " +
+                        r"assert(type(f(x, -2147483648)) == 'number') end " +
+                        r"assert(bit32.rshift(x, 2147483647) == 0) " +
+                        r"assert(bit32.lshift(x, 2147483647) == 0) " +
+                        r"assert(bit32.arshift(x, 2147483647) == " +
+                        r"(x >= 0x80000000 and 0xFFFFFFFF or 0)) end")
+End Function
+
+@Test
 Function StepHasAndAScriptsName() Throws LuauError
     Local lua = LuauState()
     Try lua.Run(r"made = {}")

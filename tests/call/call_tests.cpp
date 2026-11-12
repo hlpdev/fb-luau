@@ -112,6 +112,23 @@ TEST_CASE("source that doesn't compile is a syntax error with its line") {
     CHECK(frame.load("") == FBL_OK);
 }
 
+TEST_CASE("bit32's shifts by the ends of an int give numbers") {
+    // Luau's b_shift negates a count of -2147483648, which compilers wrap, and the sanitizers'
+    // builds don't check in lbitlib.cpp (cmake/luau.cmake); a count past 31 bits is Luau's own.
+    const test_state_t lua;
+    const int32_t status = lua.run(
+        "for _, x in { 0, 1, 0x80000000, 0xFFFFFFFF } do\n"
+        "    for _, f in { bit32.rshift, bit32.lshift, bit32.arshift } do\n"
+        "        assert(type(f(x, -2147483648)) == 'number')\n"
+        "    end\n"
+        "    assert(bit32.rshift(x, 2147483647) == 0)\n"
+        "    assert(bit32.lshift(x, 2147483647) == 0)\n"
+        "    assert(bit32.arshift(x, 2147483647) == (x >= 0x80000000 and 0xFFFFFFFF or 0))\n"
+        "end\n");
+    INFO(lua.error_message());
+    CHECK(status == FBL_OK);
+}
+
 TEST_CASE("a yield where nothing can wait for it is an error") {
     const test_state_t lua;
     CHECK(lua.run("coroutine.yield(1)") == FBL_YIELD);

@@ -631,3 +631,14 @@ Written while the PC was kept free for the user: none of it built or run until t
   holds the lock, so waiting its turn isn't counted against it. Two tests run under TSan: two
   threads checking two modules at once for 1.5 seconds, and a check beside a State's scripts on
   another thread.
+- **Luau's bit32 shifts by -2147483648 aren't checked by UBSan (139):** the bytecode fuzzer found
+  Luau 0.746's b_rshift (VM/src/lbitlib.cpp:99) negating a count of INT_MIN; b_shift negates it
+  again (:73) and, unoptimized, shifts by what's still negative (:78), which a Debug build under
+  GCC showed once the first was off. Compilers wrap the one and the processor takes the other
+  modulo 32, so a script gets a number, but both are undefined. Luau's source isn't patched: the
+  sanitizers' builds leave signed-integer-overflow and shift unchecked for lbitlib.cpp alone,
+  beside float-cast-overflow (cmake/luau.cmake). Shift's whole group, not shift-exponent alone,
+  as GCC 15 kept checking the exponent with only that off; that's one more than the coordinator
+  decided, for the same input on the same path. A C++ test and a package test shift by
+  -2147483648 and 2147483647 with rshift, lshift, and arshift, and the crash input is in the
+  bytecode fuzzer's corpus. Telling Luau's maintainers is the user's to decide.
