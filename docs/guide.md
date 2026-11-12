@@ -276,7 +276,10 @@ every wait of the State's, `task.spawn`'s and `task.delay`'s too, at each tick o
 it's on, until the State closes. A `LuauThread`'s `Start()` runs its own thread the same way, as
 an Async Function, whose Task is done when the thread ends. A Scheduler of the program's own,
 which a pause stops and whose `Tick` scales time, runs them where it's given them. `SetAsync`
-gives a script an Async Function: its thread waits for the Task.
+gives a script an Async Function: its thread waits for the Task. A String its argument takes is
+a copy of the script's, held for as long as the Function awaits, once for every thread that
+calls it; where a script's string may be large, take a `LuauValue` or a `LuauTable`, which stay
+the State's.
 
 ```vb
 Import std.core

@@ -412,3 +412,22 @@ Written while the PC was kept free for the user: none of it built or run until t
 - **The bytecode example's game has its public key compiled in (102),** `Embed("game.pub")`, and
   the build is given its private key from outside what it writes; keys/build.key is the
   example's own, which a real game's never is. A key of the wrong length stays a panic.
+- **A turn resumes the entry it collected (103),** by RefEquals, never a newer wait of the same
+  thread's.
+- **A stale wait of a thread's own is dropped wherever a wait is checked (104),** in CanWait, so an
+  Async program function a thread calls after a script went around its wait isn't "waits
+  already".
+- **A turn's clock starts where its time is read (105);** the plan says a wait made outside a turn
+  is at most two ticks late.
+- **A driver destroyed with no heir gives its waits to ThreadError (106),** as HandedOver does.
+- **The tests (107):** the hog's bystanders spin 10 ms each, so one is resumed with the tick's
+  budget nearly spent, which a shared deadline would end; 98's second half asserts `done`.
+- **A native stack guard, found on the way:** writing 61's test, string.gsub's callbacks nested in
+  each other ended the test process with a stack overflow, 0xC00000FD, at about 135 levels on
+  Windows's 1 MB main thread, Release too, short of Luau's 200 C calls: any script could end a
+  game. The shim's interrupt, which every Luau call reaches, now raises a stack overflow error
+  past 384 KB of native stack from the call's outermost entry (about 50 levels), under macOS's
+  512 KB secondary threads. It also makes 61's failure, a resume refused at Luau's 200 C calls,
+  unreachable from a script, so 61's test is this one's.
+- **An Async program function's String argument is a copy (108),** noted in the guide, with
+  LuauValue or LuauTable for large ones.
