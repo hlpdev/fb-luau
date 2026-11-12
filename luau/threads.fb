@@ -11,6 +11,7 @@ Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_ref"
 Import "./c/fbl_state"
+Import "./c/fbl_table"
 Import "./c/fbl_thread"
 Import "./errors"
 Import "./shim"
@@ -531,16 +532,34 @@ Function Given<R: LuauType>(value: R): LuauResumed
     End Function)
 End Function
 
-/// Resuming with the frame's values from slot `from`.
+/// Resuming with the frame's values from slot `from`, which stay in the State, as one table it
+/// keeps by reference, and are pushed from it at the resume: nothing of them is copied to the
+/// program, so a script's strings stay Luau's, once, counted to its memory limit.
 Function GivenFrom(slots: LuauSlots, from: Int32): LuauResumed Throws LuauError
-    Local values: LuauValue[] = []
-    For index = from Until slots.Count()
-        values.Add(Try LuauValue.FromLuau(slots, index))
+    Local count = slots.Count() - from
+    If count <= 0
+        Return LuauResumed(Function(into: LuauSlots) Throws LuauError
+        End Function)
+    End If
+    Local handle = slots.Owner.Live()
+    Try slots.Owner.Check(fbl_table_new(handle, slots.Frame, count, 0))
+    Local table = slots.Count() - 1
+    For index = 0 Until count
+        Try slots.PushNumber((index + 1) As Float64)
+        Try slots.Owner.Check(fbl_table_raw_set(handle, slots.Frame, table, table + 1,
+                                                from + index))
+        slots.Truncate(table + 1)
     End For
+    Local kept = Try LuauTable.FromLuau(slots, table)
+    slots.Truncate(table)
     Return LuauResumed(Function(into: LuauSlots) Throws LuauError
-        For value In values
-            Try LuauValue.ToLuau(into, value)
+        Local at = into.Count()
+        Try LuauTable.ToLuau(into, kept)
+        For index = 1 To count
+            Try into.Owner.Check(fbl_table_raw_get_index(into.Owner.Live(), into.Frame, at,
+                                                         index))
         End For
+        into.Remove(at)
     End Function)
 End Function
 

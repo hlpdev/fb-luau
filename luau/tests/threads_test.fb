@@ -429,3 +429,25 @@ Function SpawningAThreadThatIsntSuspendedIsTheCallersError() Throws LuauError
         Expect(error != Null && error.Message.Contains("takes a suspended thread"), source)
     End For
 End Function
+
+@Test
+Function ATasksArgumentsStayInTheState() Throws LuauError
+    // A megabyte string, given 8,000 times to each of 10,000 delays, is Luau's once: the program
+    // keeps one table a delay, not 8 GB of copies.
+    Local options = LuauOptions()
+    options.MemoryLimit = 16 * 1024 * 1024
+    options.MostWaiting = 20000
+    Local lua = Try LuauState(options)
+    Local waits = lua.Start()
+    Local before = LuauProcessMemory()
+    Try lua.Run("local s = string.rep('x', 2^20) local t = table.create(7999, s) " +
+                "for i = 1, 10000 do task.delay(1e9, function() end, table.unpack(t)) end")
+    Expect(LuauProcessMemory() - before < 512 * 1024 * 1024, "the program's memory grew")
+    // And they arrive, as they were given.
+    Try lua.Run("got = nil task.defer(function(a, b, c) got = a .. b .. tostring(c) end, 'x', 'y', nil)")
+    Scheduler.Main.Step()
+    Scheduler.Main.Step()
+    Expect(Try lua.Get<String>("got") == "xynil")
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function
