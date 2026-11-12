@@ -180,8 +180,8 @@ if(FBL_FB_TESTS)
   # The soak, short: stability.yml runs it for 30 minutes.
   add_test(NAME luau.soak
            COMMAND "${FBL_FB}" --color never run --release "${CMAKE_CURRENT_SOURCE_DIR}/soak" -- 15 9)
-  set_tests_properties(luau.soak PROPERTIES PASS_REGULAR_EXPRESSION "soak: [0-9]+ iterations"
-                       FAIL_REGULAR_EXPRESSION "a leak|outlived its close")
+  # Judged by its exit code, which an iteration that failed sets too.
+  set_tests_properties(luau.soak PROPERTIES FAIL_REGULAR_EXPRESSION "a leak|outlived its close")
   add_test(NAME examples.repl
            COMMAND "${CMAKE_COMMAND}" -DFB=${FBL_FB} -DPROGRAM=${PROJECT_SOURCE_DIR}/examples/repl
                    -DINPUT=${PROJECT_SOURCE_DIR}/examples/repl/session.txt

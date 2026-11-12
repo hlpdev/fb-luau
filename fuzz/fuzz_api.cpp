@@ -84,8 +84,14 @@ int32_t callback(uint64_t state, int32_t frame, int64_t function) {
 }
 
 // A field of a type's metatable, often one that's refused.
-constexpr std::array<const char*, 6> fields = { "__add",       "__tostring", "__index",
-                                                "__metatable", "__eq",       "" };
+constexpr std::array<const char*, 6> fields = {
+    "__add",       // an operator
+    "__tostring",  // how it prints
+    "__index",     // one it's registered with
+    "__metatable", // the metatable's lock
+    "__eq",        // an operator
+    "",            // no name
+};
 
 void check_status(int32_t status) {
     if (!is_status(status)) {

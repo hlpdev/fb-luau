@@ -1,9 +1,12 @@
 // The soak: a loop of what a program does with the package, for as long as it's given, making and
 // closing States, loading scripts, calling both ways, making and dropping objects, tables, threads,
 // and buffers, waiting on a scheduler, and running scripts into their memory limits and time
-// budgets. It samples the process's memory and the States' counts as it goes, and fails when, past
-// its first third, the memory grows by more than a few bytes an iteration, or a State outlives its
-// close: a slow leak a short test misses.
+// budgets; doing all that again in one State kept for the whole run, as a game keeps a mod's,
+// with its modules required and forgotten; and checking modules with one checker kept for the
+// run, forgetting them each time. It samples the process's memory, the kept State's, and the
+// States' counts as it goes, and fails, by its exit code, when, past its first third, the
+// process's memory or the kept State's grows by more than a few bytes an iteration, when a State
+// outlives its close, or when an iteration fails: a slow leak a short test misses.
 //
 // `fb run --release tests/soak -- <seconds> <samples>`: 20 seconds and 10 samples by default;
 // stability.yml's soak is 1800 seconds and 30 samples, one a minute.
@@ -35,17 +38,43 @@ Const Script = r"local crates = {} " +
                r"names = {} for i = 1, 40 do names['n' .. i] = string.rep('x', i) end " +
                "function twice(n) return back(n) * 2 end"
 
-// One iteration: a State made, used every way, and closed.
-Function Iterate(iteration: Int, world: Scheduler) Throws LuauError
+// The modules the kept State requires, and the checker checks, by their paths, or Null.
+Function ModuleFile(path: String): String?
+    If path == "shelf.luau"
+        Return r"local shelf = {} function shelf.stack(n: number) local t = {} " +
+               r"for i = 1, n do t[i] = make(i) end return t end return shelf"
+    End If
+    If path == "main.luau"
+        Return "--!strict\nlocal shelf = require('./shelf')\nlocal n: number = 3\nprint(shelf, n)\n"
+    End If
+    Return Null
+End Function
+
+// A State as the soak makes them: its memory limit, its time budget, a crate, and two functions,
+// its waits run by `world`.
+Function Opened(world: Scheduler): LuauState Throws LuauError
     Local options = LuauOptions()
     options.MemoryLimit = 4 * 1024 * 1024
     options.TimeBudget = 20.Milliseconds
+    options.Modules = Function(path: String): String? => ModuleFile(path)
     Local lua = Try LuauState(options)
-    Local waits = lua.Start()
-    world.Run(waits)
+    world.Run(lua.Start())
     Try lua.Register<Crate>()
     Try lua.SetFunction("make", Function(weight: Int) => Crate(weight))
     Try lua.SetFunction("back", Function(n: Int) => n + 1)
+    Return lua
+End Function
+
+// One iteration: a State made, used every way, and closed.
+Function Iterate(iteration: Int, world: Scheduler) Throws LuauError
+    Local lua = Try Opened(world)
+    Try Use(lua, iteration, world)
+    lua.Close()
+    world.Tick(0.02)
+End Function
+
+// Uses `lua` every way, as an iteration does, leaving it open.
+Function Use(lua: LuauState, iteration: Int, world: Scheduler) Throws LuauError
     Try lua.Run(Script)
     If Try lua.Get<Int>("total") != 780 Then Panic("the crates weigh {Try lua.Get<Int>("total")}")
     // Calls both ways.
@@ -75,8 +104,56 @@ Function Iterate(iteration: Int, world: Scheduler) Throws LuauError
     // An error both ways, kept as the Cause.
     Local raised = Failed(lua, "make('not a number')")
     If raised == Null Then Panic("a wrong argument gave no error")
-    lua.Close()
+End Function
+
+// One iteration in the kept State, which its first require froze: what Use does, in a script of
+// its own, as a mod's are, and its modules required, and forgotten each tenth time.
+Function IterateIn(lua: LuauState, iteration: Int, world: Scheduler) Throws LuauError
+    Local script = Try lua.NewScript("=kept")
+    Try script.Run(Script)
+    If Try script.Get<Int>("total") != 780 Then Panic("the kept State's crates weigh another")
+    Local twice = Try script.Get<LuauFunction>("twice")
+    If Try twice.Call<Int>(iteration) != (iteration + 1) * 2 Then Panic("twice is wrong")
+    Local items = Try lua.NewTable([1, 2, 3])
+    Try items.Set("crate", Crate(iteration))
+    Local bytes = Try lua.NewBuffer(64)
+    bytes.WriteInt32(0, iteration)
+    Try script.Set("bytes", bytes)
+    If Try script.Evaluate<Int>("return buffer.readi32(bytes, 0)") != iteration Then Panic("bytes")
+    Local thread = Try lua.Spawn(Try script.Load("local n = ... coroutine.yield(n) return n + 1"))
+    Try thread.Resume(iteration)
+    Try thread.Resume()
+    Try script.Run("task.spawn(function() task.wait(0.01) done = true end)")
     world.Tick(0.02)
+    world.Tick(0.02)
+    If FailedIn(script, "local big = string.rep('y', 8 * 1024 * 1024)") != LuauErrorKind.MEMORY
+        Panic("the kept State's memory limit gave another error, or none")
+    End If
+    If FailedIn(script, "while true do end") != LuauErrorKind.TIMEOUT
+        Panic("the kept State's time budget gave another error, or none")
+    End If
+    If FailedIn(script, "make('not a number')") == Null Then Panic("a wrong argument gave none")
+    Try script.Run("local shelf = require('./shelf') stacked = #shelf.stack(10)")
+    If Try script.Get<Int>("stacked") != 10 Then Panic("the shelf stacked another count")
+    If iteration % 10 == 0 Then Try lua.ForgetModules()
+End Function
+
+// The kind of error running `source` in `script` threw, or Null.
+Function FailedIn(script: LuauScript, source: String): LuauErrorKind?
+    Try
+        Try script.Run(source)
+    Catch error As LuauError
+        Return error.Kind
+    End Try
+    Return Null
+End Function
+
+// One check with the kept checker, after it forgets what it read.
+Function CheckOnce(checker: LuauChecker) Throws LuauError
+    checker.Forget()
+    For found In Try checker.Check("main")
+        If found.Severity == LuauSeverity.ERROR Then Panic("the soak's modules don't check: {found}")
+    End For
 End Function
 
 // The kind of error running `source` in `lua` threw, or Null.
@@ -114,9 +191,19 @@ Local seconds = arguments.Count > 0 ? (Int.Parse(arguments[0]) ?? 20) : 20
 Local samples = arguments.Count > 1 ? (Int.Parse(arguments[1]) ?? 10) : 10
 Local world = Scheduler()
 Local before = LuauStatesOpen(here: True)
+Local kept: LuauState? = Null
+Local checker = LuauChecker(Function(path: String): String? => ModuleFile(path),
+                            LuauCheckMode.STRICT)
+Try
+    kept = Try Opened(world)
+    Try checker.AddDefinitions(kept.Definitions(), "soak")
+Catch error As LuauError
+    Panic("the kept State wasn't made: {error.Message}")
+End Try
 Local clock = Stopwatch.StartNew()
 Local iterations: Float64[] = []
 Local resident: Float64[] = []
+Local keptMemory: Float64[] = []
 Local iteration = 0
 Local failed = False
 For sample = 1 To samples
@@ -125,35 +212,55 @@ For sample = 1 To samples
         iteration++
         Try
             Try Iterate(iteration, world)
+            Try IterateIn(kept, iteration, world)
+            Try CheckOnce(checker)
         Catch error As LuauError
             Print("iteration {iteration} failed: {error.Kind}: {error.Message}")
             failed = True
         End Try
     End While
+    kept.Collect()
     Local open = LuauStatesOpen(here: True)
     Local memory = LuauProcessMemory()
-    Print("sample {sample}: {iteration} iterations, {memory} bytes held, " +
-          "{open.0} States of {open.1} bytes")
-    If open != before
+    Print("sample {sample}: {iteration} iterations, {memory} bytes held, the kept State " +
+          "{kept.MemoryUsed}, {open.0} States of {open.1} bytes, one of them kept")
+    If open.0 != before.0 + 1
         Print("a State, or its memory, outlived its close: {open.0} of {open.1} bytes")
         failed = True
     End If
     iterations.Add(iteration As Float64)
     resident.Add(memory As Float64)
+    keptMemory.Add(kept.MemoryUsed As Float64)
 End For
+kept.Close()
+world.Tick(0.02)
+If LuauStatesOpen(here: True) != before
+    Print("a State, or its memory, outlived its close: the kept State's")
+    failed = True
+End If
 // A leak grows the memory at every stretch of the run; a heap that grows once, to what it holds,
 // steps once. So it's a leak when the memory grows in both the middle third and the last.
 Local third = samples / 3
 Local middle = SlopeOf(iterations, resident, third, 2 * third)
 Local last = SlopeOf(iterations, resident, 2 * third, samples)
-Print(
-    "soak: {iteration} iterations; bytes an iteration, the middle third {middle}, the last {last}")
+Local keptMiddle = SlopeOf(iterations, keptMemory, third, 2 * third)
+Local keptLast = SlopeOf(iterations, keptMemory, 2 * third, samples)
+Print("soak: {iteration} iterations; bytes an iteration, the middle third {middle}, the last " +
+      "{last}; the kept State's, {keptMiddle} and {keptLast}")
 // A short run's few hundred iterations are within the memory's noise, so its slopes aren't
 // judged; the States' counts, which are exact, are.
 If iteration < 5000
     Print("too few iterations to judge the memory's slope")
-ElseIf middle > 64.0 && last > 64.0
-    Print("the process's memory grows: a leak")
-    failed = True
+Else
+    If middle > 64.0 && last > 64.0
+        Print("the process's memory grows: a leak")
+        failed = True
+    End If
+    // The kept State's own memory, collected whole before each sample, is exact but for what a
+    // collection leaves: a few bytes an iteration is a leak in it.
+    If keptMiddle > 8.0 && keptLast > 8.0
+        Print("the kept State's memory grows: a leak")
+        failed = True
+    End If
 End If
 If failed Then Process.Exit(1)

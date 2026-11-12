@@ -587,3 +587,9 @@ Written while the PC was kept free for the user: none of it built or run until t
   program began a turn and didn't end it, as a turn counts as a call, so the State never closed;
   the API fuzzer found it. Nothing runs in a turn the program holds open, so close now ends it;
   a call running, or a function of the program's that Luau called, still refuses the close.
+- **The soak keeps a State and a checker for its run (119):** beside the State it makes and
+  closes each iteration, it keeps one, as a game keeps a mod's, frozen by its first require, and
+  does the same work in a script of its own there, its modules required and forgotten; and one
+  checker, which forgets and checks two modules each iteration. It judges the kept State's own
+  memory, collected whole at each sample, at 8 bytes an iteration, beside the process's at 64.
+  ctest's run is judged by its exit code, which a failed iteration sets, not by a line it prints.
