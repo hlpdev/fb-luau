@@ -3537,7 +3537,8 @@ Extend LuauState
     ///
     /// For a marked Method of a shape none exposes, like one of 8 arguments, or one that
     /// gives nothing marked [LuauExpose], and for two marked members of one name in Luau,
-    /// saying which.
+    /// saying which. A marked Static, ByRef, or Unsafe Method isn't exposed, and isn't
+    /// said, as FutureBlitz's reflection doesn't go over them.
     @PanicsAtCaller
     Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError
         Local kept = KeptType<T>()
@@ -6563,15 +6564,14 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume(): LuauValue[] Throws LuauError
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Return (Try Ran(slots, 0, True)).1
@@ -6584,15 +6584,14 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1: LuauType>(a1: A1): LuauValue[] Throws LuauError
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6606,17 +6605,16 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2>(a1: A1, a2: A2): LuauValue[] Throws LuauError
         Where A1: LuauType
         Where A2: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6631,18 +6629,17 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2, A3>(a1: A1, a2: A2, a3: A3): LuauValue[] Throws LuauError
         Where A1: LuauType
         Where A2: LuauType
         Where A3: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6658,12 +6655,7 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2, A3, A4>(a1: A1, a2: A2, a3: A3,
                                          a4: A4): LuauValue[] Throws LuauError
@@ -6671,7 +6663,11 @@ Extend LuauThread
         Where A2: LuauType
         Where A3: LuauType
         Where A4: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6688,12 +6684,7 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2, A3, A4, A5>(a1: A1, a2: A2, a3: A3, a4: A4,
                                              a5: A5): LuauValue[] Throws LuauError
@@ -6702,7 +6693,11 @@ Extend LuauThread
         Where A3: LuauType
         Where A4: LuauType
         Where A5: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6720,12 +6715,7 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2, A3, A4, A5, A6>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
                                                  a6: A6): LuauValue[] Throws LuauError
@@ -6735,7 +6725,11 @@ Extend LuauThread
         Where A4: LuauType
         Where A5: LuauType
         Where A6: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6754,12 +6748,7 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2, A3, A4, A5, A6, A7>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6,
                                                      a7: A7): LuauValue[] Throws LuauError
@@ -6770,7 +6759,11 @@ Extend LuauThread
         Where A5: LuauType
         Where A6: LuauType
         Where A7: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)
@@ -6790,12 +6783,7 @@ Extend LuauThread
     /// # Errors
     ///
     /// A LuauError for what it raises or meets as it runs, which ends it, or of
-    /// RUNTIME for a thread that isn't suspended.
-    ///
-    /// # Panics
-    ///
-    /// For a thread that runs on the
-    /// scheduler, from Start or the task library.
+    /// RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.
     @PanicsAtCaller
     Public Method Resume<A1, A2, A3, A4, A5, A6, A7, A8>(a1: A1, a2: A2, a3: A3, a4: A4, a5: A5,
                                                          a6: A6, a7: A7,
@@ -6808,7 +6796,11 @@ Extend LuauThread
         Where A6: LuauType
         Where A7: LuauType
         Where A8: LuauType
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler")
+        If Owner.Waits.Contains(Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the Luau thread waits on the scheduler, which " +
+                            "resumes it")
+        End If
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try A1.ToLuau(slots, a1)

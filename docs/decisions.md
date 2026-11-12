@@ -224,3 +224,45 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
 - **Every MEMORY error collects at the outermost (60),** in record_error, the one place.
 - **A resume that fails as it starts ends the thread (61);** with a memory limit, collectgarbage
   can't set the goal, the step, its size, or stop the collector (62).
+- **No wait is a timer of its own (64),** as decided, with option (b): a State keeps its waits by
+  thread, each with when it's due, and a driver coroutine on a scheduler resumes them at its
+  ticks. A thread's Start is a driver, for its thread and what the threads it starts wait for;
+  `lua.Start()` is the State's, for the rest. Without one, a wait is a `YIELD` error that says
+  so: a State on a worker thread has none, as nothing there can reach Async code (71). The plan
+  changed back from "a wait isn't cut short": Close ends every wait at the driver's next wake.
+  What replaces it, if the scheduler gets a readable time, is (a): the driver reads the
+  scheduler's time at each tick, with no timer at all.
+- **A driver's timer waits at most a second, not 50 ms (64), a change from what was approved:** a
+  timer made in a tick counts from the tick's end, so at a coarse tick (a test's 0.1 s Step, a
+  paused game's long one) a 50 ms cap loses most of each tick and waits run several times late.
+  At a second, a wait is late by at most one tick's overshoot each second, and a closed State's
+  driver ends within a second of the scheduler's time.
+- **At most `LuauOptions.MostWaiting` threads wait (64),** 10,000 by default, past which the
+  script's call is an error; a thread waits for one thing at a time, and a second is an error in
+  the caller (73).
+- **A thread a driver has is WAITING (65):** Resume and Start on it are LuauErrors, not panics,
+  as a script can make one wait. A State's driver started twice still panics, as only the
+  program does that.
+- **One time budget a tick for all a driver resumes (68),** what's still due going first the
+  next tick, by `fbl_state_turn`, which opens one deadline over several resumes.
+- **A call keeps its most recent 64 errors (69),** the oldest losing only its Cause.
+- **A driver is kept by what it holds, not a Defer (70):** its Destroy gives its waits to the
+  State's driver, or drops them. A coroutine its Scheduler drops does let go of its frame, so
+  that runs, where a Defer doesn't (asked of the fb lane). A thread's id is a number of its own,
+  kept by a weak-keyed table in its State, never an address.
+- **ThreadError runs once the outermost call ends (74),** so it can close the State, and
+  `task.spawn` of a running, dead, or runner thread is an error in its caller.
+- **A marked member that can't be exposed is found by its member, not its Luau name (75).** A
+  marked Static, ByRef, or Unsafe Method isn't exposed and can't be said, as FutureBlitz's For
+  Method doesn't visit them; Register's doc says so, and it's the fb lane's. A marked Method
+  with an argument that isn't a LuauType doesn't compile, as Register's Where lines need it, so
+  it has no panic case; one of 8 arguments, throwing or not, has.
+- **An element type whose FromValue wants an empty Array in some and an Object in others is
+  refused (77),** accepted as decided.
+- **A copied value's Read still goes through a State made for it (78), against the decision:**
+  fb 1.3.0 has no generic `As T` from a Bool or a String, and a Bool isn't an Object to test `Is
+  T`, so only `T.FromLuau` makes a T (fbengine-notes/luau/generic_as.fb, for the fb lane).
+  AsBool, AsNumber, AsInteger, and AsString read one with none, and Read's doc says so.
+- **`LuauStatesOpen(here: True)` counts the calling thread's States:** `fb test` runs tests on a
+  pool of threads, so a test that watched the process's count raced the others'; the package's
+  own tests count theirs.

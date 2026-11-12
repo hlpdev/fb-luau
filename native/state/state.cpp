@@ -391,6 +391,14 @@ int set_up(lua_State* stack) {
     lua_pop(stack, 1);
     fbl::prepare_callbacks(stack);
     fbl::prepare_objects(stack, *state);
+    // Each thread's number, by the thread, which Luau's collector clears.
+    lua_newtable(stack);
+    lua_newtable(stack);
+    lua_pushstring(stack, "k");
+    lua_setfield(stack, -2, "__mode");
+    lua_setmetatable(stack, -2);
+    state->thread_ids_ref = lua_ref(stack, -1);
+    lua_pop(stack, 1);
     return 0;
 }
 
@@ -828,15 +836,69 @@ int64_t fbl_state_native_functions(uint64_t state) try {
     return -1;
 }
 
-int64_t fbl_state_count(void) try {
+int32_t fbl_state_turn(uint64_t state, int32_t what) try {
+    fbl::state_t* found = fbl::find_state(state);
+    if (found == nullptr) {
+        return what == 2 ? -1 : FBL_MISUSE;
+    }
+    switch (what) {
+    case 1:
+        if (found->depth != 0 || found->turn_open) {
+            return fbl::misuse("a turn begins only when no call runs");
+        }
+        found->turn_open = true;
+        found->timed_out = false;
+        if (found->time_budget.count() > 0) {
+            found->deadline = std::chrono::steady_clock::now() + found->time_budget;
+        }
+        found->depth++;
+        return FBL_OK;
+    case 0:
+        if (!found->turn_open) {
+            return fbl::misuse("no turn is open");
+        }
+        found->turn_open = false;
+        found->depth--;
+        found->deadline = {};
+        return FBL_OK;
+    case 2:
+        return found->turn_open && found->deadline != std::chrono::steady_clock::time_point{} &&
+                       std::chrono::steady_clock::now() >= found->deadline
+                   ? 1
+                   : 0;
+    default:
+        return fbl::misuse(fbl::formatted("{} isn't a turn's step", what));
+    }
+} catch (...) {
+    return fbl::escaped();
+}
+
+int64_t fbl_state_count(int32_t here) try {
+    const std::thread::id caller = std::this_thread::get_id();
     const std::scoped_lock lock(slots_mutex);
-    return std::ranges::count_if(slots, [](const slot_t& slot) { return slot.state != nullptr; });
+    return std::ranges::count_if(slots, [&](const slot_t& slot) {
+        return slot.state != nullptr && (here == 0 || slot.owner == caller);
+    });
 } catch (...) {
     fbl::escaped();
     return -1;
 }
 
-int64_t fbl_state_memory_all(void) try { return fbl::memory_of_all_states(); } catch (...) {
+int64_t fbl_state_memory_all(int32_t here) try {
+    if (here == 0) {
+        return fbl::memory_of_all_states();
+    }
+    // Only this thread changes what its States hold, so reading it here is safe.
+    const std::thread::id caller = std::this_thread::get_id();
+    const std::scoped_lock lock(slots_mutex);
+    int64_t total = 0;
+    for (const slot_t& slot : slots) {
+        if (slot.state != nullptr && slot.owner == caller) {
+            total += slot.state->memory_used;
+        }
+    }
+    return total;
+} catch (...) {
     fbl::escaped();
     return -1;
 }

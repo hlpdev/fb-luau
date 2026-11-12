@@ -2,7 +2,6 @@
 #include "fbl.h"
 #include "state/state.hpp"
 
-#include <bit>
 #include <lua.h>
 #include <lualib.h>
 
@@ -115,7 +114,39 @@ uint64_t fbl_thread_id(uint64_t state, int32_t frame, int32_t slot) try {
     const fbl::frame_t* in = found == nullptr ? nullptr : fbl::find_frame(*found, frame);
     int index = 0;
     const lua_State* co = in == nullptr ? nullptr : thread_at(*in, slot, index);
-    return co == nullptr ? 0 : std::bit_cast<uint64_t>(co);
+    if (co == nullptr) {
+        return 0;
+    }
+    // A number of its own, kept by a weak table of the thread's, so a thread made where a
+    // collected one was is never taken for it.
+    lua_State* thread = in->thread;
+    if (lua_checkstack(thread, 2) == 0) {
+        fbl::record_error(*found, FBL_MEMORY, "not enough memory");
+        return 0;
+    }
+    lua_getref(thread, found->thread_ids_ref);
+    lua_pushvalue(thread, index);
+    lua_rawget(thread, -2);
+    const auto known = static_cast<uint64_t>(lua_tonumber(thread, -1));
+    lua_pop(thread, 2);
+    if (known != 0) {
+        return known;
+    }
+    const uint64_t number = found->next_thread_id + 1;
+    const int ids = found->thread_ids_ref;
+    lua_pushvalue(thread, index);
+    auto work = [ids, number](lua_State* stack) {
+        lua_getref(stack, ids);
+        lua_pushvalue(stack, 1);
+        lua_pushnumber(stack, static_cast<double>(number));
+        lua_rawset(stack, -3);
+        return 0;
+    };
+    if (fbl::run_protected(*found, thread, 1, 0, work) != FBL_OK) {
+        return 0;
+    }
+    found->next_thread_id = number;
+    return number;
 } catch (...) {
     fbl::escaped();
     return 0;

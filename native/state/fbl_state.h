@@ -80,13 +80,20 @@ FBL_API bool fbl_state_close(uint64_t state);
 // State's, or kilobytes below 0.
 FBL_API int32_t fbl_state_step(uint64_t state, int32_t kilobytes);
 
-// How many States the process has open, on every thread, which a program's tests and soaks watch
-// come back to what it was.
-FBL_API int64_t fbl_state_count(void);
+// A turn of the program's driver of threads: 1 begins one, with the time budget for everything
+// it resumes, as one call has it, which only begins when no call runs; 0 ends it; a status. 2
+// gives 1 when the turn's budget is spent, 0 when it isn't, or -1 for a handle that isn't a
+// State's.
+FBL_API int32_t fbl_state_turn(uint64_t state, int32_t what);
 
-// The bytes every State of the process holds, on every thread, which a program's tests and soaks
-// watch come back to what it was.
-FBL_API int64_t fbl_state_memory_all(void);
+// How many States the process has open, on every thread, or, when `here` isn't 0, those of the
+// calling thread: what a program's tests and soaks watch come back to what it was, the second
+// where tests run side by side on a pool of threads.
+FBL_API int64_t fbl_state_count(int32_t here);
+
+// The bytes every State of the process holds, on every thread, or, when `here` isn't 0, the
+// calling thread's States hold, as fbl_state_count counts them.
+FBL_API int64_t fbl_state_memory_all(int32_t here);
 
 // Whether Luau's code generator is supported here, the processor and the system: 1 or 0.
 FBL_API int32_t fbl_state_native_supported(void);

@@ -392,6 +392,7 @@ Local lua = LuauState()
 Try lua.Run(source)                                   // defines main(), which waits
 Local script = Try lua.Spawn(Try lua.Get<LuauFunction>("main"))
 Local done = script.Start()                           // a Task, on the scheduler running it
+Local waits = lua.Start()                             // runs what task.spawn and task.delay start
 
 While window.IsOpen()
     window.Draw()
@@ -409,40 +410,52 @@ end
 ```
 
 - `lua.Spawn(f)` makes a `LuauThread` that will run `f`. `thread.Start()` runs it as an Async
-  Function would: it resumes the thread, and each time the thread yields to wait, it Awaits
-  what the thread waits for, then resumes it. Its Task is done when the thread ends, and throws
-  its error. It's on the scheduler running the code, so `s.Run(...)` moves it to a Scheduler of
-  the program's own, which a pause stops, and whose `Tick(dt * speed)` scales its waits. A
-  `coroutine.yield` of the thread's own waits for the scheduler's next tick.
+  Function would, on the scheduler running the code, so `s.Run(...)` moves it to a Scheduler of
+  the program's own, which a pause stops, and whose `Tick(dt * speed)` scales its waits. Its Task
+  is done when the thread ends, and throws its error. A `coroutine.yield` of the thread's own
+  waits for the scheduler's next tick.
+- No wait is a timer of its own. A State keeps its waiting threads, each with when it's due, and
+  a driver resumes them: a thread's Start is one, for its thread and what the threads it starts
+  wait for, and `lua.Start()` is the State's, for the rest, `task.spawn`'s, `task.delay`'s, and a
+  coroutine's of a call of the program's. A driver is a coroutine that, at each of its
+  scheduler's ticks, resumes what's due, with one time budget for all of it, what's left due
+  going first the next tick, and ends when nothing of its waits or the State closes. Its time is
+  what its timer has seen pass, a `Wait` of the soonest due, at most a second at a time, as a
+  timer started in a tick counts from its end: a wait is never early, and late by at most what
+  the scheduler's ticks overshoot. At most `LuauOptions.MostWaiting` threads wait, 10,000 by
+  default, past which the script's call is an error, and a thread waits for one thing at a time.
+- A wait with no driver is a `YIELD` error. States are the main thread's, as Async code is: one
+  made on another thread works, with no driver, and its scripts don't wait.
 - The `task` library, which the State opens when `LuauOptions.Tasks` is on, as it is by default,
   is Roblox's: `task.wait(seconds)`, `task.spawn(f, ...)`, `task.defer(f, ...)`,
   `task.delay(seconds, f, ...)`, and `task.cancel(thread)`, so a mod's author writes what they
   know. `task.wait` is `Await Wait(seconds)` on the thread's scheduler, and gives the seconds it
   waited for, of the scheduler's time; nil or 0 waits for the next tick.
 - As Roblox's do, a wait belongs to the thread that waits, not to whatever resumed it: a
-  coroutine that calls `task.wait` yields to its resumer at once, and the scheduler goes on with
-  it later. A thread that waits with nothing running it, one of `task.spawn`, `task.defer`, or
-  `task.delay`, or a coroutine of a call of the program's, is run by the scheduler running the
-  code once the program's outermost call into the State returns. An error that ends one goes to
-  `LuauOptions.ThreadError`, by default std's `PrintError` of its message and traceback.
+  coroutine that calls `task.wait` yields to its resumer at once, and the driver goes on with it
+  later. An error that ends a thread a driver resumes goes to `LuauOptions.ThreadError`, by
+  default std's `PrintError` of its message and traceback, once the outermost call into the
+  State has returned, never inside one, so it can close the State. `task.spawn` of a thread
+  that's running, dead, or a runner is an error in its caller.
 - A function from `SetAsync` that a script calls on a thread yields it until its Task is done,
   then resumes it with the result, or raises the Task's error in it, as `Wrap` raises one. The
   function is called only once the thread can wait.
 - A yield where nothing can wait, as in `lua.Run`, which runs on the program's own stack, or
   inside a metamethod, is a `LuauError` of `YIELD`, saying so.
 - `thread.Resume(args...)` and `thread.Status` drive a thread by hand, as `coroutine.resume`
-  does, for a program with a loop of its own. A thread the scheduler runs can't be resumed by
-  hand, or started again: either panics.
-- A State closed while its threads wait lets them go: each one's wait ends as it would, and
-  then its Task throws a `LuauError` of `CLOSED`. A wait isn't cut short, since nothing that
-  ends it early wakes a program's Scheduler without a tick of the main one too.
+  does, for a program with a loop of its own, while it's `SUSPENDED`; once it waits it's
+  `WAITING`, a driver's, and Resume or Start on it is a `LuauError`, as a script can make it
+  so. A loop of Resume while `SUSPENDED` ends there, and the thread goes on by its driver.
+- A State closed while its threads wait lets them go at once: every wait ends at its driver's
+  next wake, within a second of the scheduler's time, and each Start's Task throws a
+  `LuauError` of `CLOSED`.
 
 ### Sandboxing and limits
 
 ```vb
 Local options = LuauOptions()
 options.MemoryLimit = 64 * 1024 * 1024          // bytes, for the whole State
-options.TimeBudget = 50.Milliseconds            // each call into the State, or each resume
+options.TimeBudget = 50.Milliseconds            // each call into the State, or a driver's tick
 Local lua = Try LuauState(options)
 
 Try lua.SetFunction("spawn_item", SpawnItem)    // what mods are given
@@ -456,8 +469,10 @@ Try doors.Run(source, "@mods/doors/init.luau")
 - A State is sandboxed as Luau's own `luaL_sandbox` and `luaL_sandboxthread` make it:
   `Freeze()` makes the globals and every library read-only, and each `LuauScript` has globals of
   its own, its `_G`, which read through to the frozen ones by a locked metatable, so one mod can't
-  change what another sees, or reach the shared table. A State that's never frozen freezes at its
-  first `NewScript`. A script's code is loaded on a thread whose globals are the script's, as Luau
+  change what another sees, or reach the shared table. What's shared is what the program gives
+  every script, the frozen globals, and the State's modules: each runs once, and every script
+  that requires it gets its one table, frozen through its fields, so no mod changes it for
+  another. A State that's never frozen freezes at its first `NewScript`. A script's code is loaded on a thread whose globals are the script's, as Luau
   resolves a chunk's globals as it loads from the loading thread's, not from the environment it's
   given.
 - The libraries, `LuauOptions.Libraries`, a `@Flags` Enum, are by default Luau's safe ones:
@@ -965,7 +980,7 @@ eating memory, which gets `MEMORY` while the State goes on.
 Done means: `task.wait` waits on the main scheduler and on a Scheduler of the program's own,
 whose pause and time scale it follows; an Async Function's Task is waited for and its error
 raised in the script; a thread's Task gives its error; a State closed with threads waiting lets
-them go.
+them go at once; no wait is a timer, and the waits are capped.
 
 ### L8: require
 

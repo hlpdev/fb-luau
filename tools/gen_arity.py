@@ -158,10 +158,12 @@ def thread_methods(count):
                          "function's arguments, and after, what the `coroutine.yield` it waits at gives. It runs\n"
                          "until it yields or returns, and what it yields or returns comes back, of any types.\n\n"
                          "# Errors\n\nA LuauError for what it raises or meets as it runs, which ends it, or of\n"
-                         "RUNTIME for a thread that isn't suspended.\n\n# Panics\n\nFor a thread that runs on the\n"
-                         "scheduler, from Start or the task library.")
+                         "RUNTIME for a thread that isn't suspended, or that waits, which the scheduler resumes.")
     lines += header("    ", "Resume", names, parameters, ": LuauValue[] Throws LuauError")
-    lines.append("        If Owner.Driven.Contains(Id) Then Panic(\"the Luau thread runs on the scheduler\")")
+    lines.append("        If Owner.Waits.Contains(Id)")
+    lines.append("            Throw LuauError(LuauErrorKind.RUNTIME, \"the Luau thread waits on the scheduler, which \" +")
+    lines.append("                            \"resumes it\")")
+    lines.append("        End If")
     lines.append("        Local slots = Try Opened()")
     lines.append("        Defer Owner.Closed(slots.Frame)")
     lines += pushes(count)
@@ -278,7 +280,8 @@ def expose_members():
                         "gives the same builder.\n\n# Errors\n\nA LuauError of MEMORY.\n\n# Panics\n\n"
                         "For a marked Method of a shape none exposes, like one of 8 arguments, or one that\n"
                         "gives nothing marked [LuauExpose], and for two marked members of one name in Luau,\n"
-                        "saying which.")
+                        "saying which. A marked Static, ByRef, or Unsafe Method isn't exposed, and isn't\n"
+                        "said, as FutureBlitz's reflection doesn't go over them.")
     lines += ["    @PanicsAtCaller",
               "    Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError",
               "        Local kept = KeptType<T>()",

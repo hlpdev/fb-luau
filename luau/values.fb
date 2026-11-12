@@ -232,7 +232,7 @@ Public Struct LuauSlots
             If value != Null && value.CanGoTo(Owner)
                 Try
                     Try LuauValue.ToLuau(Self, value)
-                    Owner.Raised[error.Message] = error
+                    Owner.Kept(error.Message, error)
                     Return
                 Catch failed As LuauError
                     Truncate(count)
@@ -240,7 +240,7 @@ Public Struct LuauSlots
             End If
         End If
         Local message = where + error.Message
-        Owner.Raised[message] = error
+        Owner.Kept(message, error)
         Try String.ToLuau(Self, message)
     End Method
 
@@ -251,7 +251,16 @@ Public Struct LuauSlots
     /// A LuauError of YIELD when nothing can wait for it: on a call of the program's, which runs
     /// to its end, or in a metamethod, saying that `name` waits.
     Package Method Yieldable(name: String) Throws LuauError
-        If fbl_thread_can_yield(Owner.Live(), Frame) == 1 Then Return
+        If fbl_thread_can_yield(Owner.Live(), Frame) == 1
+            If Owner.DriverOf(Owner.CurrentDriver) != Null ||
+               Owner.DriverOf(Owner.StateDriver) != Null
+                Return
+            End If
+            Throw LuauError(LuauErrorKind.YIELD,
+                            "attempt to yield where nothing can wait for it: '{name}' waits, and " +
+                            "nothing runs this State's waits; lua.Start() runs them, or a thread's " +
+                            "Start")
+        End If
         Throw LuauError(LuauErrorKind.YIELD,
                         "attempt to yield where nothing can wait for it: '{name}' waits, so it " +
                         "runs on a thread on the scheduler, not in a call of the program's or a " +
@@ -274,7 +283,7 @@ Public Struct LuauSlots
             where = Try? String.FromLuau(Self, Count() - 1) ?? ""
             Remove(Count() - 1)
         End If
-        Owner.Waiting.Add(LuauWaiting(Try Running(), task, where))
+        Try Owner.Waited(LuauWaiting(Try Running(), task, where))
         Truncate(0)
         Return FBL_YIELD
     End Method

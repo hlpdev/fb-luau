@@ -234,7 +234,11 @@ Public Class LuauTypeBuilder<T: LuauObject>
         Local other: String? = claimedMethods.Get(name)
         If other == Null && kind != 2 Then other = claimedGetters.Get(name)
         If other == Null && kind != 1 Then other = claimedSetters.Get(name)
-        If other != Null Then Panic("{Name}'s {other} and {member} are both '{name}' in Luau")
+        // One member taken again, as a Method with a default parameter is at two arities, is
+        // itself.
+        If other != Null && other != member
+            Panic("{Name}'s {other} and {member} are both '{name}' in Luau")
+        End If
         Select kind
             Case 0
                 claimedMethods[name] = member
@@ -249,16 +253,17 @@ Public Class LuauTypeBuilder<T: LuauObject>
     /// can't be.
     @PanicsAtCaller
     Package Method Unexposed(member: String, attribute: String, kind: Int, name: String)
-        Local found = False
+        // Exposed when it's the member that has its Luau name, not another of that name.
+        Local exposed: String? = Null
         Select kind
             Case 0
-                found = Methods.Contains(name)
+                exposed = claimedMethods.Get(name)
             Case 1
-                found = Getters.Contains(name)
+                exposed = claimedGetters.Get(name)
             Default
-                found = Setters.Contains(name)
+                exposed = claimedSetters.Get(name)
         End Select
-        If found Then Return
+        If exposed == member Then Return
         Local shape = "a Method of 0 to 7 LuauType arguments that gives a LuauType"
         Select attribute
             Case "LuauAction"

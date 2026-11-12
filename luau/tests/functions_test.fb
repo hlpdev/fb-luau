@@ -237,14 +237,15 @@ End Function
 @Test
 Function TheCauseIsTheMostRecentRaiseOfItsMessage() Throws LuauError
     Local lua = LuauState()
-    Local raised = 0
+    Local thrown: LuauError[] = []
     Try lua.SetFunction("fail", Function() Throws Error
-        raised++
-        Throw Numbered("same", raised)
+        Local error = LuauError(LuauErrorKind.RUNTIME, "same")
+        thrown.Add(error)
+        Throw error
     End Function)
     Local error = ExpectThrows<LuauError>(lua.Run("pcall(fail) fail()"))
-    Expect(error != Null && error.Cause Is Numbered)
-    Expect(error != Null && (error.Cause As Numbered).Number == 2)
+    Expect(thrown.Count == 2)
+    Expect(error != Null && error.Cause != Null && RefEquals(error.Cause, thrown[1]))
 End Function
 
 @Test

@@ -1,14 +1,16 @@
 //! Luau's threads, its coroutines, on FutureBlitz's schedulers: a thread the program runs as an
-//! Async Function would, or resumes by hand, and the `task` library, whose waits are the
-//! scheduler's waits.
+//! Async Function would, or resumes by hand, the drivers that resume threads that wait, and the
+//! `task` library, whose waits are the scheduler's.
 
 Import std.collections
 Import std.core
+Import std.text
 Import std.time
 
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_ref"
+Import "./c/fbl_state"
 Import "./c/fbl_thread"
 Import "./errors"
 Import "./shim"
@@ -17,7 +19,12 @@ Import "./tables"
 Import "./value"
 Import "./values"
 
-/// What a [LuauThread] is now, as `coroutine.status` says it.
+/// The most of a scheduler's time a driver's timer waits at once, in seconds: a closed State's
+/// driver ends within it, and a wait is late by at most what one of the scheduler's ticks
+/// overshoots, each time it waits this long, as a timer started in a tick counts from its end.
+Const LongestWait: Float64 = 1.0
+
+/// What a [LuauThread] is now, as `coroutine.status` says it, and whether the scheduler has it.
 Public Enum LuauThreadStatus
     /// Made, or yielded: a resume goes on with it.
     SUSPENDED
@@ -29,12 +36,15 @@ Public Enum LuauThreadStatus
     FINISHED
     /// An error ended it.
     FAILED
+    /// It waits, on `task.wait` or a function from `SetAsync`, and a driver resumes it when what
+    /// it waits for is done: the program can't resume it meanwhile.
+    WAITING
 End Enum
 
 /// A Luau thread, a coroutine, that the program holds, which keeps it alive in its State until it
-/// goes; it holds the State weakly, as every handle does. [Start] runs it on the scheduler, as an Async Function runs, so its `task.wait(2)`
-/// waits as an `Await Wait(2.Seconds)` does; `Resume` drives it by hand, as `coroutine.resume`
-/// does.
+/// goes; it holds the State weakly, as every handle does. [Start] runs it on the scheduler, as an
+/// Async Function runs, so its `task.wait(2)` waits as an `Await Wait(2.Seconds)` does; `Resume`
+/// drives it by hand, as `coroutine.resume` does, until it waits, when the scheduler has it.
 ///
 /// # Examples
 ///
@@ -43,8 +53,10 @@ End Enum
 /// Local lua = LuauState()
 /// Local counter = Try lua.Load("local n = 0 while true do n += 1 coroutine.yield(n) end")
 /// Local thread = Try lua.Spawn(counter)
-/// Expect((Try thread.Resume())[0].AsNumber() == 1)
-/// Expect((Try thread.Resume())[0].AsNumber() == 2)
+/// While thread.Status == LuauThreadStatus.SUSPENDED
+///     Local n = (Try thread.Resume())[0].AsNumber() ?? 0
+///     If n == 3 Then Break
+/// End While
 /// Expect(thread.Status == LuauThreadStatus.SUSPENDED)
 /// ```
 Public Class LuauThread Implements LuauType
@@ -62,7 +74,7 @@ Public Class LuauThread Implements LuauType
     End Property
     /// The State's reference to it.
     Package ReadOnly Field Ref: Int32
-    /// Its id, the same for each handle of the same thread.
+    /// Its number in its State, its own, the same for each handle of the thread.
     Package ReadOnly Field Id: UInt64
 
     Package New(owner: LuauState, ref: Int32, id: UInt64)
@@ -87,10 +99,11 @@ Public Class LuauThread Implements LuauType
     Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauThread Throws LuauError
         If slots.TypeAt(index) != FBL_TYPE_THREAD Then Throw slots.Wrong("LuauThread", index)
         Local id = fbl_thread_id(slots.Owner.Live(), slots.Frame, index)
+        If id == 0 Then Throw LuauError(LuauErrorKind.MEMORY, "not enough memory")
         Return LuauThread(slots.Owner, Try slots.RefAt(index), id)
     End Method
 
-    /// What it is now.
+    /// What it is now: WAITING while a driver has it.
     ///
     /// # Panics
     ///
@@ -98,52 +111,45 @@ Public Class LuauThread Implements LuauType
     @PanicsAtCaller
     Public Property Status: LuauThreadStatus
         Get
-            Local slots = Try? Opened()
-            If slots == Null Then Panic("not enough memory in the Luau State to see a thread's status")
-            Defer Owner.Closed(slots.Frame)
-            Return fbl_thread_status(Owner.Handle, slots.Frame, 0) As LuauThreadStatus
+            If Owner.Waits.Contains(Id) Then Return LuauThreadStatus.WAITING
+            Return Luaus()
         End Get
     End Property
 
-    /// Runs it on the scheduler running the code, as an Async Function runs: it resumes it, and
-    /// each time it waits, on `task.wait` or a function from `SetAsync`, waits as an
-    /// Await does, then resumes it with what it waited for. A `coroutine.yield` of its own waits
-    /// for the scheduler's next tick. `s.Run(thread.Start())` runs it on a Scheduler of the
-    /// program's own, whose pause and time scale its waits follow.
+    /// What Luau says it is, without the scheduler's WAITING.
+    @PanicsAtCaller
+    Package Method Luaus(): LuauThreadStatus
+        Local slots = Try? Opened()
+        If slots == Null Then Panic("not enough memory in the Luau State to see a thread's status")
+        Defer Owner.Closed(slots.Frame)
+        Return fbl_thread_status(Owner.Handle, slots.Frame, 0) As LuauThreadStatus
+    End Method
+
+    /// Runs it on the scheduler running the code, as an Async Function runs, as its driver: it
+    /// resumes it, and each time it waits, on `task.wait` or a function from `SetAsync`, resumes
+    /// it with what it waited for at the scheduler's tick when that's done; a `coroutine.yield` of
+    /// its own waits for the next tick. What the threads it starts wait for, a coroutine's or
+    /// `task.spawn`'s, it drives too. `s.Run(thread.Start())` runs it on a Scheduler of the
+    /// program's own, whose pause and time scale its waits follow. Its Task is done when the
+    /// thread ends.
     ///
     /// # Errors
     ///
-    /// The Task throws a LuauError for what the thread raises or meets as it runs, or of CLOSED
-    /// when its State closes while it waits, once what it waits for is done.
-    ///
-    /// # Panics
-    ///
-    /// When it runs on the scheduler already.
+    /// The Task throws a LuauError for what the thread raises or meets as it runs; of CLOSED when
+    /// its State closes while it waits, at the scheduler's next tick; and of RUNTIME for a thread
+    /// that waits already, or isn't suspended.
     Public Async Method Start() Throws LuauError
-        If Owner.Driven.Contains(Id) Then Panic("the Luau thread runs on the scheduler already")
-        Driving(True)
-        Defer Driving(False)
-        // Its waits are awaited here, not in an Async Function of their own, so a Scheduler's Run
-        // of its Task moves them with it.
-        Local waiting = Try Stepped(Null, "", False)
-        While waiting != Null
-            Local resumed: LuauResumed
-            Local task = waiting.Task
-            If task != Null
-                resumed = Await task
-            ElseIf waiting.Seconds > 0.0
-                Await Wait(waiting.Seconds.Seconds)
-                resumed = waiting.Given
-            Else
-                Await NextTick()
-                resumed = waiting.Given
-            End If
-            waiting = Try Stepped(resumed, waiting.Origin, True)
+        Local driver = Try LuauDriver.Started(Self)
+        // Its timer starts after its first tick, so a Scheduler's Run of its Task has moved it.
+        While True
+            Await NextTick()
+            If !(Try driver.Turned()) Then Return
+            If driver.WantsTimer() Then Timed(driver)
         End While
     End Method
 
     /// Closes it, as `coroutine.close` does: it's finished, and lets go of what it held, so
-    /// nothing goes on with it.
+    /// nothing goes on with it, and a driver doesn't resume it.
     ///
     /// # Errors
     ///
@@ -153,6 +159,7 @@ Public Class LuauThread Implements LuauType
         Local slots = Try Opened()
         Defer Owner.Closed(slots.Frame)
         Try Owner.Check(fbl_thread_close(Owner.Handle, slots.Frame, 0))
+        Owner.Waits.Remove(Id)
     End Method
 
     /// A frame with it in slot 0, which the caller closes with Owner.Closed.
@@ -207,42 +214,12 @@ Public Class LuauThread Implements LuauType
         Return (Try Ran(slots, raise, False)).0
     End Method
 
-    /// Takes its next step on the scheduler: resumes it with what it waited for, unless it's
-    /// done, or after a wait, closed meanwhile; then Null once it's done, or what it waits for
-    /// next, the scheduler's next tick for a yield of its own.
-    ///
-    /// # Errors
-    ///
-    /// A LuauError for what it meets, or of CLOSED when its State is.
-    Package Method Stepped(resumed: LuauResumed?, where: String,
-                           waited: Bool): LuauWaiting? Throws LuauError
-        Local held: LuauState? = owner
-        If held == Null || !held.IsOpen
-            Throw LuauError(LuauErrorKind.CLOSED, "the Luau State closed while its thread waited")
-        End If
-        If waited && Status != LuauThreadStatus.SUSPENDED Then Return Null
-        If Try Resumed(resumed, where) Then Return Null
-        Return held.TakeWaiting(Id) ?? LuauWaiting(Self, 0.0, LuauResumed.Nothing())
-    End Method
-
-    /// Says whether the scheduler runs it now, so its State gives what it waits for to its
-    /// driver, and the program can't resume it too.
-    Package Method Driving(driven: Bool)
-        Local held: LuauState? = owner
-        If held == Null || !held.IsOpen Then Return
-        If driven
-            held.Driven[Id] = True
-        Else
-            held.Driven.Remove(Id)
-        End If
-    End Method
-
-    /// Gives an error that ended it, which nothing waits for, to its State's ThreadError, unless
-    /// the State is closed.
+    /// Gives an error that ended it, which nothing waits for, to its State, which gives it to its
+    /// ThreadError once no call runs, unless the State is closed.
     Package Method Failed(error: LuauError)
         Local held: LuauState? = owner
         If held == Null || !held.IsOpen || error.Kind == LuauErrorKind.CLOSED Then Return
-        held.ThreadError(error)
+        held.Failed(error)
     End Method
 End Class
 
@@ -274,7 +251,8 @@ Package Class LuauResumed
     End Method
 End Class
 
-/// What a thread waits for: the scheduler's next tick, a time, or a Task of the program's.
+/// What a thread waits for: the scheduler's next tick, a time, or a Task of the program's; and
+/// which driver resumes it, and when, in that driver's time.
 Package Class LuauWaiting
     /// The thread.
     Package ReadOnly Field Thread: LuauThread
@@ -286,6 +264,9 @@ Package Class LuauWaiting
     Package ReadOnly Field Task: Task<LuauResumed>?
     /// Where it waited, which a Task's error is raised as from.
     Package ReadOnly Field Origin: String
+    /// The driver that resumes it, by its number, and the time in that driver's when it's due.
+    Package Field Driver: Int = 0
+    Package Field Due: Float64 = 0.0
 
     /// A wait of `seconds`, or for the next tick, after which it's resumed with `given`.
     Package New(thread: LuauThread, seconds: Float64, given: LuauResumed)
@@ -304,33 +285,210 @@ Package Class LuauWaiting
         Task = task
         Origin = where
     End New
+
+    /// Whether it's due in its driver's turn: its Task done, its time come, or a tick's.
+    Package Method IsDue(now: Float64): Bool
+        Local task = Task
+        If task != Null Then Return task.IsDone()
+        Return Seconds <= 0.0 || Due <= now
+    End Method
 End Class
 
-/// Runs the thread `first` waits on from where it waits, on the scheduler running the code, as
-/// Start does, for a thread nothing waits for: its error goes to its State's ThreadError.
-Package Async Function Followed(first: LuauWaiting)
-    Local thread = first.Thread
-    thread.Driving(True)
-    Defer thread.Driving(False)
-    Local waiting: LuauWaiting? = first
-    While waiting != Null
-        Local resumed: LuauResumed
-        Local task = waiting.Task
-        If task != Null
-            resumed = Await task
-        ElseIf waiting.Seconds > 0.0
-            Await Wait(waiting.Seconds.Seconds)
-            resumed = waiting.Given
-        Else
-            Await NextTick()
-            resumed = waiting.Given
+/// What resumes a State's threads that wait, on the scheduler its coroutine is on: the State's own,
+/// `lua.Start()`, for what no thread's Start runs, or a thread's Start, for its thread and what
+/// the threads it starts wait for. No wait is a timer of its own: at each of the scheduler's ticks,
+/// it resumes what's due, with one time budget for all of it, and its time is what its timer, a
+/// wait of at most a quantum at a time, has seen pass.
+Package Class LuauDriver
+    /// Its number in its State.
+    Package ReadOnly Field Number: Int
+    /// Its State, held weakly, as a handle holds it.
+    ReadOnly Field owner: Weak<LuauState>
+    /// The thread whose Start it is, or Null for the State's own.
+    Package ReadOnly Field Own: LuauThread?
+    /// Its time, in seconds of its scheduler's, which its timer moves on.
+    Package Field Now: Float64 = 0.0
+    /// Whether its timer runs.
+    Package Field Timing: Bool = False
+
+    Package New(owner: LuauState, number: Int, own: LuauThread?)
+        Self.owner = owner
+        Number = number
+        Own = own
+    End New
+
+    /// A destroyed driver, as when its Scheduler goes with it waiting, gives its waits to the
+    /// State's own driver, or, with none, lets them go, the threads suspended.
+    Method Destroy()
+        Local held: LuauState? = owner
+        If held == Null || !held.IsOpen Then Return
+        held.Dropped(Number)
+        If held.StateDriver == Number Then held.StateDriver = 0
+        Local heir = held.DriverOf(held.StateDriver)
+        Local mine: UInt64[] = []
+        For entry In held.Waits
+            If entry.1.Driver == Number Then mine.Add(entry.0)
+        End For
+        For id In mine
+            Local waiting = held.Waits.Get(id)
+            If waiting == Null Then Continue
+            If heir == Null
+                held.Waits.Remove(id)
+            Else
+                waiting.Due = heir.Now + Max(waiting.Due - Now, 0.0)
+                waiting.Driver = heir.Number
+            End If
+        End For
+    End Method
+
+    /// The State's own driver, for `lua.Start()`.
+    ///
+    /// # Panics
+    ///
+    /// When the State has one running already.
+    @PanicsAtCaller
+    Package Static Method OfState(state: LuauState): LuauDriver
+        If state.DriverOf(state.StateDriver) != Null Then Panic("the Luau State's driver runs already")
+        Local driver = state.NewDriver(Null)
+        state.StateDriver = driver.Number
+        Return driver
+    End Method
+
+    /// A thread's driver, for its Start, which has resumed it a first time.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of RUNTIME for a thread that waits already, of CLOSED for a closed State, and
+    /// what the thread meets as it runs.
+    Package Static Method Started(thread: LuauThread): LuauDriver Throws LuauError
+        Local held = thread.Owner
+        If !held.IsOpen Then Throw LuauError(LuauErrorKind.CLOSED, "the Luau State is closed")
+        If held.Waits.Contains(thread.Id)
+            Throw LuauError(LuauErrorKind.RUNTIME, "the Luau thread waits on the scheduler already")
         End If
+        Local driver = held.NewDriver(thread)
+        Try driver.Stepped(thread, Null, "")
+        Return driver
+    End Method
+
+    /// Whether its timer should start: it has a time to wait for, and no timer.
+    Package Method WantsTimer(): Bool
+        If Timing || Quantum() <= 0.0 Then Return False
+        Timing = True
+        Return True
+    End Method
+
+    /// How long its timer waits next: to its soonest time, at most a quantum; or 0 when it waits
+    /// for none, or its State is closed.
+    Package Method Quantum(): Float64
+        Local held: LuauState? = owner
+        If held == Null || !held.IsOpen Then Return 0.0
+        Local soonest: Float64 = -1.0
+        For entry In held.Waits
+            Local waiting = entry.1
+            If waiting.Driver != Number || waiting.Task != Null || waiting.Seconds <= 0.0 Then Continue
+            If soonest < 0.0 || waiting.Due < soonest Then soonest = waiting.Due
+        End For
+        If soonest < 0.0 Then Return 0.0
+        Return Min(Max(soonest - Now, 0.001), LongestWait)
+    End Method
+
+    /// Its turn at a tick of its scheduler's: resumes what's due, as much as one time budget
+    /// runs, the rest going first next tick; then whether it goes on: False once its own thread
+    /// has ended.
+    ///
+    /// # Errors
+    ///
+    /// For a thread's Start, what its thread met; for every driver, a LuauError of CLOSED once
+    /// its State is.
+    Package Method Turned(): Bool Throws LuauError
+        Local held: LuauState? = owner
+        If held == Null || !held.IsOpen
+            Throw LuauError(LuauErrorKind.CLOSED, "the Luau State closed while its threads waited")
+        End If
+        Local due: LuauWaiting[] = []
+        For entry In held.Waits
+            If entry.1.Driver == Number && entry.1.IsDue(Now) Then due.Add(entry.1)
+        End For
+        Local failed: LuauError? = Null
+        If due.Count > 0
+            Try held.Check(fbl_state_turn(held.Handle, 1))
+            held.Turning = True
+            For waiting In due
+                If fbl_state_turn(held.Handle, 2) == 1 Then Break
+                held.Waits.Remove(waiting.Thread.Id)
+                Local resumed = waiting.Given
+                Local task = waiting.Task
+                If task != Null Then resumed = task.Wait()
+                Try
+                    Try Stepped(waiting.Thread, resumed, waiting.Origin)
+                Catch error As LuauError
+                    If IsOwn(waiting.Thread) Then failed = error Else waiting.Thread.Failed(error)
+                End Try
+            End For
+            held.Turning = False
+            fbl_state_turn(held.Handle, 0)
+        End If
+        held.Report()
+        If failed != Null Then Throw failed
+        Local own = Own
+        If own == Null Then Return True
+        Return held.Waits.Contains(own.Id) || own.Luaus() == LuauThreadStatus.SUSPENDED
+    End Method
+
+    /// Whether `thread` is the one whose Start this is.
+    Method IsOwn(thread: LuauThread): Bool
+        Local own = Own
+        Return own != Null && own.Id == thread.Id
+    End Method
+
+    /// Resumes `thread`, unless it's done, or closed meanwhile, with this the driver of what it
+    /// waits for; a `coroutine.yield` of its own waits for the next tick.
+    Package Method Stepped(thread: LuauThread, resumed: LuauResumed?,
+                           where: String) Throws LuauError
+        Local held = thread.Owner
+        If thread.Luaus() != LuauThreadStatus.SUSPENDED Then Return
+        Local before = held.CurrentDriver
+        held.CurrentDriver = Number
         Try
-            waiting = Try thread.Stepped(resumed, waiting.Origin, True)
+            If Try thread.Resumed(resumed, where)
+                held.CurrentDriver = before
+                Return
+            End If
         Catch error As LuauError
-            thread.Failed(error)
-            Return
+            held.CurrentDriver = before
+            Throw error
         End Try
+        held.CurrentDriver = before
+        If !held.Waits.Contains(thread.Id) && thread.Luaus() == LuauThreadStatus.SUSPENDED
+            Local tick = LuauWaiting(thread, 0.0, LuauResumed.Nothing())
+            tick.Driver = Number
+            held.Waits[thread.Id] = tick
+        End If
+    End Method
+End Class
+
+/// A driver's timer: waits on its scheduler at most a quantum at a time, moving the driver's time
+/// on by what it waited, until the driver waits for no time.
+Async Function Timed(driver: LuauDriver)
+    While True
+        Local quantum = driver.Quantum()
+        If quantum <= 0.0
+            driver.Timing = False
+            Return
+        End If
+        Await Wait(quantum.Seconds)
+        driver.Now += quantum
+    End While
+End Function
+
+/// The State's driver: resumes what its threads wait for that no thread's Start runs, until the
+/// State closes.
+Package Async Function Drove(driver: LuauDriver) Throws LuauError
+    While True
+        Await NextTick()
+        If !(Try driver.Turned()) Then Return
+        If driver.WantsTimer() Then Timed(driver)
     End While
 End Function
 
@@ -386,10 +544,20 @@ Function GivenFrom(slots: LuauSlots, from: Int32): LuauResumed Throws LuauError
     End Function)
 End Function
 
-/// The thread in slot `index`, or a new one for the function there, for the task function `name`.
+/// The thread in slot `index`, or a new one for the function there, for the task function `name`;
+/// one given has to be suspended, not running, done, or waiting already.
 Function ThreadAt(slots: LuauSlots, index: Int32, name: String): LuauThread Throws LuauError
     Local type = slots.TypeAt(index)
-    If type == FBL_TYPE_THREAD Then Return Try LuauThread.FromLuau(slots, index)
+    If type == FBL_TYPE_THREAD
+        Local given = Try LuauThread.FromLuau(slots, index)
+        Local status = given.Status
+        If status != LuauThreadStatus.SUSPENDED
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "'{name}' takes a suspended thread, not one that's " +
+                            "{status.ToString().ToLower()}")
+        End If
+        Return given
+    End If
     If type != FBL_TYPE_FUNCTION
         Throw LuauError(LuauErrorKind.CONVERSION,
                         "invalid argument #{index + 1} to '{name}' (expected function or thread, " +
@@ -417,7 +585,7 @@ Function TaskWait(slots: LuauSlots): Int32
         Try slots.Yieldable("wait")
         Local seconds = Try SecondsAt(slots, 0, "wait")
         Local thread = Try slots.Running()
-        slots.Owner.Waiting.Add(LuauWaiting(thread, seconds, Given(seconds)))
+        Try slots.Owner.Waited(LuauWaiting(thread, seconds, Given(seconds)))
         slots.Truncate(0)
         Return FBL_YIELD
     Catch error
@@ -425,8 +593,9 @@ Function TaskWait(slots: LuauSlots): Int32
     End Try
 End Function
 
-/// `task.spawn(f, ...)`: runs a thread of `f`, or the thread given, with the rest as its
-/// arguments, now, until it waits or ends, and gives it.
+/// `task.spawn(f, ...)`: runs a thread of `f`, or the suspended thread given, with the rest as its
+/// arguments, now, until it waits or ends, and gives it; an error that ends it goes to ThreadError
+/// once no call runs.
 Function TaskSpawn(slots: LuauSlots): Int32
     Try
         Local thread = Try ThreadAt(slots, 0, "spawn")
@@ -442,32 +611,32 @@ Function TaskSpawn(slots: LuauSlots): Int32
     End Try
 End Function
 
-/// `task.defer(f, ...)`: runs a thread of `f`, or the thread given, with the rest as its
+/// `task.defer(f, ...)`: runs a thread of `f`, or the suspended thread given, with the rest as its
 /// arguments, at the scheduler's next tick, and gives it.
 Function TaskDefer(slots: LuauSlots): Int32
     Try
         Local thread = Try ThreadAt(slots, 0, "defer")
-        slots.Owner.Waiting.Add(LuauWaiting(thread, 0.0, Try GivenFrom(slots, 1)))
+        Try slots.Owner.Waited(LuauWaiting(thread, 0.0, Try GivenFrom(slots, 1)))
         Return Try slots.Result(thread)
     Catch error
         Return slots.Raise(error)
     End Try
 End Function
 
-/// `task.delay(seconds, f, ...)`: runs a thread of `f`, or the thread given, with the rest as its
-/// arguments, once the scheduler's time has moved on `seconds`, and gives it.
+/// `task.delay(seconds, f, ...)`: runs a thread of `f`, or the suspended thread given, with the
+/// rest as its arguments, once the scheduler's time has moved on `seconds`, and gives it.
 Function TaskDelay(slots: LuauSlots): Int32
     Try
         Local seconds = Try SecondsAt(slots, 0, "delay")
         Local thread = Try ThreadAt(slots, 1, "delay")
-        slots.Owner.Waiting.Add(LuauWaiting(thread, seconds, Try GivenFrom(slots, 2)))
+        Try slots.Owner.Waited(LuauWaiting(thread, seconds, Try GivenFrom(slots, 2)))
         Return Try slots.Result(thread)
     Catch error
         Return slots.Raise(error)
     End Try
 End Function
 
-/// `task.cancel(thread)`: closes the thread, so it doesn't go on.
+/// `task.cancel(thread)`: closes the thread, so it doesn't go on, nor wait.
 Function TaskCancel(slots: LuauSlots): Int32
     Try
         Local thread = Try slots.Argument<LuauThread>(0, "cancel")
@@ -479,7 +648,7 @@ Function TaskCancel(slots: LuauSlots): Int32
 End Function
 
 /// Sets the global `task` to the task library: wait, spawn, defer, delay, and cancel, as Roblox
-/// has them, on the scheduler running the code.
+/// has them, on the scheduler running the State's driver.
 Package Function TaskLibrary(lua: LuauState) Throws LuauError
     Local library = Try lua.NewTable()
     Try library.Set("wait",

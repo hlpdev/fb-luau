@@ -167,7 +167,9 @@ Public Class LuauValue Implements LuauType, Printable
     Public Method AsBytes(): UInt8[]? => Kind == LuauValueKind.STRING ? bytes.Clone() : Null
 
     /// It as a T, as a slot of it would be read. A copied value, a nil, a boolean, a number, an
-    /// integer, or a string, reads once its State is gone too.
+    /// integer, or a string, reads once its State is gone too, through a State made for the
+    /// Read, as only a State makes a T in fb 1.3.0; AsBool, AsNumber, AsInteger, and AsString
+    /// read one with none.
     ///
     /// # Errors
     ///

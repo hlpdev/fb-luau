@@ -29,8 +29,8 @@ FBL_API int32_t fbl_thread_current(uint64_t state, int32_t frame);
 // What the thread in `slot` is now, an FBL_THREAD_ constant, or -1 for a slot that isn't a thread.
 FBL_API int32_t fbl_thread_status(uint64_t state, int32_t frame, int32_t slot);
 
-// The thread in `slot`'s id, the same for each value of the same thread while it's alive, or 0 for
-// a slot that isn't a thread.
+// The thread in `slot`'s id, a number of its own from 1, the same for each value of the thread, and
+// never another thread's; or 0 for a slot that isn't a thread, or with no memory to number it.
 FBL_API uint64_t fbl_thread_id(uint64_t state, int32_t frame, int32_t slot);
 
 // Whether a function of the program's that has the frame can yield its thread: 1, or 0 when nothing

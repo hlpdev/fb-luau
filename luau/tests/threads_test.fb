@@ -26,6 +26,25 @@ Function Waited(milliseconds: Int)
     Wait((milliseconds As Int64).Milliseconds).Wait()
 End Function
 
+/// Ticks `scheduler` by `step` until `task` is done: the time it took, or -1 past `most`.
+Function Ticked(scheduler: Scheduler, task: Task Throws LuauError, step: Float64,
+                most: Float64): Float64
+    Local time: Float64 = 0.0
+    While !task.IsDone()
+        If time > most Then Return -1.0
+        scheduler.Tick(step)
+        time += step
+    End While
+    Return time
+End Function
+
+/// Closes `lua`, and runs the main scheduler until its driver's Task, `driving`, ends with CLOSED.
+Function Stopped(lua: LuauState, driving: Task Throws LuauError)
+    lua.Close()
+    Local error = ExpectThrows<LuauError>(driving.Wait())
+    Expect(error != Null && error.Kind == LuauErrorKind.CLOSED)
+End Function
+
 @Test
 Function AStartedThreadWaitsOnTheMainScheduler() Throws LuauError
     Local lua = LuauState()
@@ -52,13 +71,9 @@ Function AThreadOnAProgramsSchedulerFollowsItsPauseAndTimeScale() Throws LuauErr
     // Paused: real time passes, but the Scheduler's doesn't.
     Waited(20)
     Expect(!done.IsDone())
-    // Its time scale: three ticks of half a second each at a speed of 1, then one more.
-    For tick = 1 To 3
-        playback.Tick(0.5)
-    End For
-    Expect(!done.IsDone())
-    playback.Tick(0.6)
-    Expect(done.IsDone())
+    // Its time: done at 2 seconds of it, late by its first tick and two more at most.
+    Local took = Ticked(playback, done, 0.1, 10.0)
+    Expect(took >= 2.0 && took <= 2.35, "{took}")
     Expect(Try lua.Get<Bool>("done"))
 End Function
 
@@ -71,11 +86,8 @@ Function AnAsyncFunctionOnAProgramsSchedulerWaitsByItsTime() Throws LuauError
     Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
     playback.Run(done)
     // The sleep starts at the first wait's end, on the Scheduler running it then.
-    playback.Tick(1.0)
-    playback.Tick(1.5)
-    Expect(!done.IsDone())
-    playback.Tick(0.6)
-    Expect(done.IsDone())
+    Local took = Ticked(playback, done, 0.1, 10.0)
+    Expect(took >= 3.0 && took <= 3.5, "{took}")
     Expect(Try lua.Get<Bool>("done"))
 End Function
 
@@ -120,11 +132,14 @@ Function AStateClosedWithThreadsWaitingLetsThemGo() Throws LuauError
     Local thread = Try lua.Spawn(Try lua.Get<LuauFunction>("main"))
     Local done = thread.Start()
     playback.Run(done)
+    playback.Tick(0.1)
     lua.Close()
-    playback.Tick(10.0)
+    // Its Task ends at the next tick; its timer within a second of the Scheduler's.
+    playback.Tick(0.1)
     Expect(done.IsDone())
     Local error = ExpectThrows<LuauError>(done.Wait())
     Expect(error != Null && error.Kind == LuauErrorKind.CLOSED)
+    playback.Tick(1.1)
     Expect(playback.IsIdle())
 End Function
 
@@ -136,10 +151,12 @@ Function AYieldWhereNothingCanWaitIsAnErrorOfYield() Throws LuauError
         called++
         Return Doubled(n)
     End Function)
-    For source In ["task.wait(1)", "double(1)", "coroutine.yield()"]
+    Local sources = ["task.wait(1)", "double(1)", "coroutine.yield()",
+                     "coroutine.wrap(function() task.wait(1) end)()"]
+    For source In sources
         Local error = ExpectThrows<LuauError>(lua.Run(source))
-        Expect(error != Null && error.Kind == LuauErrorKind.YIELD)
-        Expect(error != Null && error.Message.Contains("nothing can wait for it"))
+        Expect(error != Null && error.Kind == LuauErrorKind.YIELD, source)
+        Expect(error != Null && error.Message.Contains("nothing can wait for it"), source)
     End For
     Expect(called == 0)
     // In a metamethod, on a thread on the scheduler.
@@ -155,6 +172,7 @@ End Function
 @Test
 Function TheTaskLibrarySpawnsDefersDelaysAndCancels() Throws LuauError
     Local lua = LuauState()
+    Local driving = lua.Start()
     Try lua.Run(r"order = {}" + "\n" +
                 "local function add(what) table.insert(order, what) end\n" +
                 "task.spawn(function(what) add(what) task.wait() add('spawned') end, 'now')\n" +
@@ -165,20 +183,23 @@ Function TheTaskLibrarySpawnsDefersDelaysAndCancels() Throws LuauError
     Expect(Try lua.Evaluate<String>("return table.concat(order, ' ')") == "now ran")
     Waited(100)
     Local order = Try lua.Evaluate<String>("return table.concat(order, ' ')")
-    Expect(order.StartsWith("now ran "))
-    Expect(order.EndsWith(" delayed"))
-    Expect(order.Contains("spawned") && order.Contains("deferred"))
+    Expect(order.StartsWith("now ran "), order)
+    Expect(order.EndsWith(" delayed"), order)
+    Expect(order.Contains("spawned") && order.Contains("deferred"), order)
     Expect(!order.Contains("cancelled"))
+    Stopped(lua, driving)
 End Function
 
 @Test
 Function ACoroutineThatWaitsGoesOnByTheScheduler() Throws LuauError
     Local lua = LuauState()
+    Local driving = lua.Start()
     Try lua.Run(
         "log = '' coroutine.wrap(function() task.wait() log ..= 'later' end)() log ..= 'now '")
     Expect(Try lua.Get<String>("log") == "now ")
     Waited(30)
     Expect(Try lua.Get<String>("log") == "now later")
+    Stopped(lua, driving)
 End Function
 
 @Test
@@ -189,11 +210,14 @@ Function AnErrorEndingAThreadNothingWaitsForGoesToThreadError() Throws LuauError
         errors.Add(error.Message)
     End Function
     Local lua = Try LuauState(options)
+    Local driving = lua.Start()
     Try lua.Run("task.spawn(function() error('spawned') end)\n" +
                 "task.defer(function() error('deferred') end)")
+    // Given once the call's ended, not inside it.
     Expect(errors == ["chunk:1: spawned"])
     Waited(30)
     Expect(errors == ["chunk:1: spawned", "chunk:2: deferred"])
+    Stopped(lua, driving)
 End Function
 
 @Test
@@ -232,4 +256,176 @@ Function TheTaskLibraryIsAnOption() Throws LuauError
     Local lua = Try LuauState(options)
     Expect(Try lua.Evaluate<Bool>("return task == nil"))
     Expect(Try LuauState().Evaluate<Bool>("return table.isfrozen(task)"))
+End Function
+
+@Test
+Function AWaitOfCenturiesEndsWhenItsStateCloses() Throws LuauError
+    Local lua = LuauState()
+    Local driving = lua.Start()
+    Try lua.Run("task.delay(1e9, function() end) task.spawn(function() task.wait(1e300) end)")
+    Expect(lua.Waits.Count == 2)
+    Waited(20)
+    Stopped(lua, driving)
+    // Its timer's next wake is within a second; then nothing of the State's is on the scheduler.
+    Waited(1100)
+    Expect(Scheduler.Main.IsIdle())
+End Function
+
+@Test
+Function TheMostThatWaitIsALimit() Throws LuauError
+    Local options = LuauOptions()
+    options.MostWaiting = 100
+    Local lua = Try LuauState(options)
+    Local driving = lua.Start()
+    Local error = ExpectThrows<LuauError>(lua.Run(
+        "local t = coroutine.create(function() end) " +
+        "for i = 1, 1e5 do task.delay(1e9, coroutine.create(function() end)) end"))
+    Expect(error != Null && error.Message.Contains("more than 100 threads would wait"),
+           error?.Message ?? "")
+    Expect(lua.Waits.Count == 100)
+    Stopped(lua, driving)
+End Function
+
+@Test
+Function AThreadOnlyWaitsForOneThingAtATime() Throws LuauError
+    Local lua = LuauState()
+    Local driving = lua.Start()
+    Try lua.Run("local t = coroutine.create(function() end) task.defer(t) " +
+                "local ok, e = pcall(task.defer, t) assert(not ok and e:find('waiting'))")
+    Stopped(lua, driving)
+End Function
+
+@Test
+Function AThreadThatWaitsIsWaitingAndTheProgramCantResumeIt() Throws LuauError
+    Local lua = LuauState()
+    Local driving = lua.Start()
+    Local thread = Try lua.Spawn(Try lua.Load("task.wait(0.01) reached = true"))
+    Try thread.Resume()
+    Expect(thread.Status == LuauThreadStatus.WAITING)
+    Local resumed = ExpectThrows<LuauError>(thread.Resume())
+    Expect(resumed != Null && resumed.Message.Contains("waits on the scheduler"))
+    Local started = ExpectThrows<LuauError>(thread.Start().Wait())
+    Expect(started != Null && started.Kind == LuauErrorKind.RUNTIME)
+    // The scheduler goes on with it.
+    Waited(50)
+    Expect(Try lua.Evaluate<Bool>("return reached == true"))
+    Expect(thread.Status == LuauThreadStatus.FINISHED)
+    Stopped(lua, driving)
+End Function
+
+@Test
+Function ATickHasOneTimeBudgetForAllItResumes() Throws LuauError
+    Local options = LuauOptions()
+    options.TimeBudget = 20.Milliseconds
+    Local lua = Try LuauState(options)
+    Local driving = lua.Start()
+    Try lua.Run("for i = 1, 100 do task.defer(function() while true do " +
+                "local t = os.clock() while os.clock() - t < 0.004 do end task.wait() end end) end")
+    For tick = 0 Until 3
+        Local started = Instant.Now()
+        Scheduler.Main.Step()
+        Expect(started.Elapsed < 40.Milliseconds, "{started.Elapsed.TotalMilliseconds} ms")
+    End For
+    Stopped(lua, driving)
+End Function
+
+/// Errors that say which raise they were.
+Class Counted Extends Error
+    ReadOnly Field Number: Int
+
+    New(number: Int)
+        Super.New("counted {number}")
+        Number = number
+    End New
+End Class
+
+@Test
+Function OneCallKeepsTheMostRecent64ErrorsItRaised() Throws LuauError
+    Local lua = LuauState()
+    Local weak: Weak<LuauState> = lua
+    Local raised = 0
+    Try lua.SetFunction("fail", Function() Throws Error
+        raised++
+        Throw Counted(raised)
+    End Function)
+    Try lua.SetFunction("kept", Function(): Int
+        Local held: LuauState? = weak
+        If held == Null Then Return -1
+        Return held.Raised.Count
+    End Function)
+    Local error = ExpectThrows<LuauError>(lua.Run(
+        "for i = 1, 10000 do pcall(fail) end assert(kept() == 64) fail()"))
+    Expect(error != Null && error.Cause Is Counted)
+    Expect(error != Null && (error.Cause As Counted).Number == 10001)
+End Function
+
+/// Starts `thread` on a Scheduler that's dropped as this returns, with the thread waiting.
+Function Dropped(thread: LuauThread)
+    Local playback = Scheduler()
+    playback.Run(thread.Start())
+    playback.Tick(0.1)
+End Function
+
+@Test
+Function AThreadWhoseSchedulerGoesIsResumedByAnother() Throws LuauError
+    Local lua = LuauState()
+    Local thread = Try lua.Spawn(Try lua.Load("task.wait(5) reached = true"))
+    Dropped(thread)
+    // Its driver went with the Scheduler, so nothing waits for it, and the program resumes it.
+    Expect(thread.Status == LuauThreadStatus.SUSPENDED)
+    Try thread.Resume()
+    Expect(Try lua.Evaluate<Bool>("return reached == true"))
+End Function
+
+/// A State made, run, and told to wait on this thread, which isn't the main one.
+Function OnWorker(): String
+    Local lua = LuauState()
+    Local answer = (Try? lua.Evaluate<Int>("return 6 * 7")) ?? 0
+    Local waited = "none"
+    Try
+        Try lua.Run("task.wait(1)")
+    Catch error As LuauError
+        waited = error.Kind == LuauErrorKind.YIELD ? "yield" : "other"
+    End Try
+    Return "{answer} {waited}"
+End Function
+
+@Test
+Function StatesWorkOnOtherThreads() Throws LuauError
+    Local first: Task<String> = Spawn(Function() => OnWorker())
+    Local second: Task<String> = Spawn(Function() => OnWorker())
+    Expect(first.Wait() == "42 yield")
+    Expect(second.Wait() == "42 yield")
+End Function
+
+@Test
+Function ThreadErrorRunsOnceTheCallEndsAndCanCloseItsState() Throws LuauError
+    Local options = LuauOptions()
+    Local closers: Weak<LuauState>[] = []
+    Local seen = 0
+    options.ThreadError = Function(error: LuauError)
+        seen++
+        For closer In closers
+            Local held: LuauState? = closer
+            held?.Close()
+        End For
+    End Function
+    Local lua = Try LuauState(options)
+    closers.Add(lua)
+    Try lua.Run("task.spawn(function() error('spawned') end) after = true")
+    Expect(seen == 1)
+    Expect(!lua.IsOpen)
+End Function
+
+@Test
+Function SpawningAThreadThatIsntSuspendedIsTheCallersError() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run("runner = coroutine.running()")
+    Local sources = ["task.spawn(coroutine.running())",
+                     "local t = coroutine.create(function() end) coroutine.resume(t) task.spawn(t)",
+                     "task.spawn(runner)"]
+    For source In sources
+        Local error = ExpectThrows<LuauError>(lua.Run(source))
+        Expect(error != Null && error.Message.Contains("takes a suspended thread"), source)
+    End For
 End Function

@@ -38,8 +38,9 @@ Package Extern "C" Lib "luau_native"
     Function fbl_state_new(options: Ptr<fbl_state_options_t>, status: Ptr<Int32>): UInt64
     Function fbl_state_close(state: UInt64): Bool
     Function fbl_state_step(state: UInt64, kilobytes: Int32): Int32
-    Function fbl_state_count(): Int64
-    Function fbl_state_memory_all(): Int64
+    Function fbl_state_turn(state: UInt64, what: Int32): Int32
+    Function fbl_state_count(here: Int32): Int64
+    Function fbl_state_memory_all(here: Int32): Int64
     Function fbl_state_native_supported(): Int32
     Function fbl_state_native_functions(state: UInt64): Int64
     Function fbl_state_memory(state: UInt64): Int64

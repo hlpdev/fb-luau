@@ -132,8 +132,10 @@ if(FBL_FB_TESTS)
       "short-key=a key of 5 bytes is too short to sign with"
       "negative-budget=a time budget of -1 microseconds is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
-      "started-twice=the Luau thread runs on the scheduler already"
-      "resumed-by-hand=the Luau thread runs on the scheduler")
+      "state-started-twice=the Luau State's driver runs already"
+      "action-gives=Acting.Count is marked @LuauAction, but isn't"
+      "throwing-shape=Throwing.Take is marked @LuauExpose, but isn't"
+      "shadowed=Shadowed.Harm is marked @LuauExpose, but isn't")
   # The examples, which run as programs do.
   add_test(NAME examples.bytecode
            COMMAND "${FBL_FB}" --color never run "${PROJECT_SOURCE_DIR}/examples/bytecode")

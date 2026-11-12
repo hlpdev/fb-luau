@@ -123,7 +123,8 @@ End Function
 @Test
 Function AnyKeyALuauTableHoldsCanBeAnEmptyMapsPath() Throws LuauError
     Local lua = LuauState()
-    For key In [".", "a.b", "[", "]", "a[1]", "\"", "\\", "", "12", "x\ny"]
+    For key In [".", "a.b", "[", "]", "a[1]", "\"", "\\", "", "12", "x\ny", "a.\"b", "a.\\c",
+                "a.\nc", "a.\tc"]
         Try lua.Set("key", key)
         Local groups = Try lua.Evaluate<Groups>(r"return { Named = { [key] = {} } }")
         Expect(groups.Named.Count == 1 && groups.Named[key]?.Count == 0, key)
@@ -182,4 +183,12 @@ Function ARecordsBytesAreABufferBothWays() Throws LuauError
     // A string where bytes are wanted is base64, as Load reads it.
     Local text = Try lua.Evaluate<Blob>(r"return { Data = 'YWJj' }")
     Expect(text.Data == [97 As UInt8, 98, 99])
+End Function
+
+@Test
+Function AnInfiniteKeyIsntAnItemsIndex() Throws LuauError
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Evaluate<Spawn>(
+        r"return { Name = 'rat', Kind = 'RAT', Tags = { [math.huge] = 'x' } }"))
+    Expect(error != Null && error.Kind == LuauErrorKind.CONVERSION)
 End Function

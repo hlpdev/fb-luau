@@ -34,19 +34,25 @@ Package Function LastError(): String
 End Function
 
 /// How many States the process has open, on every thread, and the bytes they hold: what a
-/// program's tests and soaks watch come back to what it was.
+/// program's tests and soaks watch come back to what it was. With `here`, only the States made on
+/// the calling thread, as tests that run side by side on a pool of threads, as `fb test`'s do,
+/// count theirs.
 ///
 /// # Examples
 ///
 /// ```
 /// # Import luau
-/// Local before = LuauStatesOpen()
+/// Local before = LuauStatesOpen(here: True)
 /// Local lua = LuauState()
-/// Expect(LuauStatesOpen().0 == before.0 + 1)
+/// Expect(LuauStatesOpen(here: True).0 == before.0 + 1)
 /// lua.Close()
-/// Expect(LuauStatesOpen() == before)
+/// Expect(LuauStatesOpen(here: True) == before)
 /// ```
-Public Function LuauStatesOpen(): (Int64, Int64) => (fbl_state_count(), fbl_state_memory_all())
+Public Function LuauStatesOpen(here: Bool = False): (Int64, Int64)
+    Local flag: Int32 = 0
+    If here Then flag = 1
+    Return (fbl_state_count(flag), fbl_state_memory_all(flag))
+End Function
 
 /// Whether Luau's code generator is supported where the program runs, its processor and system:
 /// where it isn't, a State's code runs in Luau's interpreter, whatever its NativeCode says.

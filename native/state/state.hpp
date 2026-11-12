@@ -103,6 +103,11 @@ struct state_t {
     std::vector<int64_t> released_objects;
     std::vector<int> type_refs;
     int objects_ref = LUA_NOREF;
+    // The registry's weak table of each thread's number, and the last number given.
+    int thread_ids_ref = LUA_NOREF;
+    uint64_t next_thread_id = 0;
+    // Whether the program's driver has a turn open, with the time budget for all it resumes.
+    bool turn_open = false;
     // require's: whether the State has it, the registry's reference to the program's reader of its
     // files, or none; how many modules are loading; and the walk of the require running.
     bool require_open = false;

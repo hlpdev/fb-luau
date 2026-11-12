@@ -85,7 +85,9 @@ Function ADerivedObjectCrossesAsItsBaseAndRunsItsOwnMethods() Throws LuauError
     Expect(Try lua.Evaluate<String>("return typeof(dog) .. ' ' .. dog:Sound()") == "Animal woof")
     Try lua.SetFunction("speak", Function(a: Animal) => a.Sound())
     Expect(Try lua.Evaluate<String>("return speak(dog)") == "woof")
-    Local error = ExpectThrows<LuauError>(lua.Run("speak(5)"))
+    Try lua.Register<Plain>()
+    Try lua.Set("plain", Plain())
+    Local error = ExpectThrows<LuauError>(lua.Run("speak(plain)"))
     Expect(error != Null && error.Message.Contains("invalid argument #1 to 'speak'"),
            error?.Message ?? "")
 End Function
@@ -174,21 +176,31 @@ End Function
 
 @Test
 Function AStateDroppedWithoutCloseLetsGoOfWhatItHeld() Throws LuauError
-    Local before = LuauStatesOpen()
+    Local before = LuauStatesOpen(here: True)
     Local held = Try Dropped()
     Local given: Animal? = held[0]
     Local captured: Animal? = held[1]
     Expect(given == Null && captured == Null)
-    Expect(LuauStatesOpen() == before)
+    Expect(LuauStatesOpen(here: True) == before)
 End Function
 
 @Test
 Function AStateInAClosedOnesSlotIsItsOwn() Throws LuauError
+    // Tests run side by side, and another's State can take the slot first: again until this one
+    // has it.
     Local old = LuauState()
     Local function = Try old.Load("return 1")
     Local slot = old.Handle >> 32
     old.Close()
     Local made = LuauState()
+    For attempt = 0 Until 100
+        If made.Handle >> 32 == slot Then Break
+        old = made
+        function = Try old.Load("return 1")
+        slot = old.Handle >> 32
+        old.Close()
+        made = LuauState()
+    End For
     Expect(made.Handle >> 32 == slot)
     Try made.SetFunction("twice", Function(n: Int) => n * 2)
     Expect(Try made.Evaluate<Int>("return twice(21)") == 42)
@@ -203,10 +215,10 @@ End Function
 
 @Test
 Function HandlesOutliveTheirState() Throws LuauError
-    Local before = LuauStatesOpen()
+    Local before = LuauStatesOpen(here: True)
     For round = 0 Until 10
         Local table = Try Orphaned()
-        Expect(LuauStatesOpen() == before)
+        Expect(LuauStatesOpen(here: True) == before)
     End For
 End Function
 
@@ -250,4 +262,17 @@ Function AScriptsLoadAndGlobals() Throws LuauError
     Expect(Try globals.Get<Int>("x") == 3)
     Expect(Try globals.Get<String>("shared") == "all")
     Expect(Try lua.Evaluate<Bool>("return x == nil"))
+End Function
+
+/// A type with a Method of a default parameter.
+Class Defaulted Implements LuauObject
+    @LuauExpose Method Sum(a: Int, b: Int = 2): Int => a + b
+End Class
+
+@Test
+Function AMethodWithADefaultParameterIsntRefused() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Defaulted>()
+    Try lua.Set("d", Defaulted())
+    Expect(Try lua.Evaluate<Int>("return d:Sum(1, 5)") == 6)
 End Function

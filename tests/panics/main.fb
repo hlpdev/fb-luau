@@ -1,6 +1,7 @@
 // The package's panics, each a mistake a program can make, which fb test can't catch: ctest runs
 // this with a case's name and checks it panics with the case's message.
 
+Import std.core
 Import std.os
 Import std.text
 Import std.time
@@ -21,6 +22,23 @@ End Class
 Class Unset Implements LuauObject
     @LuauSet Method Reset()
     End Method
+End Class
+
+Class Acting Implements LuauObject
+    @LuauAction Method Count(): Int => 1
+End Class
+
+Class Throwing Implements LuauObject
+    @LuauExpose Method Take(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int,
+                            h: Int): Int Throws IOError
+        Throw IOError(IOErrorKind.OTHER, "no")
+    End Method
+End Class
+
+Class Shadowed Implements LuauObject
+    @LuauExpose("hurt") Method Damage(amount: Int): Int => amount
+    @LuauExpose("hurt") Method Harm(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int,
+                                    h: Int): Int => 1
 End Class
 
 Class Twice Implements LuauObject
@@ -104,24 +122,22 @@ Function Run(name: String) Throws LuauError
             Local options = LuauOptions()
             options.Compile.Optimization = 3
             Local _lua = Try LuauState(options)
-        // A thread started while the scheduler runs it already.
-        Case "started-twice"
-            Local lua = LuauState()
-            Local thread = Try lua.Spawn(Try lua.Load("task.wait(1)"))
-            Local _first = thread.Start()
-            Local _second = thread.Start()
-        // A thread the scheduler runs, resumed by hand.
-        Case "resumed-by-hand"
-            Local lua = LuauState()
-            Local thread = Try lua.Spawn(Try lua.Load("task.wait(1)"))
-            Local _first = thread.Start()
-            Try thread.Resume()
         Case "eight-arguments"
             Try LuauState().Register<Many>()
         Case "get-argument"
             Try LuauState().Register<Asking>()
         Case "set-none"
             Try LuauState().Register<Unset>()
+        Case "action-gives"
+            Try LuauState().Register<Acting>()
+        Case "throwing-shape"
+            Try LuauState().Register<Throwing>()
+        Case "shadowed"
+            Try LuauState().Register<Shadowed>()
+        Case "state-started-twice"
+            Local lua = LuauState()
+            Local _first = lua.Start()
+            Local _second = lua.Start()
         Case "two-names"
             Try LuauState().Register<Twice>()
         // A registration used once its State is closed.
