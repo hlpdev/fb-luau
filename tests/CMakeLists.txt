@@ -140,7 +140,8 @@ if(FBL_FB_TESTS)
       "negative-native-memory=a native code cap of -1 bytes is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "state-started-twice=the Luau State's driver runs already"
-      "checker-time-limit=a checker's time limit of"
+      "checker-time-limit=a checker's time limit of 0"
+      "checker-heap-limit=0 bytes isn't a type function's heap limit"
       "action-gives=Acting.Count is marked @LuauAction, but isn't"
       "throwing-shape=Throwing.Take is marked @LuauExpose, but isn't"
       "shadowed=Shadowed.Harm is marked @LuauExpose, but isn't")

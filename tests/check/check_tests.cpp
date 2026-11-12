@@ -15,6 +15,9 @@
 
 namespace {
 
+// The type functions' heap limit the tests' checkers ask for, the package's default.
+constexpr int64_t heap_limit = int64_t{ 64 } * 1024 * 1024;
+
 struct diagnostic_t {
     std::string module;
     std::string name;
@@ -25,8 +28,8 @@ struct diagnostic_t {
 // A checker the test owns.
 class checker_t {
 public:
-    explicit checker_t(int32_t mode = FBL_CHECK_NONSTRICT, double seconds = 0)
-        : m_handle(fbl_check_new(mode, seconds)) {
+    explicit checker_t(int32_t mode = FBL_CHECK_NONSTRICT, double seconds = 60)
+        : m_handle(fbl_check_new(mode, seconds, heap_limit)) {
         REQUIRE(m_handle != 0);
     }
     ~checker_t() {
@@ -247,6 +250,47 @@ TEST_CASE("a module past its time limit says so") {
     CHECK(count_named(found, "TimeLimit") == 1);
 }
 
+TEST_CASE("a type function that hoards ends at its heap limit, its memory back") {
+    const checker_t checker(FBL_CHECK_STRICT, 30);
+    const int64_t before = fbl_core_resident();
+    // Each string its own, as string.rep's would be one string, interned, each time.
+    const std::map<std::string, std::string> files = {
+        {
+            "hog.luau",
+            "type function hog(t)\n"
+            "    local k = {}\n"
+            "    for i = 1, 1e9 do k[i] = string.rep('x', 1048576) .. i end\n"
+            "    return t\n"
+            "end\n"
+            "type T = hog<number>\n",
+        },
+    };
+    const std::vector<diagnostic_t> found = checked(checker, "hog", files);
+    REQUIRE(found.size() == 1);
+    CHECK(found[0].name == "TypeError");
+    CHECK(found[0].message.contains("not enough memory"));
+    const int64_t after = fbl_core_resident();
+    if (before > 0 && after > 0) {
+        CHECK(after - before < int64_t{ 256 } * 1024 * 1024);
+    }
+}
+
+TEST_CASE("a type function that loops ends at the time limit") {
+    const checker_t checker(FBL_CHECK_STRICT, 0.5);
+    const std::map<std::string, std::string> files = {
+        {
+            "spin.luau",
+            "type function spin(t)\n"
+            "    while true do end\n"
+            "    return t\n"
+            "end\n"
+            "type T = spin<number>\n",
+        },
+    };
+    const std::vector<diagnostic_t> found = checked(checker, "spin", files);
+    CHECK(count_named(found, "TimeLimit") == 1);
+}
+
 TEST_CASE("a .luaurc that doesn't parse is a ConfigError") {
     const checker_t checker;
     const std::vector<diagnostic_t> found =
@@ -255,8 +299,11 @@ TEST_CASE("a .luaurc that doesn't parse is a ConfigError") {
 }
 
 TEST_CASE("misuse is refused, saying why") {
-    CHECK(fbl_check_new(3, 0) == 0);
-    CHECK(fbl_check_new(FBL_CHECK_STRICT, -1) == 0);
+    CHECK(fbl_check_new(3, 1, heap_limit) == 0);
+    CHECK(fbl_check_new(FBL_CHECK_STRICT, -1, heap_limit) == 0);
+    CHECK(fbl_check_new(FBL_CHECK_STRICT, 0, heap_limit) == 0);
+    CHECK(fbl_check_new(FBL_CHECK_STRICT, 1, 0) == 0);
+    CHECK(fbl_check_new(FBL_CHECK_STRICT, 1, int64_t{ 1024 } * 1024 * 1024 * 1024) == 0);
     CHECK(fbl_check_run(12345678, "main") == -1);
     CHECK(fbl_check_count(12345678) == -1);
     fbl_check_free(12345678);
@@ -289,7 +336,7 @@ TEST_CASE("misuse is refused, saying why") {
 }
 
 TEST_CASE("a freed checker's handle isn't one") {
-    const uint64_t handle = fbl_check_new(FBL_CHECK_STRICT, 0);
+    const uint64_t handle = fbl_check_new(FBL_CHECK_STRICT, 1, heap_limit);
     REQUIRE(handle != 0);
     fbl_check_free(handle);
     CHECK(fbl_check_count(handle) == -1);

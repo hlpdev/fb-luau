@@ -8,7 +8,7 @@ Package Const FBL_CHECK_ERROR: Int32 = 0
 Package Const FBL_CHECK_WARNING: Int32 = 1
 
 Package Extern "C" Lib "luau_native"
-    Function fbl_check_new(mode: Int32, seconds: Float64): UInt64
+    Function fbl_check_new(mode: Int32, seconds: Float64, heap: Int64): UInt64
     Function fbl_check_free(checker: UInt64)
     Function fbl_check_definitions(checker: UInt64, text: Ptr<UInt8>, length: Int64,
                                    name: CString): Int32

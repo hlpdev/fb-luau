@@ -147,7 +147,10 @@ Function Run(name: String) Throws LuauError
             Try LuauState().Register<Shadowed>()
         Case "checker-time-limit"
             Local _checker = LuauChecker(Function(path: String): String? => Null,
-                                         LuauCheckMode.STRICT, 0.Seconds - 1.Seconds)
+                                         LuauCheckMode.STRICT, 0.Seconds)
+        Case "checker-heap-limit"
+            Local _checker = LuauChecker(Function(path: String): String? => Null,
+                                         LuauCheckMode.STRICT, Null, 0)
         Case "state-started-twice"
             Local lua = LuauState()
             Local _first = lua.Start()

@@ -435,3 +435,10 @@ Written while the PC was kept free for the user: none of it built or run until t
   61's test is this one's.
 - **An Async program function's String argument is a copy (108),** noted in the guide, with
   LuauValue or LuauTable for large ones.
+- **Checking runs a mod's type functions under two limits (109):** Luau 0.746 always parses
+  `type function`, and its solver runs the body in a VM whose heap had no limit. LuauChecker
+  takes `typeFunctionMemory`, 64 MB by default, Luau's DebugLuauTypeFunctionRuntimeHeapLimit,
+  which is the process's: the smallest any checker asks for is every checker's, lowered only
+  while no check runs (a shared lock each check holds). A time limit of 0, "as long as it
+  takes", is refused, so a loop in a type function always ends. The C API's fbl_check_new takes
+  the heap limit.

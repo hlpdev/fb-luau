@@ -628,7 +628,10 @@ End For
   its name, is `any`, as is what a LuauFunction, or a member added by hand, takes and gives. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
   the checker's default.
 - `Check` takes a time limit per module, as Luau's does, so a module that makes the checker work
-  too long gives a diagnostic saying so, not a hang.
+  too long gives a diagnostic saying so, not a hang; there's always one. Checking runs a module's
+  code, its `type function`s, in a VM of the solver's own, under that time limit and a heap
+  limit, 64 MB by default, and no other: Luau's heap limit is the process's, so the smallest
+  any checker asks for is every checker's.
 - It's for mod tooling: a game's mod checker, its editor support, or a command. Running mods
   doesn't need it, but it's in the same library, so a game that checks mods as it loads them can.
 

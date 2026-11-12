@@ -465,6 +465,10 @@ Expect(found.Count == 2 && found[0].Name == "TypeError" && found[0].Line == 2)
 Each `LuauDiagnostic` has its module, line and column, its severity, Luau's code and name for
 it, and its message, as luau-analyze gives them.
 
+Checking a mod runs some of its code: Luau's solver runs a `type function`'s body as it checks,
+in a VM of its own. The checker's time limit, 10 seconds a module by default, and its heap
+limit for type functions, 64 MB by default, are the only limits on it; a State's don't apply.
+
 ## A game's modding
 
 The parts above make the shape a game's modding takes, the one SCP: Containment Breach X's mods
