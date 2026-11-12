@@ -8,6 +8,7 @@
 #include <exception>
 #include <lua.h>
 #include <lualib.h>
+#include <new>
 #include <string>
 #include <string_view>
 
@@ -66,6 +67,10 @@ int resume_from(state_t& state, lua_State* thread, lua_State* co, int arguments,
     // Put back however the resume ends, if Luau throws as it starts too.
     const entered_t entered(state);
     try {
+        if (state.failing_resume) {
+            state.failing_resume = false;
+            throw std::bad_alloc();
+        }
         return raise ? lua_resumeerror(co, thread) : lua_resume(co, thread, arguments);
     } catch (...) {
         // The error has no value: pushing one could fail too.
@@ -120,7 +125,6 @@ int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, boo
     if (reset) {
         lua_resetthread(co);
     }
-    collect_after(state, kind);
     return status == LUA_YIELD ? FBL_YIELD : kind;
 }
 
@@ -175,6 +179,8 @@ int32_t fbl_call_function(uint64_t state, int32_t frame, int32_t slot, int32_t r
     for (int extra = moved; extra < wanted; extra++) {
         lua_pushnil(thread);
     }
+    // Nothing of this call's is left on the runner for the next, another script's, to find.
+    lua_resetthread(co);
     return FBL_OK;
 } catch (...) {
     return fbl::escaped();

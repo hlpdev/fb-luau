@@ -179,6 +179,11 @@ int32_t fbl_thread_resume(uint64_t state, int32_t frame, int32_t slot, int32_t r
     const int status = fbl::resume_from(*found, thread, co, count, raise != 0);
     if (status != LUA_OK && status != LUA_YIELD) {
         const int32_t kind = fbl::failed(*found, thread, co, status, false);
+        // An error ends it, as one that failed as it started, past Luau's C calls, would be left
+        // suspended.
+        if (status_of(thread, co) == FBL_THREAD_SUSPENDED) {
+            lua_resetthread(co);
+        }
         lua_settop(thread, index - 1);
         return kind;
     }

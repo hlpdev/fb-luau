@@ -256,3 +256,76 @@ TEST_CASE("freezing reaches every table in the globals' tables") {
     // A script's own tables are its own.
     CHECK(lua.run("local t = {} t.x = 1") == FBL_OK);
 }
+
+TEST_CASE("getfenv and setfenv take a function only of the caller's own environment") {
+    fbl_state_options_t options = default_options();
+    options.environments = true;
+    const test_state_t lua(options);
+    // Another environment's function, a script's as a module's would be.
+    REQUIRE(lua.run("function shared() return 1 end") == FBL_OK);
+    CHECK(run_in_environment(lua, "local ok = pcall(getfenv, shared) assert(not ok)") == FBL_OK);
+    CHECK(run_in_environment(lua, "local ok = pcall(setfenv, shared, {}) assert(not ok)") ==
+          FBL_OK);
+    CHECK(run_in_environment(lua, "local function mine() end assert(getfenv(mine) == _G)") ==
+          FBL_OK);
+}
+
+TEST_CASE("loadstring through pcall loads into the nearest script's environment") {
+    fbl_state_options_t options = default_options();
+    options.load_string = true;
+    const test_state_t lua(options);
+    CHECK(run_in_environment(lua, "x = 7 local ok, f = pcall(loadstring, 'return x') "
+                                  "assert(ok and f() == 7)") == FBL_OK);
+}
+
+TEST_CASE("with a memory limit, a script can't change the collector's settings") {
+    fbl_state_options_t options = default_options();
+    options.memory_limit = int64_t{ 8 } * 1024 * 1024;
+    options.collect_garbage = FBL_COLLECT_FULL;
+    const test_state_t lua(options);
+    for (const char* setting : { "setgoal", "setstepmul", "setstepsize", "stop" }) {
+        CHECK(lua.run(std::string("collectgarbage('") + setting + "', 400)") == FBL_RUNTIME);
+    }
+    CHECK(lua.run("collectgarbage('collect') collectgarbage('step')") == FBL_OK);
+    const test_state_t unlimited([] {
+        fbl_state_options_t full = default_options();
+        full.collect_garbage = FBL_COLLECT_FULL;
+        return full;
+    }());
+    CHECK(unlimited.run("collectgarbage('setgoal', 150)") == FBL_OK);
+}
+
+TEST_CASE("a call whose resume throws as it starts puts its depth back, and the State goes on") {
+    fbl_state_options_t options = default_options();
+    options.time_budget = 1000000;
+    const test_state_t lua(options);
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    state->failing_resume = true;
+    CHECK(lua.run("local x = 1") == FBL_MEMORY);
+    CHECK(state->depth == 0);
+    CHECK(state->deadline == std::chrono::steady_clock::time_point{});
+    CHECK(lua.run("local x = 1") == FBL_OK);
+    CHECK(fbl_state_close(lua.handle));
+}
+
+TEST_CASE("a compile past the time budget is a timeout once it returns") {
+    fbl_state_options_t options = default_options();
+    options.load_string = true;
+    options.time_budget = 1000;
+    const test_state_t lua(options);
+    // The compile's own call raises it, so a pcall around it sees it, before any safe point after
+    // it would.
+    std::string source;
+    for (int line = 0; line < 200000; line++) {
+        source += "local a = 1 ";
+    }
+    REQUIRE(lua.run("function probe(source) loaded = pcall(loadstring, source) end") == FBL_OK);
+    const int32_t frame = fbl_frame_open(lua.handle);
+    REQUIRE(fbl_frame_get_global(lua.handle, frame, bytes_of("probe"), 5) == FBL_OK);
+    REQUIRE(fbl_frame_push_string(lua.handle, frame, bytes_of(source),
+                                  static_cast<int64_t>(source.size())) == FBL_OK);
+    CHECK(fbl_call_function(lua.handle, frame, 0, 0) == FBL_TIMEOUT);
+    CHECK(fbl_frame_close(lua.handle, frame));
+    CHECK(lua.run("assert(loaded == false)") == FBL_OK);
+}

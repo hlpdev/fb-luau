@@ -71,6 +71,8 @@ struct state_t {
     bool load_string = false;
     bool environments = false;
     bool frozen = false;
+    // For the tests: whether the next resume throws as it starts, as Luau's can.
+    bool failing_resume = false;
     // Whether it has Luau's code generator.
     bool code_generator = false;
     lua_CompileOptions compile_options{};
@@ -158,7 +160,8 @@ int protect(state_t& state, lua_State* thread, int arguments, int results, Work&
         [](lua_State* stack, void* data) { return (*static_cast<Work*>(data))(stack); }, &work);
 }
 
-// After an error of `kind`: a MEMORY error, when no call's running, collects everything, as the
+// After an error of `kind`, as record_error keeps one: a MEMORY error, when no call's running,
+// collects everything, as the
 // collector stops past the limit, and the State then has room again.
 void collect_after(const state_t& state, int32_t kind) noexcept;
 

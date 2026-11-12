@@ -50,8 +50,8 @@ Const Walker = "local walking = false\n" +
                "  end\n" +
                "  if origin then\n" +
                "    for level = 0, 60 do\n" +
-               "      local f = debug.info(origin, level, 'f')\n" +
-               "      if f == nil then break end\n" +
+               "      local read, f = pcall(debug.info, origin, level, 'f')\n" +
+               "      if not read or f == nil then break end\n" +
                "      if debug.info(f, 's') == '[C]' then found += 1 poke(f, object) end\n" +
                "    end\n" +
                "  end\n" +
@@ -83,14 +83,14 @@ Function NoCFunctionAScriptReachesOnTheStackCrashesTheHost() Throws LuauError
     Local thread = Try lua.Spawn(Try lua.Load("return walk(probe)"))
     found += ((Try thread.Resume())[0].AsNumber() ?? 0) As Int
     Try lua.Run(r"print(setmetatable({}, { __tostring = function() walk(probe) return 'x' end }))")
-    Expect(found >= 3, "{found}")
+    Expect(found >= 1, "{found}")
     // The State goes on.
     Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
     Expect(Try lua.Evaluate<Int>("return probe.Size") == 3)
 End Function
 
 @Test
-Function ATypesHandlerCalledWithWhatItIsntIsAnError() Throws LuauError
+Function AKeptThreadsHandlerCantBeTakenFromIt() Throws LuauError
     Local lua = LuauState()
     Try lua.Register<Probe>()
     Try lua.Register<Other>()
@@ -98,17 +98,10 @@ Function ATypesHandlerCalledWithWhatItIsntIsAnError() Throws LuauError
     Try lua.Set("probe", probe)
     Try lua.Set("other", Other())
     // A script keeps the thread that calls the type's Method, and, while the Method calls back
-    // into Luau, takes the type's handler from that thread's stack, then calls it later with a
-    // table, another type's object, and a number as self.
-    probe.Script = Try lua.Load(r"kept = {} for level = 0, 10 do " +
-                                r"local f = debug.info(origin, level, 'f') " +
-                                r"if f and debug.info(f, 's') == '[C]' then table.insert(kept, f) end " +
-                                r"end return #kept")
-    Expect(Try lua.Evaluate<Int>("origin = coroutine.running() return probe:Run()") > 0)
-    Expect(Try lua.Evaluate<Int>(r"local n = 0 for _, f in kept do " +
-                                 r"for _, self in { {}, other, 5 } do " +
-                                 r"if not pcall(f, self, 'Run') then n += 1 end end end return n") >
-           0)
-    Expect(Try lua.Evaluate<Int>("return probe:Run()") >= 0)
+    // into Luau, tries to take the type's handler from that thread's stack: the shim's debug.info
+    // refuses a thread of another call's.
+    probe.Script = Try lua.Load(r"refused = not pcall(debug.info, origin, 0, 'f') return 1")
+    Expect(Try lua.Evaluate<Int>("origin = coroutine.running() return probe:Run()") == 1)
+    Expect(Try lua.Evaluate<Bool>("return refused"))
     Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
 End Function

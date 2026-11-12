@@ -22,6 +22,7 @@ constexpr int64_t silent = 5;
 constexpr int64_t deep = 6;
 constexpr int64_t make = 7;
 constexpr int64_t other = 8;
+constexpr int64_t fire = 9;
 
 // What the test's callback has called, for the nesting test.
 int depth_reached = 0;
@@ -70,6 +71,17 @@ int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
     case silent:
         fbl_frame_truncate(state, frame, 0);
         return FBL_OK;
+    case fire: {
+        // Runs the global onEvent, a call deeper, as a game's event would.
+        fbl_frame_truncate(state, frame, 0);
+        const int32_t inner = fbl_frame_open(state);
+        int32_t status = fbl_frame_get_global(state, inner, bytes_of("onEvent"), 7);
+        if (status == FBL_OK) {
+            status = fbl_call_function(state, inner, 0, 0);
+        }
+        fbl_frame_close(state, inner);
+        return status == FBL_OK ? FBL_OK : FBL_OTHER;
+    }
     case other:
         // Fails without an error, its arguments left in its frame.
         return FBL_OTHER;
@@ -288,4 +300,38 @@ TEST_CASE("a function that fails without an error raises none of its arguments")
               "local ok, e = pcall(other, 'secret', 'arguments') "
               "assert(not ok and e == \"the program's function failed, and gave no error\", e)") ==
           FBL_OK);
+}
+
+TEST_CASE("a script can't read another script's frames on a runner it kept") {
+    const test_state_t lua;
+    REQUIRE(fbl_callback_set(test_callback));
+    set_function(lua, "fire", fire);
+    // Script A keeps its runner; later, script B's call on that runner fires A's event, a call
+    // deeper, which tries to read B's frames, and B's locals, from the runner it kept.
+    REQUIRE(lua.run("saved = coroutine.running()\n"
+                    "function onEvent()\n"
+                    "  infoOk, infoError = pcall(debug.info, saved, 1, 'fn')\n"
+                    "  traceOk = pcall(debug.traceback, saved)\n"
+                    "end") == FBL_OK);
+    CHECK(lua.run("local function secret() return 'b' end fire()") == FBL_OK);
+    CHECK(lua.run("assert(not infoOk, 'info read another call') assert(not traceOk)") == FBL_OK);
+    CHECK(lua.run("assert(tostring(infoError):find(\"another call's thread\"))") == FBL_OK);
+    // The caller's own thread, and its own levels, read as Luau's own do.
+    CHECK(lua.run("local function here() return debug.info(1, 'n') end assert(here() == 'here')") ==
+          FBL_OK);
+    CHECK(lua.run("assert(debug.info(coroutine.running(), 1, 's') ~= nil)") == FBL_OK);
+    CHECK(lua.run("assert(debug.traceback('x'):find('x'))") == FBL_OK);
+    CHECK(lua.run("local co = coroutine.create(function() coroutine.yield() end) "
+                  "coroutine.resume(co) assert(debug.traceback(co) ~= nil)") == FBL_OK);
+}
+
+TEST_CASE("a finalizer one script leaves on a runner doesn't run in another's call") {
+    const test_state_t lua;
+    REQUIRE(lua.run("hits = 0 coroutine.finally(coroutine.running(), function() hits += 1 end)") ==
+            FBL_OK);
+    REQUIRE(lua.run("before = hits") == FBL_OK);
+    for (int call = 0; call < 3; call++) {
+        CHECK(lua.run("local x = 1") == FBL_OK);
+    }
+    CHECK(lua.run("assert(hits == before, hits)") == FBL_OK);
 }

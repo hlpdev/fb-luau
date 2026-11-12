@@ -16,14 +16,18 @@ extern "C" {
 // Sets the global require, for which the Luau function in `reader_slot` reads the modules' files:
 // called with a file's path from the modules' root, with no "./" and "/" between its parts, like
 // "doors.luau", "lib/init.luau", or "lib/.luaurc", it gives the file's text, or nil when there's
-// no such file, and its errors are the require's. A module "lib/doors" is "lib/doors.luau",
+// no such file, and its errors are the require's. A path it's given has no empty part, no "..",
+// no ":", "\", or NUL, and no Windows device's name, like "con", and is at most 1,024 bytes of
+// 64 parts; a require's path past that is refused before anything's read, and the reader's calls
+// keep to the time budget. A module "lib/doors" is "lib/doors.luau",
 // "lib/doors.lua", "lib/doors/init.luau", or "lib/doors/init.lua", and two of them are an error.
 // A chunk named "@path" requires from that path; one of any other name, from the root. With no
 // reader, `reader_slot` -1, require is an error saying the program gives no modules. The State's
 // first module freezes it, as a script's environment does. A status.
 FBL_API int32_t fbl_require_open(uint64_t state, int32_t frame, int32_t reader_slot);
 
-// Forgets every module's value, so the next require of each runs it again. A status.
+// Forgets every module's value, so the next require of each runs it again. A status: FBL_RUNTIME
+// while a module loads.
 FBL_API int32_t fbl_require_forget(uint64_t state);
 
 #ifdef __cplusplus

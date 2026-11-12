@@ -203,3 +203,24 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   its own, outside the VM's allocator; it's about the size of the bytecode it compiles.
 - **`lua.NativeFunctions`** is the count of functions compiled, which tests and a game's own
   diagnostics read; there's nothing else to tell native code from interpreted.
+
+## The second review, on dev/review-2 (2026-11-11)
+
+- **A require's path is at most 1,024 bytes of 64 parts (51),** refused at require, before the
+  reader's asked; the walk checks the budget each time it reads, keeps only the files it found,
+  and lets them go when its module's loaded. A walk is its own, kept aside while the reader runs
+  code that requires (58).
+- **A part the reader could take for something else is refused (57):** empty, `:`, `\`, NUL, and
+  Windows's device names.
+- **An exporting module gives a table (52),** or its require's an error; any error after its
+  placeholder's made clears the placeholder and its provided flag, so the next require loads it
+  anew (53). A module's table is frozen through its fields (55). The modules can't be forgotten
+  while one loads (56), and forgetting clears the provided flags too.
+- **debug.info and debug.traceback are the shim's (54),** refusing a runner's or a module's thread
+  that isn't the caller's, adding one to a level of the caller's own, as the wrap is a frame; a
+  runner is reset after every call, which drops a finalizer one script left on it too.
+- **getfenv and setfenv, given a function, take one of the caller's own environment (55);**
+  loadstring's environment is the nearest Luau function's, and it's refused with none (59).
+- **Every MEMORY error collects at the outermost (60),** in record_error, the one place.
+- **A resume that fails as it starts ends the thread (61);** with a memory limit, collectgarbage
+  can't set the goal, the step, its size, or stop the collector (62).

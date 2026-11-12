@@ -206,3 +206,37 @@ TEST_CASE("after a call meets the memory limit, a call that needs little runs") 
     CHECK(lua.run("local t = {} for i = 1, 1e7 do t[i] = { i } end") == FBL_MEMORY);
     CHECK(lua.run("local t = { 1, 2, 3 } assert(#t == 3)") == FBL_OK);
 }
+
+TEST_CASE("an error at the memory limit keeps every reference its own") {
+    fbl_state_options_t options = default_options();
+    options.memory_limit = int64_t{ 4 } * 1024 * 1024;
+    const test_state_t lua(options);
+    int32_t frame = fbl_frame_open(lua.handle);
+    std::vector<int32_t> refs;
+    for (int index = 0; index < 100; index++) {
+        REQUIRE(fbl_frame_push_number(lua.handle, frame, index) == FBL_OK);
+        int32_t ref = 0;
+        REQUIRE(fbl_ref_new(lua.handle, frame, 0, &ref) == FBL_OK);
+        refs.push_back(ref);
+        fbl_frame_truncate(lua.handle, frame, 0);
+    }
+    CHECK(fbl_frame_close(lua.handle, frame));
+    // The limit at what it holds, so the errors' sets meet it.
+    fbl::state_t* state = fbl::find_state(lua.handle);
+    REQUIRE(state != nullptr);
+    state->memory_limit = state->memory_used;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        CHECK(lua.run("error(nil)") != FBL_OK);
+        CHECK(lua.run("error({})") != FBL_OK);
+    }
+    state->memory_limit = int64_t{ 4 } * 1024 * 1024;
+    frame = fbl_frame_open(lua.handle);
+    for (size_t index = 0; index < refs.size(); index++) {
+        REQUIRE(fbl_ref_push(lua.handle, frame, refs[index]) == FBL_OK);
+        double value = -1;
+        CHECK(fbl_frame_number(lua.handle, frame, 0, &value));
+        CHECK(value == static_cast<double>(index));
+        fbl_frame_truncate(lua.handle, frame, 0);
+    }
+    CHECK(fbl_frame_close(lua.handle, frame));
+}

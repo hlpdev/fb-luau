@@ -72,7 +72,8 @@ bool is_device(std::string_view name) {
 // ":", "\", or NUL, which a reader joining paths would take as a drive, a separator, or an end,
 // nor a Windows device's name.
 bool is_safe_part(std::string_view part) {
-    return !part.empty() && part.find_first_of(std::string_view(":\\\0", 3)) == std::string_view::npos &&
+    return !part.empty() &&
+           part.find_first_of(std::string_view(":\\\0", 3)) == std::string_view::npos &&
            !is_device(part);
 }
 
@@ -133,16 +134,25 @@ void check_length(lua_State* stack, const fbl::require_walk_t& walk) {
 // on its own; puts it back however the reader ends.
 class walk_kept_t {
 public:
-    explicit walk_kept_t(fbl::state_t& state) : m_state(state), m_kept(std::move(state.require_walk)) {
-        m_state.require_walk = {};
+    explicit walk_kept_t(fbl::state_t& state) : m_state(state) {
+        swapped();
     }
-    ~walk_kept_t() { m_state.require_walk = std::move(m_kept); }
+    ~walk_kept_t() {
+        swapped();
+    }
     walk_kept_t(const walk_kept_t&) = delete;
     walk_kept_t& operator=(const walk_kept_t&) = delete;
     walk_kept_t(walk_kept_t&&) = delete;
     walk_kept_t& operator=(walk_kept_t&&) = delete;
 
 private:
+    // Swaps the State's walk and the one kept, which needs no memory.
+    void swapped() noexcept {
+        m_state.require_walk.parts.swap(m_kept.parts);
+        m_state.require_walk.file.swap(m_kept.file);
+        m_state.require_walk.found.swap(m_kept.found);
+    }
+
     fbl::state_t& m_state;
     fbl::require_walk_t m_kept;
 };
@@ -281,8 +291,7 @@ luarequire_NavigateResult to_parent(lua_State* /*stack*/, void* context) {
 luarequire_NavigateResult to_child(lua_State* stack, void* context, const char* name) {
     fbl::state_t& state = state_of(context);
     const std::string_view child = name;
-    if (child == "." || child == ".." || child == ".config" ||
-        child.find('/') != std::string_view::npos) {
+    if (child == "." || child == ".." || child == ".config" || child.contains('/')) {
         return NAVIGATE_NOT_FOUND;
     }
     if (!is_safe_part(child)) {
@@ -341,7 +350,9 @@ luarequire_WriteResult get_config(lua_State* stack, void* context, char* buffer,
 // walk's files go when it's done, however it ends.
 class loading_t {
 public:
-    explicit loading_t(fbl::state_t& state) : m_state(state) { m_state.requires_running++; }
+    explicit loading_t(fbl::state_t& state) : m_state(state) {
+        m_state.requires_running++;
+    }
     ~loading_t() {
         m_state.requires_running--;
         m_state.require_walk.found.clear();

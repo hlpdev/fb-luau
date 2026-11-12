@@ -118,6 +118,11 @@ int collect_garbage(lua_State* stack) {
         operation != LUA_GCCOUNT) {
         luaL_error(stack, "collectgarbage only gives the memory in use, with 'count'");
     }
+    if (state != nullptr && state->memory_limit > 0 &&
+        (operation == LUA_GCSETGOAL || operation == LUA_GCSETSTEPMUL ||
+         operation == LUA_GCSETSTEPSIZE || operation == LUA_GCSTOP)) {
+        luaL_error(stack, "with a memory limit, the collector's settings are the State's");
+    }
     const int result = lua_gc(stack, operation, luaL_optinteger(stack, 2, 0));
     if (operation == LUA_GCSTEP || operation == LUA_GCISRUNNING) {
         lua_pushboolean(stack, result);
@@ -129,17 +134,20 @@ int collect_garbage(lua_State* stack) {
 
 // Pushes the environment of the function at `level` above the C function running, or the
 // globals' for a C function's, as a C function's own is its creator's globals.
-void push_caller_environment(lua_State* stack, int level) {
+// Pushes the environment of the nearest Luau function up the stack from the C function running,
+// past C functions like pcall, which have no environment of a script's: true, or false, pushing
+// nothing, when there's none.
+bool push_caller_environment(lua_State* stack) {
     lua_Debug info{};
-    if (lua_getinfo(stack, level, "f", &info) != 0) {
+    for (int level = 1; lua_getinfo(stack, level, "f", &info) != 0; level++) {
         if (lua_type(stack, -1) == LUA_TFUNCTION && lua_iscfunction(stack, -1) == 0) {
             lua_getfenv(stack, -1);
             lua_remove(stack, -2);
-            return;
+            return true;
         }
         lua_pop(stack, 1);
     }
-    lua_pushvalue(stack, LUA_GLOBALSINDEX);
+    return false;
 }
 
 // loadstring: compiles source with the State's options, never loading bytecode, into a function of
@@ -160,7 +168,9 @@ int load_string(lua_State* stack) {
     }
     lua_settop(stack, 2);
     luaL_checkstack(stack, 4, "loadstring");
-    push_caller_environment(stack, 1);
+    if (!push_caller_environment(stack)) {
+        luaL_error(stack, "loadstring loads into its caller's environment, and has no Luau caller");
+    }
     lua_setsafeenv(stack, -1, 0);
     lua_CompileOptions options = state == nullptr ? lua_CompileOptions{} : state->compile_options;
     size_t size = 0;
@@ -209,6 +219,16 @@ void environment_function(lua_State* stack, bool optional) {
     // A C function's environment is its creator's globals, which aren't a script's to reach.
     if (lua_iscfunction(stack, -1) != 0) {
         luaL_error(stack, "a C function's environment can't be reached");
+    }
+    // A function given, rather than a level, is one of the caller's own environment, as another's
+    // function, a module's say, would give that environment away.
+    if (lua_type(stack, 1) == LUA_TFUNCTION) {
+        lua_getfenv(stack, -1);
+        if (!push_caller_environment(stack) || lua_rawequal(stack, -1, -2) == 0) {
+            luaL_error(stack, "a function of another environment than the caller's can't be "
+                              "reached");
+        }
+        lua_pop(stack, 2);
     }
 }
 
@@ -262,6 +282,55 @@ void interrupt(lua_State* stack, int gc) {
     fbl::check_deadline(stack);
 }
 
+// What debug.info and debug.traceback are: Luau's own, its upvalue, refusing a thread argument
+// that's a runner, of a call of the program's, or a module's, unless it's the caller's own, as a
+// script that kept one would read another script's frames on it. A level of the caller's own is
+// one more to Luau's, past this function.
+int guarded_debug(lua_State* stack) {
+    const bool traceback = lua_toboolean(stack, lua_upvalueindex(2)) != 0;
+    const bool threaded = lua_type(stack, 1) == LUA_TTHREAD;
+    if (threaded) {
+        lua_State* other = lua_tothread(stack, 1);
+        if (other != stack && fbl::is_runner(other)) {
+            luaL_error(stack, "another call's thread can't be read");
+        }
+    }
+    // A level of the caller's own stack: info's is its first argument after a thread, and
+    // traceback's its second, after the message, 1 when it's left out.
+    const bool own = !threaded || lua_tothread(stack, 1) == stack;
+    if (own) {
+        const int first = threaded ? 2 : 1;
+        const int index = traceback ? first + 1 : first;
+        if (lua_type(stack, index) == LUA_TNUMBER) {
+            lua_pushinteger(stack, lua_tointeger(stack, index) + 1);
+            lua_replace(stack, index);
+        } else if (traceback && lua_type(stack, index) == LUA_TNONE) {
+            lua_settop(stack, index - 1);
+            lua_pushinteger(stack, 2);
+        }
+    }
+    lua_pushvalue(stack, lua_upvalueindex(1));
+    lua_insert(stack, 1);
+    lua_call(stack, lua_gettop(stack) - 1, LUA_MULTRET);
+    return lua_gettop(stack);
+}
+
+// Puts guarded_debug in place of debug.info and debug.traceback, when the State has the library.
+void guard_debug(lua_State* stack) {
+    lua_getglobal(stack, LUA_DBLIBNAME);
+    if (lua_type(stack, -1) != LUA_TTABLE) {
+        lua_pop(stack, 1);
+        return;
+    }
+    for (const char* name : { "info", "traceback" }) {
+        lua_getfield(stack, -1, name);
+        lua_pushboolean(stack, std::string_view(name) == "traceback" ? 1 : 0);
+        lua_pushcclosurek(stack, guarded_debug, name, 2, nullptr);
+        lua_setfield(stack, -2, name);
+    }
+    lua_pop(stack, 1);
+}
+
 // Opens one of Luau's libraries, `name` by `function`, when the State's options have its bit.
 void open(lua_State* stack, const fbl::state_t& state, int32_t bit, const char* name,
           lua_CFunction function) {
@@ -284,6 +353,7 @@ int set_up(lua_State* stack) {
     open(stack, *state, FBL_LIBRARY_STRING, LUA_STRLIBNAME, luaopen_string);
     open(stack, *state, FBL_LIBRARY_MATH, LUA_MATHLIBNAME, luaopen_math);
     open(stack, *state, FBL_LIBRARY_DEBUG, LUA_DBLIBNAME, luaopen_debug);
+    guard_debug(stack);
     open(stack, *state, FBL_LIBRARY_UTF8, LUA_UTF8LIBNAME, luaopen_utf8);
     open(stack, *state, FBL_LIBRARY_BIT32, LUA_BITLIBNAME, luaopen_bit32);
     open(stack, *state, FBL_LIBRARY_BUFFER, LUA_BUFFERLIBNAME, luaopen_buffer);
@@ -486,6 +556,7 @@ int32_t misuse(std::string_view why) noexcept {
 int32_t record_error(state_t& state, int32_t kind, std::string_view message,
                      std::string_view traceback) noexcept {
     state.error_kind = kind;
+    collect_after(state, kind);
     // An error that isn't a value of Luau's has none. The slot holds false then, never nil,
     // which would make it a border lua_ref could give another, and a dead key a set could need
     // memory for.
@@ -550,9 +621,7 @@ int32_t settle(state_t& state, lua_State* thread, int status) noexcept {
     }
     // An error the interrupt raised, or any the timeout led to, is the timeout.
     const int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
-    take_error(state, thread, kind);
-    collect_after(state, kind);
-    return kind;
+    return take_error(state, thread, kind);
 }
 
 void collect_after(const state_t& state, int32_t kind) noexcept {

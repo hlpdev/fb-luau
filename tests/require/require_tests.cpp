@@ -239,10 +239,13 @@ TEST_CASE("a require's path has no part a reader could take as a drive, a device
 
 TEST_CASE("an exporting module that gives what isn't a table is an error, and loads anew") {
     files_of() = {
-        { "a.luau", "loadstring('return')\n"
-                    "table = { freeze = function() return 0 end }\n"
-                    "local b = require('./b')\n"
-                    "export local x = 1" },
+        {
+            "a.luau",
+            "loadstring('return')\n"
+            "table = { freeze = function() return 0 end }\n"
+            "local b = require('./b')\n"
+            "export local x = 1",
+        },
         { "b.luau", "local a = require('./a')\nexport local y = 2" },
         { "ok.luau", "export local z = 3" },
     };
@@ -254,8 +257,9 @@ TEST_CASE("an exporting module that gives what isn't a table is an error, and lo
 }
 
 TEST_CASE("an exporting module that errors once loads at its next require") {
-    files_of() = { { "shared.luau", "if attempt() == 1 then error('not yet') end\n"
-                                    "export local x = 1" } };
+    files_of() = {
+        { "shared.luau", "if attempt() == 1 then error('not yet') end\nexport local x = 1" },
+    };
     const require_state_t lua;
     CHECK(lua.run("local ok = pcall(require, './shared') assert(not ok)", "@main.luau") == FBL_OK);
     CHECK(lua.run("assert(require('./shared').x == 1)", "@main.luau") == FBL_OK);
@@ -271,7 +275,9 @@ TEST_CASE("a module's table is frozen through its fields for every script") {
 }
 
 TEST_CASE("the modules aren't forgotten while one loads") {
-    files_of() = { { "forgetful.luau", "local ok = pcall(forget) assert(not ok) export local x = 1" } };
+    files_of() = {
+        { "forgetful.luau", "local ok = pcall(forget) assert(not ok) export local x = 1" },
+    };
     const require_state_t lua;
     CHECK(lua.run("assert(require('./forgetful').x == 1)", "@main.luau") == FBL_OK);
     CHECK(lua.run("forget() assert(require('./forgetful').x == 1)", "@main.luau") == FBL_OK);

@@ -94,8 +94,10 @@ Public Struct LuauOptions
     /// require's, in the script. A module "lib/doors" is "lib/doors.luau", "lib/doors.lua",
     /// "lib/doors/init.luau", or "lib/doors/init.lua", and a chunk named "@path" requires from its
     /// path, as Luau's rules have it; one of any other name, from the root. Nothing above the root
-    /// is asked for, so a script requires only what this gives. Null, the default, gives no
-    /// modules, and `require` is an error that says so.
+    /// is asked for, so a script requires only what this gives, and no path has an empty part, a
+    /// ":", a "\", NUL, or a Windows device's name, or is past 1,024 bytes of 64 parts. A module's
+    /// table is frozen through its fields, as every script that requires it shares it. Null, the
+    /// default, gives no modules, and `require` is an error that says so.
     Public Field Modules: (Func(String): String? Throws Error)? = Null
     /// Whether its scripts have the `task` library, Roblox's: True by default.
     Public Field Tasks: Bool = True
