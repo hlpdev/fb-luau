@@ -607,3 +607,14 @@ Written while the PC was kept free for the user: none of it built or run until t
   the runner can do is cut, from a case's first text to the text after it, each with why:
   coroutine.luau's `assert(main == nil)`, pcall.luau's resumeerror, and tables.luau's cases of
   setallocationlimit. 76 runs pass, 20 scripts skipped, from 24.
+- **122's small items:** Definitions declares `nil` each of Luau's globals the State's options
+  turned off, loadstring, getfenv and setfenv, collectgarbage, the base library's, and each
+  library left out, which Luau's own definitions still declare, so the checker refuses what the
+  State would at run time (a library's string methods, which come by the string metatable, it
+  can't). A getter and a setter of two types are declared `read` and `write` each. Registering a
+  type of the name of another registered one panics, as scripts, errors, and the checker tell
+  types by their names, where Definitions showed only the last. Columns are said to count UTF-8
+  bytes, and the plan's AddDefinitions has its Try.
+- **61 has its test:** a resume from an error handler past Luau's 200 C calls fails before the
+  thread runs, and the thread is ended, as the header says, not left suspended; without the
+  fix the test fails.

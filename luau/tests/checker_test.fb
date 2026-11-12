@@ -20,6 +20,15 @@ Class Door Implements LuauObject
     End Method
 End Class
 
+/// A dial whose level reads as a number and is set by a word.
+Class Dial Implements LuauObject
+    Field level: Int = 0
+    @LuauGet("Level") Method Level(): Int => level
+    @LuauSet("Level") Method SetLevel(word: String)
+        level = word.Length
+    End Method
+End Class
+
 /// A checker over `files`, by their paths from the root.
 Function Over(files: Map<String, String>,
               mode: LuauCheckMode = LuauCheckMode.NONSTRICT): LuauChecker
@@ -203,6 +212,44 @@ Function DefinitionsWriteEachTypeAsLuausOwn() Throws LuauError
     Expect(text.Contains("    Open: boolean\n") && text.Contains("    read Name: string\n"), text)
     // Definitions parse, as the checker takes them.
     Try Over({}).AddDefinitions(text)
+End Function
+
+@Test
+Function TheDefinitionsFollowTheStatesOptions() Throws LuauError
+    // What the default State turned off, the checker refuses as the State does at run time.
+    Local text = LuauState().Definitions()
+    Expect(text.Contains("declare loadstring: nil\n") && text.Contains("declare getfenv: nil\n"),
+           text)
+    Expect(!text.Contains("declare print: nil") && !text.Contains("declare debug: nil"), text)
+    Local checker = Over({"main.luau": "print(loadstring('return 1'), getfenv(1), utf8.char(65))\n"},
+                         LuauCheckMode.STRICT)
+    Try checker.AddDefinitions(text, "game")
+    // getfenv, though it's nil here, is still one Luau's lint calls deprecated.
+    Expect(Names(Try checker.Check("main")) == ["TypeError", "TypeError", "DeprecatedApi"])
+    // What the options turn on, and a library they leave out.
+    Local options = LuauOptions()
+    options.LoadString = True
+    options.Environments = True
+    options.Libraries = LuauLibraries.BASE | LuauLibraries.STRING
+    Local turned = (Try LuauState(options)).Definitions()
+    Expect(!turned.Contains("declare loadstring") && !turned.Contains("declare getfenv"), turned)
+    Expect(turned.Contains("declare debug: nil\n") && turned.Contains("declare utf8: nil\n"), turned)
+    Expect(!turned.Contains("declare string: nil"), turned)
+    Try Over({}).AddDefinitions(turned)
+End Function
+
+@Test
+Function AGetterAndASetterOfTwoTypesAreDeclaredEach() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Dial>()
+    Local text = lua.Definitions()
+    Expect(text.Contains("    read Level: number\n    write Level: string\n"), text)
+    Local checker = Over({"main.luau": "local function f(d: Dial)\n    d.Level = 'high'\n" +
+                          "    local n: number = d.Level\n    d.Level = 3\n    print(n)\nend\n" +
+                          "print(f)\n"},
+                         LuauCheckMode.STRICT)
+    Try checker.AddDefinitions(text, "game")
+    Expect(Names(Try checker.Check("main")) == ["TypeError"])
 End Function
 
 @Test

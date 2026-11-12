@@ -599,7 +599,7 @@ Try lua.Run(loaded)
 
 ```vb
 Local checker = LuauChecker(Function(path: String): String? => Try? modFiles.ReadText(path))
-checker.AddDefinitions(lua.Definitions())       // the API the game gives mods
+Try checker.AddDefinitions(lua.Definitions())   // the API the game gives mods
 For d In Try checker.Check("mods/doors/init")
     Print("{d.Module}:{d.Line}:{d.Column}: {d.Severity} {d.Code} {d.Message}")
 End For
@@ -621,12 +621,17 @@ End For
 - `AddDefinitions(text)` adds a definitions file, Luau's `declare` syntax, which
   `lua.Definitions()` writes for what a State gives scripts, so a mod is checked against the
   game's real API: each registered type as a `declare extern type`, its getters and setters as
-  fields, `read` or `write` when it has only one, its Methods by their types, its arguments named
-  `a1`, `a2`, and so on, as reflection doesn't give a parameter's name; and each global the
-  program set by `Set`, `SetFunction`, or `SetAsync`, with the `task` library when it's open.
-  A type Luau has none for, like a record, whose fields reflection gives only by the type, not
-  its name, is `any`, as is what a LuauFunction, or a member added by hand, takes and gives. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
-  the checker's default.
+  fields, `read` or `write` when it has only one, both when they're of two types, its Methods by
+  their types, its arguments named `a1`, `a2`, and so on, as reflection doesn't give a
+  parameter's name; each global the program set by `Set`, `SetFunction`, or `SetAsync`, with
+  the `task` library when it's open; and each of Luau's globals the State's options turned off,
+  loadstring, getfenv and setfenv, collectgarbage, and a library left out, as `nil`, so the
+  checker refuses what the State would at run time. A type Luau has none for, like a record,
+  whose fields reflection gives only by the type, not its name, is `any`, as is what a
+  LuauFunction, or a member added by hand, takes and gives. Two registered types of one name,
+  from two modules, are refused at Register, as Luau tells types by their names. A mode,
+  `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or the checker's default.
+  Lines and columns count from 1, a column in UTF-8 bytes, as Luau counts them.
 - `Check` has one time limit for all its modules, not Luau's one a module, which N modules
   make N times it, so a mod that makes the checker work too long gives a diagnostic saying so,
   not a hang; there's always one. The solver is stopped at the deadline and no module's begun

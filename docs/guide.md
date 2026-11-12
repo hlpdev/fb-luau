@@ -456,8 +456,9 @@ Expect(!LuauNativeCodeSupported() || lua.NativeFunctions > 0)
 
 `LuauChecker` is Luau's type checker and lint, as `luau-analyze` runs them, over files the
 program reads. `lua.Definitions()` writes what a State gives its scripts, its registered types
-and the globals it set, as a definitions file, so a mod is checked against the game's real API
-before it's loaded, and a mod's editor can know it too.
+and the globals it set, and what its options took away, like loadstring, as a definitions file,
+so a mod is checked against the game's real API before it's loaded, and a mod's editor can know
+it too.
 
 ```vb
 Import std.collections

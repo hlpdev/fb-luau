@@ -5,6 +5,7 @@ Import std.collections
 Import std.core
 Import std.text
 Import "./objects"
+Import "./scripts"
 Import "./state"
 
 /// A member of a registered type, or a global the program set, with its types as FutureBlitz names
@@ -173,6 +174,12 @@ Extend LuauState
         End For
         Local text = "-- What the program gives its scripts, for Luau's type checker: made by " +
                      "luau's LuauState.Definitions.\n"
+        If TurnedOff.Count > 0
+            text += "\n-- Luau's globals the State's options turned off.\n"
+            For name In Sorted(TurnedOff)
+                text += "declare {name}: nil\n"
+            End For
+        End If
         Local typeNames: String[] = []
         For entry In objects
             typeNames.Add(entry.0)
@@ -201,18 +208,27 @@ Extend LuauState
             For field In Sorted(fields)
                 Local getter = getters.Get(field)
                 Local setter = setters.Get(field)
-                // A field's type is what its getter gives, or what its setter takes.
-                Local type = "any"
+                // What its getter gives, and what its setter takes: one type, or a read's and
+                // a write's when they differ.
+                Local read = "any"
                 If getter != Null && getter.Result != Null && getter.Result != ""
-                    type = LuauTypeText(getter.Result ?? "", objects)
-                ElseIf setter != Null
-                    Local taken = setter.Arguments
-                    If taken != Null && taken.Count == 1 Then type = LuauTypeText(taken[0], objects)
+                    read = LuauTypeText(getter.Result ?? "", objects)
                 End If
-                Local access = ""
-                If setter == Null Then access = "read "
-                If getter == Null Then access = "write "
-                text += "    {access}{field}: {type}\n"
+                Local write = "any"
+                Local taken = setter?.Arguments
+                If taken != Null && taken.Count == 1 Then write = LuauTypeText(taken[0], objects)
+                If setter == Null
+                    text += "    read {field}: {read}\n"
+                ElseIf getter == Null
+                    text += "    write {field}: {write}\n"
+                ElseIf read == write || write == "any"
+                    text += "    {field}: {read}\n"
+                ElseIf read == "any"
+                    text += "    {field}: {write}\n"
+                Else
+                    text += "    read {field}: {read}\n"
+                    text += "    write {field}: {write}\n"
+                End If
             End For
             For key In Sorted(methods)
                 Local declared = members[key]
@@ -237,3 +253,38 @@ Extend LuauState
         Return text
     End Method
 End Extend
+
+/// Luau's globals that `options` turn off, which Luau's own definitions declare: the base
+/// library's, each library's, loadstring, getfenv and setfenv, and collectgarbage.
+Package Function TurnedOffBy(options: LuauOptions): String[]
+    Local off: String[] = []
+    // The base library's, as Luau's opens them.
+    Local base = ["assert", "error", "gcinfo", "getfenv", "getmetatable", "ipairs", "next",
+                  "newproxy", "pairs", "pcall", "print", "rawequal", "rawget", "rawlen", "rawset",
+                  "select", "setfenv", "setmetatable", "tonumber", "tostring", "type", "typeof",
+                  "unpack", "xpcall"]
+    Local libraries: (LuauLibraries, String)[] = [
+        (LuauLibraries.COROUTINE, "coroutine"), (LuauLibraries.TABLE, "table"),
+        (LuauLibraries.OS, "os"), (LuauLibraries.STRING, "string"),
+        (LuauLibraries.MATH, "math"), (LuauLibraries.DEBUG, "debug"),
+        (LuauLibraries.UTF8, "utf8"), (LuauLibraries.BIT32, "bit32"),
+        (LuauLibraries.BUFFER, "buffer"), (LuauLibraries.VECTOR, "vector"),
+        (LuauLibraries.INTEGER, "integer")
+    ]
+    If (options.Libraries & LuauLibraries.BASE) != LuauLibraries.BASE
+        For name In base
+            off.Add(name)
+        End For
+    Else
+        If !options.Environments
+            off.Add("getfenv")
+            off.Add("setfenv")
+        End If
+    End If
+    For library In libraries
+        If (options.Libraries & library.0) != library.0 Then off.Add(library.1)
+    End For
+    If !options.LoadString Then off.Add("loadstring")
+    If options.CollectGarbage == LuauCollectGarbage.NONE Then off.Add("collectgarbage")
+    Return off
+End Function

@@ -1,0 +1,11 @@
+//! A type of the name of main's Door, in a module of its own.
+
+Import luau
+
+Class Door Implements LuauObject
+End Class
+
+/// Registers this module's Door in `lua`.
+Public Function RegisterOtherDoor(lua: LuauState) Throws LuauError
+    Try lua.Register<Door>()
+End Function

@@ -212,6 +212,8 @@ Public Class LuauState
     /// kind and name, and the globals the program set, by their names.
     Package Field DeclaredTypes: Map<String, Map<String, LuauDeclared>>
     Package Field DeclaredGlobals: Map<String, LuauDeclared>
+    /// Luau's globals its options turned off, which Definitions declares nil.
+    Package Field TurnedOff: String[]
     /// Whether it has the `task` library, which Definitions declares.
     Package Field HasTasks: Bool = False
     Package Field Drivers: Map<Int, Weak<LuauDriver>>
@@ -248,6 +250,7 @@ Public Class LuauState
             Reported(error)
         End Function
         Local options = LuauOptions()
+        TurnedOff = TurnedOffBy(options)
         MostWaiting = options.MostWaiting
         TickBudget = options.TimeBudget
         Local made = Made(options)
@@ -292,6 +295,7 @@ Public Class LuauState
         ThreadError = Function(error: LuauError)
             Reported(error)
         End Function
+        TurnedOff = TurnedOffBy(options)
         Local given = options.ThreadError
         If given != Null Then ThreadError = given
         If options.MostWaiting < 0 Then Panic("{options.MostWaiting} threads can't wait at most")

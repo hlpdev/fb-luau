@@ -13,10 +13,15 @@ namespace {
 constexpr int64_t pause = 1;
 constexpr int64_t can_yield = 2;
 constexpr int64_t current = 3;
+constexpr int64_t resume_it = 4;
 
 // What `can_yield` last said, and the id of the thread `current` last saw.
 int32_t yield_said = -2;
 uint64_t current_id = 0;
+// What `resume_it`'s resume of the thread it was given gave, and the thread's status after.
+int32_t resumed_status = -1;
+int32_t resumed_after = -1;
+std::string resumed_error;
 
 int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
     switch (function) {
@@ -35,6 +40,23 @@ int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
         current_id = fbl_thread_id(state, frame, 0);
         fbl_frame_truncate(state, frame, 0);
         return FBL_OK;
+    case resume_it: {
+        // Resumes the thread its first argument is, from where it's called.
+        int32_t ended = -1;
+        fbl_frame_truncate(state, frame, 1);
+        if (fbl_frame_push_copy(state, frame, 0) != FBL_OK) {
+            return FBL_OTHER;
+        }
+        resumed_status = fbl_thread_resume(state, frame, 1, 0, &ended);
+        resumed_after = fbl_thread_status(state, frame, 0);
+        int64_t length = 0;
+        const uint8_t* message = fbl_state_error_message(state, &length);
+        resumed_error = message == nullptr ? std::string()
+                                           : std::string(reinterpret_cast<const char*>(message),
+                                                         static_cast<size_t>(length));
+        fbl_frame_truncate(state, frame, 0);
+        return FBL_OK;
+    }
     default:
         return FBL_OTHER;
     }
@@ -49,6 +71,7 @@ struct thread_state_t : test_state_t {
         set("pause", pause);
         set("can_yield", can_yield);
         set("current", current);
+        set("resume_it", resume_it);
     }
 
     void set(std::string_view name, int64_t function) const {
@@ -225,6 +248,22 @@ TEST_CASE("a closed thread is finished, and a running one can't be closed") {
     CHECK(fbl_thread_close(lua.handle, frame, fbl_frame_count(lua.handle, frame) - 1) ==
           FBL_RUNTIME);
     CHECK(fbl_frame_close(lua.handle, frame));
+}
+
+TEST_CASE("a resume that fails as it starts, past Luau's C calls, ends the thread") {
+    // An error handler runs past Luau's 200 C calls, where a resume fails before the thread
+    // runs; the thread is ended, as the header says an error ends it, not left suspended.
+    const thread_state_t lua;
+    resumed_status = -1;
+    resumed_after = -1;
+    REQUIRE(lua.run("co = coroutine.create(function() return 1 end) "
+                    "local function deep() string.gsub('x', 'x', deep) end "
+                    "ok = xpcall(deep, function() resume_it(co) return 'handled' end)") ==
+            FBL_OK);
+    CHECK(resumed_status == FBL_RUNTIME);
+    CHECK(resumed_error.contains("C stack overflow"));
+    CHECK(resumed_after != FBL_THREAD_SUSPENDED);
+    CHECK(lua.run("assert(coroutine.status(co) == 'dead') assert(not ok)") == FBL_OK);
 }
 
 TEST_CASE("a thread's id is the same for each of its values") {

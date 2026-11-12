@@ -33,11 +33,11 @@ Public Class LuauDiagnostic Implements Printable
     Public ReadOnly Field Module: String
     /// Its line, from 1.
     Public ReadOnly Field Line: Int
-    /// Its column, from 1.
+    /// Its column, from 1, in UTF-8 bytes, as Luau counts it, not characters.
     Public ReadOnly Field Column: Int
     /// The line it ends on, from 1.
     Public ReadOnly Field EndLine: Int
-    /// The column just past its end, from 1.
+    /// The column just past its end, from 1, in UTF-8 bytes.
     Public ReadOnly Field EndColumn: Int
     /// Whether it's an error or a warning.
     Public ReadOnly Field Severity: LuauSeverity

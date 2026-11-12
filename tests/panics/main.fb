@@ -6,6 +6,7 @@ Import std.os
 Import std.text
 Import std.time
 Import luau
+Import "./other"
 
 Class Door Implements LuauObject
 End Class
@@ -64,6 +65,11 @@ Function Run(name: String) Throws LuauError
             Local function = Try Dropped()
             Try function.Invoke()
         // An object of a type the State hasn't registered.
+        // Two types of one name, in two modules.
+        Case "two-doors"
+            Local lua = LuauState()
+            Try lua.Register<Door>()
+            Try RegisterOtherDoor(lua)
         Case "unregistered"
             Local lua = LuauState()
             Try lua.Set("door", Door())

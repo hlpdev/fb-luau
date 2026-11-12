@@ -75,10 +75,10 @@ FBL_API const char* fbl_check_wanted(uint64_t checker, int32_t index);
 // checker's.
 FBL_API int32_t fbl_check_count(uint64_t checker);
 
-// Diagnostic `index`'s number `which`: 0, its line, and 1, its column, from 1; 2 and 3, the line
-// and the column just past where it ends; 4, its severity, an FBL_CHECK_ERROR or
-// FBL_CHECK_WARNING; 5, Luau's code for it, or 0 for one of the checker's own. -1 for what isn't
-// one.
+// Diagnostic `index`'s number `which`: 0, its line, and 1, its column, from 1, a column in UTF-8
+// bytes; 2 and 3, the line and the column just past where it ends; 4, its severity, an
+// FBL_CHECK_ERROR or FBL_CHECK_WARNING; 5, Luau's code for it, or 0 for one of the checker's own.
+// -1 for what isn't one.
 FBL_API int32_t fbl_check_number(uint64_t checker, int32_t index, int32_t which);
 
 // Diagnostic `index`'s text: `which` 0, its module's file path; 1, Luau's name for its kind, like
