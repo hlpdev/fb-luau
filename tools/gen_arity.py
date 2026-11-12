@@ -298,17 +298,11 @@ def expose_members():
                         "For a marked Method of a shape none exposes, like one of 8 arguments, or one that\n"
                         "gives nothing marked [LuauExpose], and for two marked members of one name in Luau,\n"
                         "saying which. A marked Static, ByRef, or Unsafe Method isn't exposed, and isn't\n"
-                        "said, as FutureBlitz's reflection doesn't go over them. And for a type of the\n"
-                        "name, TypeName's, of another registered one: scripts, their errors, and the\n"
-                        "checker tell types by their names.")
+                        "said, as FutureBlitz's reflection doesn't go over them.")
     lines += ["    @PanicsAtCaller",
               "    Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError",
               "        Local kept = KeptType<T>()",
               "        If kept != Null Then Return kept",
-              "        If DeclaredTypes.Contains(TypeName<T>())",
-              "            Panic(\"another type named {TypeName<T>()} is registered, and Luau tells types \" +",
-              "                  \"by their names\")",
-              "        End If",
               "        Local type = NewType<T>()"]
     body = []
     for count in range(MOST):

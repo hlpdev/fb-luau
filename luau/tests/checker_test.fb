@@ -221,8 +221,9 @@ Function TheDefinitionsFollowTheStatesOptions() Throws LuauError
     Expect(text.Contains("declare loadstring: nil\n") && text.Contains("declare getfenv: nil\n"),
            text)
     Expect(!text.Contains("declare print: nil") && !text.Contains("declare debug: nil"), text)
-    Local checker = Over({"main.luau": "print(loadstring('return 1'), getfenv(1), utf8.char(65))\n"},
-                         LuauCheckMode.STRICT)
+    Local checker =
+        Over({"main.luau": "print(loadstring('return 1'), getfenv(1), utf8.char(65))\n"},
+             LuauCheckMode.STRICT)
     Try checker.AddDefinitions(text, "game")
     // getfenv, though it's nil here, is still one Luau's lint calls deprecated.
     Expect(Names(Try checker.Check("main")) == ["TypeError", "TypeError", "DeprecatedApi"])
@@ -233,7 +234,8 @@ Function TheDefinitionsFollowTheStatesOptions() Throws LuauError
     options.Libraries = LuauLibraries.BASE | LuauLibraries.STRING
     Local turned = (Try LuauState(options)).Definitions()
     Expect(!turned.Contains("declare loadstring") && !turned.Contains("declare getfenv"), turned)
-    Expect(turned.Contains("declare debug: nil\n") && turned.Contains("declare utf8: nil\n"), turned)
+    Expect(turned.Contains("declare debug: nil\n") && turned.Contains("declare utf8: nil\n"),
+           turned)
     Expect(!turned.Contains("declare string: nil"), turned)
     Try Over({}).AddDefinitions(turned)
 End Function

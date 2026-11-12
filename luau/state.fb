@@ -958,7 +958,9 @@ Public Class LuauState
     /// A new registration of T, which Finished finishes.
     Package Method NewType<T: LuauObject>(): LuauTypeBuilder<T>
         nextType++
-        DeclaredTypes[TypeName<T>()] = {}
+        // Types of one name, from two modules, are one to scripts' typeof and the checker, so
+        // they're declared as one, with the members of each.
+        If !DeclaredTypes.Contains(TypeName<T>()) Then DeclaredTypes[TypeName<T>()] = {}
         Return LuauTypeBuilder<T>(Self, nextType, TypeName<T>())
     End Method
 

@@ -124,7 +124,6 @@ if(FBL_FB_TESTS)
       "buffer-write-past-end=3 bytes at 2 aren't within a buffer of 4"
       "dropped-state=the Luau State is closed"
       "unregistered=Door isn't registered"
-      "two-doors=another type named Door is registered"
       "buffer-bounds=4 bytes at 1 aren't within a buffer of 4"
       "buffer-read-huge=1099511627776 bytes at 0 aren't within a buffer of 4"
       "eight-arguments=Many.Sum is marked @LuauExpose, but isn't"

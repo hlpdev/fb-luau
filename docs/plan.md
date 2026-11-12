@@ -629,7 +629,8 @@ End For
   checker refuses what the State would at run time. A type Luau has none for, like a record,
   whose fields reflection gives only by the type, not its name, is `any`, as is what a
   LuauFunction, or a member added by hand, takes and gives. Two registered types of one name,
-  from two modules, are refused at Register, as Luau tells types by their names. A mode,
+  from two modules, are one type to typeof and the checker, declared as one with the members of
+  each. A mode,
   `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or the checker's default.
   Lines and columns count from 1, a column in UTF-8 bytes, as Luau counts them.
 - `Check` has one time limit for all its modules, not Luau's one a module, which N modules

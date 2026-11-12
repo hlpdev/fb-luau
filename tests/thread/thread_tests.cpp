@@ -258,8 +258,7 @@ TEST_CASE("a resume that fails as it starts, past Luau's C calls, ends the threa
     resumed_after = -1;
     REQUIRE(lua.run("co = coroutine.create(function() return 1 end) "
                     "local function deep() string.gsub('x', 'x', deep) end "
-                    "ok = xpcall(deep, function() resume_it(co) return 'handled' end)") ==
-            FBL_OK);
+                    "ok = xpcall(deep, function() resume_it(co) return 'handled' end)") == FBL_OK);
     CHECK(resumed_status == FBL_RUNTIME);
     CHECK(resumed_error.contains("C stack overflow"));
     CHECK(resumed_after != FBL_THREAD_SUSPENDED);

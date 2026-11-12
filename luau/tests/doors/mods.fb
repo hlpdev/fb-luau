@@ -6,4 +6,6 @@ Import luau
 Public Class Door Implements LuauObject
     /// Who made it.
     @LuauExpose Public Method Maker(): String => "mods"
+    /// Whether it's locked, which only a mod's door says.
+    @LuauGet Public Method Locked(): Bool => True
 End Class

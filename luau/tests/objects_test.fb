@@ -218,6 +218,11 @@ Function TwoTypesOfOneNameInTwoModulesAreEachTheirOwn() Throws LuauError
     Try lua.Set("b", mods.Door())
     Expect(Try lua.Evaluate<String>("return a:Maker() .. ' ' .. b:Maker()") == "game mods")
     Expect(ExpectThrows<LuauError>(lua.Evaluate<mods.Door>("return a")) != Null)
+    // To the checker they're one type, as to typeof, with the members of each.
+    Local text = lua.Definitions()
+    Expect(text.Split("declare extern type Door with").Count == 2, text)
+    Expect(text.Contains("    read Locked: boolean\n") && text.Contains("    function Maker("),
+           text)
 End Function
 
 @Test
