@@ -66,6 +66,8 @@ def state_methods(count):
                                  "function, as [Wrap] makes it.\n\n# Errors\n\nA LuauError of MEMORY.")
             lines += header("    ", "SetFunction", type_names, f"name: String, f: {func}", " Throws LuauError")
             lines.append("        Try Set(name, Try Wrap(f, name))")
+            lines.append("        Local types: String[] = [" + ", ".join(f"TypeName<{name}>()" for name in names) + "]")
+            lines.append("        DeclareFunction(name, types, " + ("TypeName<R>()" if gives else "Null") + ")")
             lines.append("    End Method")
             lines.append("")
             # Wrap.
@@ -122,6 +124,8 @@ def async_methods(count):
                                  "function, as [WrapAsync] makes it.\n\n# Errors\n\nA LuauError of MEMORY.")
             lines += header("    ", "SetAsync", type_names, f"name: String, f: {func}", " Throws LuauError")
             lines.append("        Try Set(name, Try WrapAsync(f, name))")
+            lines.append("        Local types: String[] = [" + ", ".join(f"TypeName<{name}>()" for name in names) + "]")
+            lines.append("        DeclareFunction(name, types, " + ("TypeName<R>()" if gives else "Null") + ")")
             lines.append("    End Method")
             lines.append("")
             lines += doc("    ", f"`f`, a function of {counted(count)} {what}, an Async Function's, as a Luau\n"
@@ -268,6 +272,19 @@ def loop(attribute, func, type_names, throws):
     lines.append(f"        Local name = MemberName(m.Attribute({attribute})?.Name, m.Name)")
     kind = {"LuauExpose": 0, "LuauAction": 0, "LuauGet": 1, "LuauSet": 2}[attribute]
     lines.append(f"        type.Claim({kind}, name, m.Name)")
+    # Its types, for Definitions.
+    taken = [name for name in type_names if name not in ("R",)]
+    if attribute == "LuauSet":
+        lines.append("        Local types: String[] = [TypeName<V>()]")
+        lines.append("        type.Declare(LuauDeclaredKind.SETTER, name, types, Null)")
+    elif attribute == "LuauGet":
+        lines.append("        Local types: String[] = []")
+        lines.append("        type.Declare(LuauDeclaredKind.GETTER, name, types, TypeName<R>())")
+    else:
+        listed = ", ".join(f"TypeName<{name}>()" for name in taken)
+        lines.append(f"        Local types: String[] = [{listed}]")
+        result = "TypeName<R>()" if "R" in type_names else "Null"
+        lines.append(f"        type.Declare(LuauDeclaredKind.METHOD, name, types, {result})")
     return lines
 
 
@@ -348,6 +365,7 @@ def generate():
         "",
         "Import std.core",
         "Import \"./c/fbl_call\"",
+        "Import \"./definitions\"",
         "Import \"./errors\"",
         "Import \"./functions\"",
         "Import \"./objects\"",

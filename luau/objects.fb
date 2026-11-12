@@ -4,6 +4,7 @@
 Import std.collections
 Import std.core
 Import "./c/fbl_udata"
+Import "./definitions"
 Import "./errors"
 Import "./functions"
 Import "./state"
@@ -249,6 +250,29 @@ Public Class LuauTypeBuilder<T: LuauObject>
         End Select
     End Method
 
+    /// Says its member `name` is of `kind`, of `arguments`' types, Null for any, that gives
+    /// `result`'s, Null for nothing and "" for anything, for Definitions; it replaces what the type
+    /// had by that name, as the member does.
+    Package Method Declare(kind: LuauDeclaredKind, name: String, arguments: String[]?,
+                           result: String?)
+        Local state: LuauState? = owner
+        If state == Null Then Return
+        Local members = state.DeclaredTypes.Get(Name)
+        If members == Null
+            members = {}
+            state.DeclaredTypes[Name] = members
+        End If
+        Select kind
+            Case LuauDeclaredKind.METHOD
+                members.Remove("GETTER " + name)
+                members.Remove("SETTER " + name)
+            Case LuauDeclaredKind.GETTER, LuauDeclaredKind.SETTER
+                members.Remove("METHOD " + name)
+            Default
+        End Select
+        members["{kind} {name}"] = LuauDeclared(kind, name, arguments, result)
+    End Method
+
     /// Panics at Register for a Method marked `attribute` that no shape exposes, saying why it
     /// can't be.
     @PanicsAtCaller
@@ -293,6 +317,7 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Public Method AddMethod(name: String,
                             function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
         Mine(function)
+        Declare(LuauDeclaredKind.METHOD, name, Null, "")
         Methods.Remove(name)
         Getters.Remove(name)
         Setters.Remove(name)
@@ -308,6 +333,7 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Public Method AddGetter(name: String,
                             function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
         Mine(function)
+        Declare(LuauDeclaredKind.GETTER, name, Null, "")
         Methods.Remove(name)
         Functions.Remove(name)
         Getters.Remove(name)
@@ -321,6 +347,7 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Public Method AddSetter(name: String,
                             function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
         Mine(function)
+        Declare(LuauDeclaredKind.SETTER, name, Null, Null)
         Methods.Remove(name)
         Functions.Remove(name)
         Setters.Remove(name)
@@ -338,6 +365,9 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Public Method AddOperator(operator: LuauOperator,
                               function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
         Mine(function)
+        Local metamethod = MetamethodOf(operator)
+        If operator != LuauOperator.TOSTRING Then Declare(LuauDeclaredKind.OPERATOR, metamethod,
+                                                          Null, "")
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)

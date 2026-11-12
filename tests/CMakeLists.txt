@@ -49,6 +49,10 @@ fbl_add_tests(sandbox sandbox/sandbox_tests.cpp)
 fbl_add_tests(thread thread/thread_tests.cpp)
 fbl_add_tests(require require/require_tests.cpp)
 fbl_add_tests(bytecode bytecode/bytecode_tests.cpp)
+fbl_add_tests(check check/check_tests.cpp)
+# The cases the checker's diagnostics are compared with luau-analyze's on (tools/analyze_golden.py).
+target_compile_definitions(fbl_check_tests PRIVATE
+                           FBL_CHECK_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/check/corpus")
 fbl_add_tests(native native/native_tests.cpp)
 
 find_program(FBL_SH sh DOC "A POSIX shell, for the tools' scripts")
@@ -133,6 +137,7 @@ if(FBL_FB_TESTS)
       "negative-budget=a time budget of -1 microseconds is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "state-started-twice=the Luau State's driver runs already"
+      "checker-time-limit=a checker's time limit of"
       "action-gives=Acting.Count is marked @LuauAction, but isn't"
       "throwing-shape=Throwing.Take is marked @LuauExpose, but isn't"
       "shadowed=Shadowed.Harm is marked @LuauExpose, but isn't")

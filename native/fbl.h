@@ -7,6 +7,7 @@
 #include "bytecode/fbl_bytecode.h"
 #include "call/fbl_call.h"
 #include "callback/fbl_callback.h"
+#include "check/fbl_check.h"
 #include "core/fbl_core.h"
 #include "frame/fbl_frame.h"
 #include "load/fbl_load.h"

@@ -1,0 +1,4 @@
+main.luau:3:1: SyntaxError: Expected ')' (to close '(' at line 2), got <eof>
+main.luau:2:7: TypeError: Unknown global 'x'; consider assigning to it first
+main.luau:1:7: LocalUnused: Variable 'x' is never used; prefix with '_' to silence
+main.luau:2:1: MultiLineStatement: Statement spans multiple lines; use indentation to silence

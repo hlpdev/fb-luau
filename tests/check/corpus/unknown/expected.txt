@@ -1,0 +1,2 @@
+main.luau:2:11: TypeError: Unknown require: unsupported path
+main.luau:3:12: TypeError: Unknown require: unsupported path

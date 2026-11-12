@@ -266,3 +266,22 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
 - **`LuauStatesOpen(here: True)` counts the calling thread's States:** `fb test` runs tests on a
   pool of threads, so a test that watched the process's count raced the others'; the package's
   own tests count theirs.
+
+## L11 (2026-11-11)
+
+- **The checker asks for nothing across the shim:** a check gives the files it wanted and wasn't
+  given, and the package reads them and checks again. The VM's require calls a Luau function as
+  its reader; a checker has no State, and a C callback into FutureBlitz would be the shim's first.
+  Rounds are as many as the require graph is deep, as Frontend's parse finds every file it can
+  reach from what it has before anything's checked.
+- **Its diagnostics match luau-analyze's for the same files,** module by module: a corpus
+  (tests/check/corpus) keeps what luau-analyze, built from the same Luau, gives
+  (tools/analyze_golden.py), and the C++ tests compare. A cycle's modules can come in another
+  order, as luau-analyze names them by its root's name and by their full paths.
+- **A default limit of 10 seconds a module,** where luau-analyze has none: a game checking mods as
+  it loads them mustn't hang on one.
+- **Definitions record types where reflection sees them:** Register's loops and SetFunction keep
+  each member's and global's FutureBlitz types by TypeName, which Definitions maps to Luau's. A
+  record is `any`, as nothing reaches its fields from its name; arguments are `a1`, `a2`, as
+  reflection gives no parameter names. What the State sets for itself, `print` and `task`, isn't
+  the program's: `task` is declared by hand.

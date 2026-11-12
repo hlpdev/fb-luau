@@ -4,6 +4,7 @@
 
 Import std.core
 Import "./c/fbl_call"
+Import "./definitions"
 Import "./errors"
 Import "./functions"
 Import "./objects"
@@ -23,6 +24,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetFunction<R: LuauType>(name: String, f: Func(): R) Throws LuauError
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of no arguments that gives a result, as a Luau function, named `name` in
@@ -57,6 +60,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetFunction<R: LuauType>(name: String, f: Func(): R Throws Error) Throws LuauError
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of no arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -91,6 +96,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetFunction(name: String, f: Func()) Throws LuauError
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of no arguments that gives nothing, as a Luau function, named `name` in
@@ -121,6 +128,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetFunction(name: String, f: Func() Throws Error) Throws LuauError
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of no arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -158,6 +167,8 @@ Extend LuauState
         Where A1: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of one argument that gives a result, as a Luau function, named `name` in
@@ -197,6 +208,8 @@ Extend LuauState
         Where A1: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of one argument that gives a result, and throws, as a Luau function, named `name` in
@@ -234,6 +247,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetFunction<A1: LuauType>(name: String, f: Func(A1)) Throws LuauError
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of one argument that gives nothing, as a Luau function, named `name` in
@@ -270,6 +285,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetFunction<A1: LuauType>(name: String, f: Func(A1) Throws Error) Throws LuauError
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of one argument that gives nothing, and throws, as a Luau function, named `name` in
@@ -309,6 +326,8 @@ Extend LuauState
         Where A2: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 2 arguments that gives a result, as a Luau function, named `name` in
@@ -352,6 +371,8 @@ Extend LuauState
         Where A2: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 2 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -393,6 +414,8 @@ Extend LuauState
         Where A1: LuauType
         Where A2: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 2 arguments that gives nothing, as a Luau function, named `name` in
@@ -434,6 +457,8 @@ Extend LuauState
         Where A1: LuauType
         Where A2: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 2 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -477,6 +502,8 @@ Extend LuauState
         Where A3: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 3 arguments that gives a result, as a Luau function, named `name` in
@@ -523,6 +550,8 @@ Extend LuauState
         Where A3: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 3 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -567,6 +596,8 @@ Extend LuauState
         Where A2: LuauType
         Where A3: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 3 arguments that gives nothing, as a Luau function, named `name` in
@@ -612,6 +643,8 @@ Extend LuauState
         Where A2: LuauType
         Where A3: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 3 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -659,6 +692,8 @@ Extend LuauState
         Where A4: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 4 arguments that gives a result, as a Luau function, named `name` in
@@ -709,6 +744,8 @@ Extend LuauState
         Where A4: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 4 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -757,6 +794,8 @@ Extend LuauState
         Where A3: LuauType
         Where A4: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 4 arguments that gives nothing, as a Luau function, named `name` in
@@ -805,6 +844,8 @@ Extend LuauState
         Where A3: LuauType
         Where A4: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 4 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -856,6 +897,9 @@ Extend LuauState
         Where A5: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 5 arguments that gives a result, as a Luau function, named `name` in
@@ -910,6 +954,9 @@ Extend LuauState
         Where A5: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 5 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -962,6 +1009,9 @@ Extend LuauState
         Where A4: LuauType
         Where A5: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 5 arguments that gives nothing, as a Luau function, named `name` in
@@ -1014,6 +1064,9 @@ Extend LuauState
         Where A4: LuauType
         Where A5: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 5 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -1068,6 +1121,9 @@ Extend LuauState
         Where A6: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 6 arguments that gives a result, as a Luau function, named `name` in
@@ -1126,6 +1182,9 @@ Extend LuauState
         Where A6: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 6 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -1182,6 +1241,9 @@ Extend LuauState
         Where A5: LuauType
         Where A6: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 6 arguments that gives nothing, as a Luau function, named `name` in
@@ -1238,6 +1300,9 @@ Extend LuauState
         Where A5: LuauType
         Where A6: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 6 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -1296,6 +1361,9 @@ Extend LuauState
         Where A7: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 7 arguments that gives a result, as a Luau function, named `name` in
@@ -1355,6 +1423,9 @@ Extend LuauState
         Where A7: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 7 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -1415,6 +1486,9 @@ Extend LuauState
         Where A6: LuauType
         Where A7: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 7 arguments that gives nothing, as a Luau function, named `name` in
@@ -1474,6 +1548,9 @@ Extend LuauState
         Where A6: LuauType
         Where A7: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 7 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -1535,6 +1612,9 @@ Extend LuauState
         Where A8: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 8 arguments that gives a result, as a Luau function, named `name` in
@@ -1597,6 +1677,9 @@ Extend LuauState
         Where A8: LuauType
         Where R: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 8 arguments that gives a result, and throws, as a Luau function, named `name` in
@@ -1660,6 +1743,9 @@ Extend LuauState
         Where A7: LuauType
         Where A8: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 8 arguments that gives nothing, as a Luau function, named `name` in
@@ -1723,6 +1809,9 @@ Extend LuauState
         Where A7: LuauType
         Where A8: LuauType
         Try Set(name, Try Wrap(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 8 arguments that gives nothing, and throws, as a Luau function, named `name` in
@@ -1776,6 +1865,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetAsync<R: LuauType>(name: String, f: Func(): Task<R>) Throws LuauError
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of no arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -1811,6 +1902,8 @@ Extend LuauState
     Public Method SetAsync<R: LuauType>(name: String,
                                         f: Func(): (Task<R> Throws Error)) Throws LuauError
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of no arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -1846,6 +1939,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetAsync(name: String, f: Func(): Task) Throws LuauError
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of no arguments that gives a Task, an Async Function's, as a Luau
@@ -1880,6 +1975,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetAsync(name: String, f: Func(): (Task Throws Error)) Throws LuauError
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = []
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of no arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -1917,6 +2014,8 @@ Extend LuauState
         Where A1: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of one argument that gives a Task of a result, an Async Function's, as a Luau
@@ -1957,6 +2056,8 @@ Extend LuauState
         Where A1: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of one argument that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -1995,6 +2096,8 @@ Extend LuauState
     @PanicsAtCaller
     Public Method SetAsync<A1: LuauType>(name: String, f: Func(A1): Task) Throws LuauError
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of one argument that gives a Task, an Async Function's, as a Luau
@@ -2031,6 +2134,8 @@ Extend LuauState
     Public Method SetAsync<A1: LuauType>(name: String,
                                          f: Func(A1): (Task Throws Error)) Throws LuauError
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of one argument that gives a Task, which throws, an Async Function's, as a Luau
@@ -2070,6 +2175,8 @@ Extend LuauState
         Where A2: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 2 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -2113,6 +2220,8 @@ Extend LuauState
         Where A2: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 2 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -2155,6 +2264,8 @@ Extend LuauState
         Where A1: LuauType
         Where A2: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 2 arguments that gives a Task, an Async Function's, as a Luau
@@ -2196,6 +2307,8 @@ Extend LuauState
         Where A1: LuauType
         Where A2: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 2 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -2240,6 +2353,8 @@ Extend LuauState
         Where A3: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 3 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -2287,6 +2402,8 @@ Extend LuauState
         Where A3: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 3 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -2332,6 +2449,8 @@ Extend LuauState
         Where A2: LuauType
         Where A3: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 3 arguments that gives a Task, an Async Function's, as a Luau
@@ -2376,6 +2495,8 @@ Extend LuauState
         Where A2: LuauType
         Where A3: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 3 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -2423,6 +2544,8 @@ Extend LuauState
         Where A4: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 4 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -2474,6 +2597,8 @@ Extend LuauState
         Where A4: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 4 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -2524,6 +2649,8 @@ Extend LuauState
         Where A3: LuauType
         Where A4: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 4 arguments that gives a Task, an Async Function's, as a Luau
@@ -2573,6 +2700,8 @@ Extend LuauState
         Where A3: LuauType
         Where A4: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 4 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -2625,6 +2754,9 @@ Extend LuauState
         Where A5: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 5 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -2679,6 +2811,9 @@ Extend LuauState
         Where A5: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 5 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -2733,6 +2868,9 @@ Extend LuauState
         Where A4: LuauType
         Where A5: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 5 arguments that gives a Task, an Async Function's, as a Luau
@@ -2785,6 +2923,9 @@ Extend LuauState
         Where A4: LuauType
         Where A5: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 5 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -2840,6 +2981,9 @@ Extend LuauState
         Where A6: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 6 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -2897,6 +3041,9 @@ Extend LuauState
         Where A6: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 6 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -2955,6 +3102,9 @@ Extend LuauState
         Where A5: LuauType
         Where A6: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 6 arguments that gives a Task, an Async Function's, as a Luau
@@ -3011,6 +3161,9 @@ Extend LuauState
         Where A5: LuauType
         Where A6: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 6 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -3070,6 +3223,9 @@ Extend LuauState
         Where A7: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 7 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -3128,6 +3284,9 @@ Extend LuauState
         Where A7: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 7 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -3186,6 +3345,9 @@ Extend LuauState
         Where A6: LuauType
         Where A7: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 7 arguments that gives a Task, an Async Function's, as a Luau
@@ -3244,6 +3406,9 @@ Extend LuauState
         Where A6: LuauType
         Where A7: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 7 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -3306,6 +3471,9 @@ Extend LuauState
         Where A8: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 8 arguments that gives a Task of a result, an Async Function's, as a Luau
@@ -3365,6 +3533,9 @@ Extend LuauState
         Where A8: LuauType
         Where R: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, TypeName<R>())
     End Method
 
     /// `f`, a function of 8 arguments that gives a Task of a result, which throws, an Async Function's, as a Luau
@@ -3426,6 +3597,9 @@ Extend LuauState
         Where A7: LuauType
         Where A8: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 8 arguments that gives a Task, an Async Function's, as a Luau
@@ -3483,6 +3657,9 @@ Extend LuauState
         Where A7: LuauType
         Where A8: LuauType
         Try Set(name, Try WrapAsync(f, name))
+        Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                 TypeName<A5>(), TypeName<A6>(), TypeName<A7>(), TypeName<A8>()]
+        DeclareFunction(name, types, Null)
     End Method
 
     /// `f`, a function of 8 arguments that gives a Task, which throws, an Async Function's, as a Luau
@@ -3550,6 +3727,8 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = []
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3566,6 +3745,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = []
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3580,6 +3761,8 @@ Extend LuauState
             Where M: Func()
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = []
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3596,6 +3779,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = []
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3613,6 +3798,8 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3631,6 +3818,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3647,6 +3836,8 @@ Extend LuauState
             Where A1: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3665,6 +3856,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3684,6 +3877,8 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3704,6 +3899,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3722,6 +3919,8 @@ Extend LuauState
             Where A2: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3742,6 +3941,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3763,6 +3964,8 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3785,6 +3988,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3805,6 +4010,8 @@ Extend LuauState
             Where A3: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3827,6 +4034,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3850,6 +4059,8 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3874,6 +4085,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3896,6 +4109,8 @@ Extend LuauState
             Where A4: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3920,6 +4135,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3945,6 +4162,9 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3971,6 +4191,9 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -3995,6 +4218,9 @@ Extend LuauState
             Where A5: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4021,6 +4247,9 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4048,6 +4277,9 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4076,6 +4308,9 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4102,6 +4337,9 @@ Extend LuauState
             Where A6: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4130,6 +4368,9 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4159,6 +4400,9 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4189,6 +4433,9 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauExpose)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, TypeName<R>())
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4217,6 +4464,9 @@ Extend LuauState
             Where A7: LuauType
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4247,6 +4497,9 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauAction)?.Name, m.Name)
             type.Claim(0, name, m.Name)
+            Local types: String[] = [TypeName<A1>(), TypeName<A2>(), TypeName<A3>(), TypeName<A4>(),
+                                     TypeName<A5>(), TypeName<A6>(), TypeName<A7>()]
+            type.Declare(LuauDeclaredKind.METHOD, name, types, Null)
             type.Methods[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4270,6 +4523,8 @@ Extend LuauState
             Where R: LuauType
             Local name = MemberName(m.Attribute(LuauGet)?.Name, m.Name)
             type.Claim(1, name, m.Name)
+            Local types: String[] = []
+            type.Declare(LuauDeclaredKind.GETTER, name, types, TypeName<R>())
             type.Getters[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4285,6 +4540,8 @@ Extend LuauState
             Where V: LuauType
             Local name = MemberName(m.Attribute(LuauSet)?.Name, m.Name)
             type.Claim(2, name, m.Name)
+            Local types: String[] = [TypeName<V>()]
+            type.Declare(LuauDeclaredKind.SETTER, name, types, Null)
             type.Setters[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4303,6 +4560,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauGet)?.Name, m.Name)
             type.Claim(1, name, m.Name)
+            Local types: String[] = []
+            type.Declare(LuauDeclaredKind.GETTER, name, types, TypeName<R>())
             type.Getters[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)
@@ -4319,6 +4578,8 @@ Extend LuauState
             Where E: Error
             Local name = MemberName(m.Attribute(LuauSet)?.Name, m.Name)
             type.Claim(2, name, m.Name)
+            Local types: String[] = [TypeName<V>()]
+            type.Declare(LuauDeclaredKind.SETTER, name, types, Null)
             type.Setters[name] = Function(slots: LuauSlots): Int32
                 Try
                     Local object = Try slots.Argument<T>(0, name)

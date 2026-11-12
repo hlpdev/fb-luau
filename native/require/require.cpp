@@ -1,5 +1,6 @@
 #include "core/core.hpp"
 #include "fbl.h"
+#include "require/paths.hpp"
 #include "state/state.hpp"
 
 #include <algorithm>
@@ -23,110 +24,15 @@ LUAU_FASTFLAG(LuauCyclicRequireShortCircuit)
 
 namespace {
 
-// The files a module path names, in the order they're looked for, as Luau's CLI has them.
-constexpr std::array<std::string_view, 4> module_suffixes = {
-    ".luau",
-    ".lua",
-    "/init.luau",
-    "/init.lua",
-};
-
-// The most a require's path, or the walk to a module, has: bytes, and parts between its "/"s.
-constexpr size_t most_path_bytes = 1024;
-constexpr size_t most_path_parts = 64;
-
 fbl::state_t& state_of(void* context) {
     return *static_cast<fbl::state_t*>(context);
 }
 
-// A module path's parts joined as a file path's are.
-std::string joined(const std::vector<std::string>& parts) {
-    std::string path;
-    for (const std::string& part : parts) {
-        if (!path.empty()) {
-            path += '/';
-        }
-        path += part;
-    }
-    return path;
-}
-
-// Whether `name`, without what follows its first ".", is one of Windows's devices, which a reader
-// that opens files would open as one.
-bool is_device(std::string_view name) {
-    const std::string_view base = name.substr(0, name.find('.'));
-    std::string upper;
-    for (const char each : base) {
-        upper += static_cast<char>(each >= 'a' && each <= 'z' ? each - 'a' + 'A' : each);
-    }
-    for (const std::string_view device : { "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$" }) {
-        if (upper == device) {
-            return true;
-        }
-    }
-    return upper.size() == 4 && (upper.starts_with("COM") || upper.starts_with("LPT")) &&
-           upper[3] >= '0' && upper[3] <= '9';
-}
-
-// Whether a part of a module's path is one the reader can be given: not empty, nor holding a
-// ":", "\", or NUL, which a reader joining paths would take as a drive, a separator, or an end,
-// nor a Windows device's name.
-bool is_safe_part(std::string_view part) {
-    return !part.empty() &&
-           part.find_first_of(std::string_view(":\\\0", 3)) == std::string_view::npos &&
-           !is_device(part);
-}
-
-// A file's path as a module path's parts from the root: "." left out, ".." going up, and a
-// module's file named as its module, or nothing for a path that goes above the root, or has a
-// part the reader can't be given.
-std::optional<std::vector<std::string>> module_parts(std::string_view path) {
-    std::vector<std::string> parts;
-    size_t start = 0;
-    while (start <= path.size()) {
-        size_t end = path.find_first_of("/\\", start);
-        if (end == std::string_view::npos) {
-            end = path.size();
-        }
-        const std::string_view part = path.substr(start, end - start);
-        if (part == "..") {
-            if (parts.empty()) {
-                return std::nullopt;
-            }
-            parts.pop_back();
-        } else if (!part.empty() && part != ".") {
-            if (!is_safe_part(part)) {
-                return std::nullopt;
-            }
-            parts.emplace_back(part);
-        }
-        start = end + 1;
-    }
-    if (!parts.empty()) {
-        std::string& last = parts.back();
-        for (const std::string_view suffix :
-             { std::string_view(".luau"), std::string_view(".lua") }) {
-            if (last.size() > suffix.size() && last.ends_with(suffix)) {
-                last.resize(last.size() - suffix.size());
-                break;
-            }
-        }
-        if (last == "init") {
-            parts.pop_back();
-        }
-    }
-    return parts;
-}
-
 // Raises when the walk's path is past what a require's may be.
 void check_length(lua_State* stack, const fbl::require_walk_t& walk) {
-    size_t bytes = 0;
-    for (const std::string& part : walk.parts) {
-        bytes += part.size() + 1;
-    }
-    if (walk.parts.size() > most_path_parts || bytes > most_path_bytes) {
+    if (fbl::is_too_long(walk.parts)) {
         luaL_error(stack, "a require's path is at most %d parts and %d bytes",
-                   static_cast<int>(most_path_parts), static_cast<int>(most_path_bytes));
+                   static_cast<int>(fbl::most_path_parts), static_cast<int>(fbl::most_path_bytes));
     }
 }
 
@@ -196,9 +102,9 @@ int resolve(fbl::state_t& state, lua_State* stack) {
     if (state.require_walk.parts.empty()) {
         return 0;
     }
-    const std::string base = joined(state.require_walk.parts);
+    const std::string base = fbl::joined(state.require_walk.parts);
     int count = 0;
-    for (const std::string_view suffix : module_suffixes) {
+    for (const std::string_view suffix : fbl::module_suffixes) {
         std::string file = base + std::string(suffix);
         if (read_file(state, stack, file).has_value()) {
             if (count == 0) {
@@ -233,9 +139,10 @@ bool is_require_allowed(lua_State* stack, void* context, const char* /*requirer*
     if (path != nullptr) {
         const std::string_view given(path, length);
         const size_t parts = static_cast<size_t>(std::ranges::count(given, '/')) + 1;
-        if (length > most_path_bytes || parts > most_path_parts) {
+        if (length > fbl::most_path_bytes || parts > fbl::most_path_parts) {
             luaL_error(stack, "a require's path is at most %d parts and %d bytes",
-                       static_cast<int>(most_path_parts), static_cast<int>(most_path_bytes));
+                       static_cast<int>(fbl::most_path_parts),
+                       static_cast<int>(fbl::most_path_bytes));
         }
         // Luau's require reads it as C text, to its first NUL, which would hide the rest.
         if (given.contains('\0')) {
@@ -254,7 +161,7 @@ luarequire_NavigateResult reset(lua_State* /*stack*/, void* context, const char*
         state.require_walk.parts = { std::string(name) };
         return NAVIGATE_SUCCESS;
     }
-    std::optional<std::vector<std::string>> parts = module_parts(name.substr(1));
+    std::optional<std::vector<std::string>> parts = fbl::module_parts(name.substr(1));
     if (!parts) {
         return NAVIGATE_NOT_FOUND;
     }
@@ -269,7 +176,7 @@ luarequire_NavigateResult jump_to_alias(lua_State* stack, void* context, const c
     if (!given.starts_with('/')) {
         return NAVIGATE_NOT_FOUND;
     }
-    std::optional<std::vector<std::string>> parts = module_parts(given);
+    std::optional<std::vector<std::string>> parts = fbl::module_parts(given);
     if (!parts) {
         return NAVIGATE_NOT_FOUND;
     }
@@ -294,7 +201,7 @@ luarequire_NavigateResult to_child(lua_State* stack, void* context, const char* 
     if (child == "." || child == ".." || child == ".config" || child.contains('/')) {
         return NAVIGATE_NOT_FOUND;
     }
-    if (!is_safe_part(child)) {
+    if (!fbl::is_safe_part(child)) {
         luaL_error(stack, "a require's path can't have an empty part, a ':', a '\\', or a "
                           "device's name");
     }
@@ -325,8 +232,7 @@ luarequire_WriteResult get_cache_key(lua_State* /*stack*/, void* context, char* 
 
 // Where the .luaurc of the place the walk is at would be.
 std::string config_file(const fbl::state_t& state) {
-    const std::string folder = joined(state.require_walk.parts);
-    return folder.empty() ? ".luaurc" : folder + "/.luaurc";
+    return fbl::config_file(state.require_walk.parts);
 }
 
 luarequire_ConfigStatus get_config_status(lua_State* stack, void* context) {

@@ -1,0 +1,2 @@
+main.luau:2:11: TypeError: Cyclic dependencies are only supported if all modules in the cycle use 'export' syntax. The following modules do not use 'export': b.luau, main.luau
+b.luau:2:11: TypeError: Cyclic dependencies are only supported if all modules in the cycle use 'export' syntax. The following modules do not use 'export': main.luau, b.luau

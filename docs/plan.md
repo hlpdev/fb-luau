@@ -580,9 +580,23 @@ End For
   default: it reads modules through the program's function, follows their `require`s as the VM
   does, and gives each type error and lint warning as a `LuauDiagnostic`: its module, line and
   column (from 1), end, severity, Luau's code and name for it, and message, as Luau writes it.
+  The shim asks the program for nothing: a check says which files it wanted and wasn't given,
+  the package reads each through the program's function and gives it, or says there's none, and
+  checks again, until it wants none, so nothing calls across the shim. Each file is read once,
+  until `Forget()`. Modules are found by the VM's rules, the same code (native/require/paths), and
+  a folder's `.luaurc` gives a module's mode and lint as luau-analyze reads it; a `.config.luau`,
+  which would run code, isn't asked for.
+- A checker's own diagnostics: `TimeLimit` for a module that took past the limit, `ConfigError`
+  for a `.luaurc` that doesn't parse, and `InternalCompilerError` for one Luau gives up on. Its
+  default mode is luau-analyze's, `NONSTRICT`, and its default limit 10 seconds a module.
 - `AddDefinitions(text)` adds a definitions file, Luau's `declare` syntax, which
   `lua.Definitions()` writes for what a State gives scripts, so a mod is checked against the
-  game's real API. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
+  game's real API: each registered type as a `declare extern type`, its getters and setters as
+  fields, `read` or `write` when it has only one, its Methods by their types, its arguments named
+  `a1`, `a2`, and so on, as reflection doesn't give a parameter's name; and each global the
+  program set by `Set`, `SetFunction`, or `SetAsync`, with the `task` library when it's open.
+  A type Luau has none for, like a record, whose fields reflection gives only by the type, not
+  its name, is `any`, as is what a LuauFunction, or a member added by hand, takes and gives. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
   the checker's default.
 - `Check` takes a time limit per module, as Luau's does, so a module that makes the checker work
   too long gives a diagnostic saying so, not a hang.

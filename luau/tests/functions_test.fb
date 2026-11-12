@@ -187,16 +187,6 @@ Function AFunctionCanHoldItsStateWeakly() Throws LuauError
     Expect(Try lua.Evaluate<Int>("return count()") == 42)
 End Function
 
-/// An error that says which raise it was.
-Class Numbered Extends Error
-    ReadOnly Field Number: Int
-
-    New(message: String, number: Int)
-        Super.New(message)
-        Number = number
-    End New
-End Class
-
 @Test
 Function ANestedCallsErrorKeepsItsKindThroughTheProgramsFunction() Throws LuauError
     Local options = LuauOptions()

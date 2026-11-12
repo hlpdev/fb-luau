@@ -1,0 +1,199 @@
+Import std.collections
+Import std.core
+Import std.math
+Import std.test
+Import std.text
+Import luau
+
+/// A door a game gives its mods.
+Class Door Implements LuauObject
+    Field open: Bool = False
+    @LuauGet("Open") Method IsOpen(): Bool => open
+    @LuauSet("Open") Method SetOpen(value: Bool)
+        open = value
+    End Method
+    @LuauGet Method Name(): String => "door"
+    @LuauExpose Method Knock(times: Int): String => "knock"
+    @LuauAction Method Close()
+        open = False
+    End Method
+End Class
+
+/// A checker over `files`, by their paths from the root.
+Function Over(files: Map<String, String>,
+              mode: LuauCheckMode = LuauCheckMode.NONSTRICT): LuauChecker
+    Return LuauChecker(Function(path: String): String? => files.Get(path), mode)
+End Function
+
+/// The names of `found`, in order.
+Function Names(found: LuauDiagnostic[]): String[]
+    Local names: String[] = []
+    For each In found
+        names.Add(each.Name)
+    End For
+    Return names
+End Function
+
+@Test
+Function ATypeErrorIsGivenWithItsPlace() Throws LuauError
+    Local checker = Over({"main.luau": "--!strict\nlocal n: number = 'x'\nprint(n)\n"})
+    Local found = Try checker.Check("main")
+    Expect(found.Count == 1)
+    Local first = found[0]
+    Expect(first.Module == "main.luau" && first.Line == 2 && first.Column == 19)
+    Expect(first.EndLine == 2 && first.EndColumn == 22)
+    Expect(first.Severity == LuauSeverity.ERROR && first.Name == "TypeError" && first.Code >= 1000)
+    Expect(first.ToString() ==
+           "main.luau:2:19: TypeError: Expected this to be 'number', but got 'string'",
+           first.ToString())
+End Function
+
+@Test
+Function ALintIsAWarning() Throws LuauError
+    Local found = Try Over({"main.luau": "local unused = 1\n"}).Check("main")
+    Expect(Names(found) == ["LocalUnused"])
+    Expect(found[0].Severity == LuauSeverity.WARNING)
+End Function
+
+@Test
+Function ModulesAreFoundAsRequireFindsThem() Throws LuauError
+    Local files: Map<String, String> = {
+        "mods/doors/init.luau": "--!strict\nlocal util = require('@self/util')\nutil.open('x')\nreturn 1\n",
+        "mods/doors/util.luau": r"return { open = function(n: number) return n end }"
+    }
+    Local asked: String[] = []
+    Local checker = LuauChecker(Function(path: String): String?
+        asked.Add(path)
+        Return files.Get(path)
+    End Function, LuauCheckMode.STRICT)
+    Local found = Try checker.Check("mods/doors")
+    Expect(Names(found) == ["TypeError"])
+    Expect(found[0].Module == "mods/doors/init.luau" && found[0].Line == 3)
+    // Each file's asked for once, until Forget.
+    Local count = asked.Count
+    Try checker.Check("mods/doors")
+    Expect(asked.Count == count)
+    checker.Forget()
+    Try checker.Check("mods/doors")
+    Expect(asked.Count == count * 2)
+End Function
+
+@Test
+Function TheReadersErrorIsTheChecks() Throws LuauError
+    Local checker = LuauChecker(Function(path: String): String? Throws Error
+        Throw IOError(IOErrorKind.OTHER, "the pak is gone")
+    End Function)
+    Local error = ExpectThrows<LuauError>(checker.Check("main"))
+    Expect(error != Null && error.Kind == LuauErrorKind.OTHER && error.Cause Is IOError)
+    Expect(error != Null && error.Message.Contains("the pak is gone"))
+End Function
+
+@Test
+Function NoSuchModuleIsAnError() Throws LuauError
+    Local error = ExpectThrows<LuauError>(Over({}).Check("nothing"))
+    Expect(error != Null && error.Kind == LuauErrorKind.RUNTIME &&
+           error.Message.Contains("no module"))
+    Local above = ExpectThrows<LuauError>(Over({}).Check("../up"))
+    Expect(above != Null && above.Kind == LuauErrorKind.RUNTIME)
+End Function
+
+@Test
+Function DefinitionsThatDontParseAreASyntaxError() Throws LuauError
+    Local error = ExpectThrows<LuauError>(Over({}).AddDefinitions("declare function (", "game"))
+    Expect(error != Null && error.Kind == LuauErrorKind.SYNTAX &&
+           error.Message.StartsWith("game:1:"))
+End Function
+
+/// A State with what a game gives its mods.
+Function Game(): LuauState Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Door>()
+    Try lua.SetFunction("spawn_item", Function(name: String, count: Int): Door => Door())
+    Try lua.Set("MAX_DOORS", 5)
+    Try lua.Set("front", Door())
+    Return lua
+End Function
+
+@Test
+Function AStatesDefinitionsCheckAScriptThatUsesIt() Throws LuauError
+    Local lua = Try Game()
+    Local source = "--!strict\n" +
+                   "local door = spawn_item('key', MAX_DOORS)\n" +
+                   "door.Open = not front.Open\n" +
+                   "local said: string = door:Knock(2) .. door.Name\n" +
+                   "door:Close()\n" +
+                   "task.wait(1)\n" +
+                   "task.delay(2, function() print(said) end)\n"
+    // The script runs as it's checked.
+    Try lua.Run(source.Replace("task.wait(1)\n",
+                               "").Replace("task.delay(2, function() print(said) end)\n",
+                                           "print(said)\n"))
+    Local checker = Over({"mod.luau": source})
+    Try checker.AddDefinitions(lua.Definitions(), "game")
+    Local found = Try checker.Check("mod")
+    Expect(found.Count == 0, found.Count > 0 ? found[0].ToString() : "")
+End Function
+
+@Test
+Function AStatesDefinitionsFindAScriptsMisuse() Throws LuauError
+    Local lua = Try Game()
+    Local source = "--!strict\n" +
+                   "local door = spawn_item(5, 1)\n" +
+                   "door.Name = 'x'\n" +
+                   "local n: number = door:Knock('twice')\n" +
+                   "door:Open()\n" +
+                   "print(n, MAX_DOORS .. 1, front:Lock())\n"
+    Local checker = Over({"mod.luau": source})
+    Try checker.AddDefinitions(lua.Definitions(), "game")
+    Local lines: Int[] = []
+    For each In Try checker.Check("mod")
+        If each.Name == "TypeError" Then lines.Add(each.Line)
+    End For
+    // The wrong argument, the read-only field, the wrong argument and result, a field called,
+    // and a Method there isn't.
+    For line In [2, 3, 4, 5, 6]
+        Expect(lines.Contains(line), "line {line}: {lines.Count} errors")
+    End For
+End Function
+
+@Test
+Function DefinitionsWriteEachTypeAsLuausOwn() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Door>()
+    Try lua.SetFunction("names", Function(counts: Map<String, Int>, at: Vec3): Int => 0)
+    Try lua.SetFunction("table", Function(t: LuauTable, f: LuauFunction): LuauNil => LuauNil())
+    Try lua.Set("raw", Try lua.Load("return 1"))
+    Try lua.Set("not a name", 1)
+    Local text = lua.Definitions()
+    Expect(text.Contains(r"declare function names(a1: { [string]: number }, a2: vector): number"),
+           text)
+    Expect(
+        text.Contains(r"declare function table(a1: { [any]: any }, a2: (...any) -> ...any): nil"),
+        text)
+    Expect(text.Contains("declare raw: (...any) -> ...any"), text)
+    Expect(!text.Contains("not a name"), text)
+    Expect(text.Contains("    Open: boolean\n") && text.Contains("    read Name: string\n"), text)
+    // Definitions parse, as the checker takes them.
+    Try Over({}).AddDefinitions(text)
+End Function
+
+@Test
+Function AMemberAddedByHandIsDeclaredLoosely() Throws LuauError
+    Local lua = LuauState()
+    Local builder = Try lua.Register<Door>()
+    Try builder.AddMethod("Paint", Try lua.Load("return 1"))
+    Try builder.AddOperator(LuauOperator.ADD, Try lua.Load("return 1"))
+    Local text = lua.Definitions()
+    Expect(text.Contains("    function Paint(self, ...: any): ...any\n"), text)
+    Expect(text.Contains("    function __add(self, ...: any): ...any\n"), text)
+    Try Over({}).AddDefinitions(text)
+End Function
+
+@Test
+Function TheStatesOwnGlobalsArentTheProgramsAndTaskIsDeclared() Throws LuauError
+    Local text = LuauState().Definitions()
+    Expect(!text.Contains("declare print") && text.Contains(r"declare task: {"), text)
+    Local options = LuauOptions()
+    options.Tasks = False
+    Expect(!(Try LuauState(options)).Definitions().Contains("declare task"))
+End Function

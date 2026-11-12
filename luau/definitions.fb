@@ -1,0 +1,239 @@
+//! What a State gives its scripts, written as a Luau definitions file, for the type checker and
+//! for a mod's editor.
+
+Import std.collections
+Import std.core
+Import std.text
+Import "./objects"
+Import "./state"
+
+/// A member of a registered type, or a global the program set, with its types as FutureBlitz names
+/// them, which [LuauState.Definitions] writes as Luau's.
+Package Class LuauDeclared
+    /// A Method, a getter, a setter, an operator, a global value, or a global function.
+    Package ReadOnly Field Kind: LuauDeclaredKind
+    /// Its Luau name: a member's, a global's, or an operator's metamethod's, like "__add".
+    Package ReadOnly Field Name: String
+    /// Its arguments' types, or Null for any arguments, as a LuauFunction takes.
+    Package ReadOnly Field Arguments: String[]?
+    /// What it gives: its type, Null for nothing, or "" for anything, as a LuauFunction gives.
+    Package ReadOnly Field Result: String?
+
+    Package New(kind: LuauDeclaredKind, name: String, arguments: String[]?, result: String?)
+        Kind = kind
+        Name = name
+        Arguments = arguments
+        Result = result
+    End New
+End Class
+
+/// What a [LuauDeclared] is.
+Package Enum LuauDeclaredKind
+    METHOD
+    GETTER
+    SETTER
+    OPERATOR
+    VALUE
+    FUNCTION
+End Enum
+
+/// Luau's reserved words, which no declared name can be.
+Const Reserved: String[] = ["and", "break", "do", "else", "elseif", "end", "false", "for",
+                            "function", "if", "in", "local", "nil", "not", "or", "repeat",
+                            "return", "then", "true", "until", "while"]
+
+/// The `task` library, Roblox's, as the State has it.
+Const TaskDefinitions = "\ndeclare task: {{\n" +
+                        "    wait: (seconds: number?) -> number,\n" +
+                        "    spawn: (f: ((...any) -> ...any) | thread, ...any) -> thread,\n" +
+                        "    defer: (f: ((...any) -> ...any) | thread, ...any) -> thread,\n" +
+                        "    delay: (seconds: number?, f: ((...any) -> ...any) | thread, ...any) -> thread,\n" +
+                        "    cancel: (thread: thread) -> (),\n" +
+                        "}}\n"
+
+/// Whether `name` is a Luau name a definitions file can declare.
+Function IsLuauName(name: String): Bool
+    If name.Length == 0 || Reserved.Contains(name) Then Return False
+    Local first = True
+    For byte In name.Bytes
+        Local letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+        Local digit = byte >= 48 && byte <= 57
+        If !letter && !(digit && !first) Then Return False
+        first = False
+    End For
+    Return True
+End Function
+
+/// The Luau type of what FutureBlitz names `name`, among the State's registered `objects`: a
+/// number, a string, a table of its elements, a registered type's own name, or `any` for what
+/// Luau has no type of, as a record, whose fields reflection doesn't give by its name.
+Package Function LuauTypeText(name: String, objects: Map<String, Bool>): String
+    If name.EndsWith("?")
+        Local inner = LuauTypeText(name.Slice(0, name.Length - 1), objects)
+        If inner == "any" Then Return inner
+        If inner.Contains("->") Then Return "({inner})?"
+        Return inner + "?"
+    End If
+    If name.EndsWith("[]")
+        Return "{{ {LuauTypeText(name.Slice(0, name.Length - 2), objects)} }}"
+    End If
+    If name.StartsWith("Map<") && name.EndsWith(">")
+        Local inside = name.Slice(4, name.Length - 1)
+        // The comma between the key and the value, outside any type's own < and >.
+        Local depth = 0
+        Local index = 0
+        For byte In inside.Bytes
+            If byte == 60 Then depth++
+            If byte == 62 Then depth--
+            If byte == 44 && depth == 0
+                Local key = LuauTypeText(inside.Slice(0, index).Trim(), objects)
+                Local value = LuauTypeText(inside.Slice(index + 1, inside.Length).Trim(), objects)
+                Return "{{ [{key}]: {value} }}"
+            End If
+            index++
+        End For
+        Return "any"
+    End If
+    Select name
+        Case "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Float32",
+             "Float64"
+            Return "number"
+        Case "Bool"
+            Return "boolean"
+        Case "String", "LuauBytes"
+            Return "string"
+        Case "LuauInteger"
+            Return "integer"
+        Case "LuauNil"
+            Return "nil"
+        Case "LuauTable"
+            Return "{{ [any]: any }}"
+        Case "LuauFunction"
+            Return "(...any) -> ...any"
+        Case "LuauThread"
+            Return "thread"
+        Case "LuauBuffer"
+            Return "buffer"
+        Case "Vec3"
+            Return "vector"
+    End Select
+    If objects.Contains(name) Then Return name
+    Return "any"
+End Function
+
+/// A function's parameters and result as a definitions file writes them, after `self` for a
+/// Method.
+Function Signature(declared: LuauDeclared, method: Bool, objects: Map<String, Bool>): String
+    Local parameters: String[] = []
+    If method Then parameters.Add("self")
+    Local arguments = declared.Arguments
+    If arguments == Null
+        parameters.Add("...: any")
+    Else
+        For index = 0 Until arguments.Count
+            parameters.Add("a{index + 1}: {LuauTypeText(arguments[index], objects)}")
+        End For
+    End If
+    Local text = "(" + parameters.Join(", ") + ")"
+    Local result = declared.Result
+    If result == Null Then Return text
+    If result == "" Then Return text + ": ...any"
+    Return text + ": " + LuauTypeText(result, objects)
+End Function
+
+/// `names`, sorted, as a definitions file has them, so it's the same each time.
+Function Sorted(names: String[]): String[]
+    Local sorted = names.Clone()
+    sorted.Sort()
+    Return sorted
+End Function
+
+/// A State's definitions file.
+Extend LuauState
+    /// What it gives its scripts, as a Luau definitions file, Luau's `declare` syntax, which
+    /// `LuauChecker.AddDefinitions` takes, so a mod is checked against the game's real API, and a
+    /// mod's editor knows it: each registered type, its fields and Methods by their types, and
+    /// each global the program set, by `Set`, `SetFunction`, or `SetAsync`. A type Luau has no
+    /// type for, like a record, is `any`, as is what a LuauFunction takes and gives; a name Luau's
+    /// definitions can't declare, like one with a space, is left out.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # Import std.text
+    /// # Import luau
+    /// Local lua = LuauState()
+    /// Try lua.SetFunction("double", Function(n: Int) => n * 2)
+    /// Expect(lua.Definitions().Contains("declare function double(a1: number): number"))
+    /// ```
+    Public Method Definitions(): String
+        Local objects: Map<String, Bool> = {}
+        For entry In DeclaredTypes
+            If IsLuauName(entry.0) Then objects[entry.0] = True
+        End For
+        Local text = "-- What the program gives its scripts, for Luau's type checker: made by " +
+                     "luau's LuauState.Definitions.\n"
+        Local typeNames: String[] = []
+        For entry In objects
+            typeNames.Add(entry.0)
+        End For
+        For typeName In Sorted(typeNames)
+            text += "\ndeclare extern type {typeName} with\n"
+            Local members = DeclaredTypes.Get(typeName) ?? {}
+            Local getters: Map<String, LuauDeclared> = {}
+            Local setters: Map<String, LuauDeclared> = {}
+            Local fields: String[] = []
+            Local methods: String[] = []
+            For entry In members
+                Local declared = entry.1
+                If !IsLuauName(declared.Name) Then Continue
+                Select declared.Kind
+                    Case LuauDeclaredKind.GETTER
+                        getters[declared.Name] = declared
+                        If !setters.Contains(declared.Name) Then fields.Add(declared.Name)
+                    Case LuauDeclaredKind.SETTER
+                        setters[declared.Name] = declared
+                        If !getters.Contains(declared.Name) Then fields.Add(declared.Name)
+                    Default
+                        methods.Add(entry.0)
+                End Select
+            End For
+            For field In Sorted(fields)
+                Local getter = getters.Get(field)
+                Local setter = setters.Get(field)
+                // A field's type is what its getter gives, or what its setter takes.
+                Local type = "any"
+                If getter != Null && getter.Result != Null && getter.Result != ""
+                    type = LuauTypeText(getter.Result ?? "", objects)
+                ElseIf setter != Null
+                    Local taken = setter.Arguments
+                    If taken != Null && taken.Count == 1 Then type = LuauTypeText(taken[0], objects)
+                End If
+                Local access = ""
+                If setter == Null Then access = "read "
+                If getter == Null Then access = "write "
+                text += "    {access}{field}: {type}\n"
+            End For
+            For key In Sorted(methods)
+                Local declared = members[key]
+                text += "    function {declared.Name}{Signature(declared, True, objects)}\n"
+            End For
+            text += "end\n"
+        End For
+        If HasTasks Then text += TaskDefinitions
+        Local globals: String[] = []
+        For entry In DeclaredGlobals
+            If IsLuauName(entry.0) Then globals.Add(entry.0)
+        End For
+        If globals.Count > 0 Then text += "\n"
+        For name In Sorted(globals)
+            Local declared = DeclaredGlobals[name]
+            If declared.Kind == LuauDeclaredKind.FUNCTION
+                text += "declare function {name}{Signature(declared, False, objects)}\n"
+            Else
+                text += "declare {name}: {LuauTypeText(declared.Result ?? "", objects)}\n"
+            End If
+        End For
+        Return text
+    End Method
+End Extend

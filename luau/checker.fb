@@ -1,0 +1,203 @@
+//! Luau's type checker and lint, as `luau-analyze` runs them, over a mod's files: for a game's mod
+//! checker, its editor support, or a command.
+
+Import std.core
+Import std.time
+Import "./c/fbl_check"
+Import "./c/fbl_core"
+Import "./errors"
+Import "./library"
+Import "./shim"
+
+/// What a module without a `--!` line is checked as.
+Public Enum LuauCheckMode
+    /// Every value's type is known or said, and every mismatch is an error.
+    STRICT
+    /// What's said is checked, and what isn't is `any`: luau-analyze's default.
+    NONSTRICT
+    /// Nothing is type-checked; the lint still runs.
+    NOCHECK
+End Enum
+
+/// What a diagnostic is.
+Public Enum LuauSeverity
+    /// A type error, a syntax error, a lint's error, or the checker's own.
+    ERROR
+    /// A lint's warning.
+    WARNING
+End Enum
+
+/// One thing the checker found: where, how bad, and what, as Luau says it.
+Public Class LuauDiagnostic Implements Printable
+    /// Its module's file, by its path from the files' root, like "mods/doors/init.luau".
+    Public ReadOnly Field Module: String
+    /// Its line, from 1.
+    Public ReadOnly Field Line: Int
+    /// Its column, from 1.
+    Public ReadOnly Field Column: Int
+    /// The line it ends on, from 1.
+    Public ReadOnly Field EndLine: Int
+    /// The column just past its end, from 1.
+    Public ReadOnly Field EndColumn: Int
+    /// Whether it's an error or a warning.
+    Public ReadOnly Field Severity: LuauSeverity
+    /// Luau's code for it: a type error's from 1000, a lint's its number, or 0 for the checker's
+    /// own, as a module that took past the time limit.
+    Public ReadOnly Field Code: Int
+    /// Luau's name for its kind: "TypeError", "SyntaxError", a lint's, like "LocalUnused", or the
+    /// checker's own, "TimeLimit", "ConfigError", or "InternalCompilerError".
+    Public ReadOnly Field Name: String
+    /// What it says, as Luau writes it.
+    Public ReadOnly Field Message: String
+
+    New(module: String, numbers: Int[], name: String, message: String)
+        Module = module
+        Line = numbers[0]
+        Column = numbers[1]
+        EndLine = numbers[2]
+        EndColumn = numbers[3]
+        Severity = numbers[4] == FBL_CHECK_WARNING ? LuauSeverity.WARNING : LuauSeverity.ERROR
+        Code = numbers[5]
+        Name = name
+        Message = message
+    End New
+
+    /// It as luau-analyze writes one: "module:line:column: name: message".
+    Public Method ToString(): String => "{Module}:{Line}:{Column}: {Name}: {Message}"
+End Class
+
+/// Luau's type checker, its Frontend with the new solver, and its lint, as `luau-analyze` runs
+/// them, over files the program reads: a module and every one it requires, found by require's
+/// rules, from the files' root. It asks its reader only for files under the root, each once,
+/// until [Forget]. Running mods doesn't need it, but a game that checks mods as it loads them
+/// can, with `LuauState.Definitions` for the API it gives them.
+///
+/// # Examples
+///
+/// ```
+/// # Import std.collections
+/// # Import luau
+/// Local files: Map<String, String> = {
+///     "mods/doors/init.luau": "--!strict\nlocal open: number = 'yes'\nprint(open)\n"
+/// }
+/// Local checker = LuauChecker(Function(path: String): String? => files.Get(path))
+/// Local found = Try checker.Check("mods/doors")
+/// Expect(found.Count == 1 && found[0].Name == "TypeError" && found[0].Line == 2)
+/// ```
+Public Class LuauChecker
+    // The shim's checker.
+    Field handle: UInt64
+    Field reader: Func(String): String? Throws Error
+
+    /// A checker whose `reader` gives a file's text by its path from the files' root, with "/"
+    /// between its parts, like "mods/doors/init.luau" or "mods/.luaurc", or Null when there's no
+    /// such file; an error it throws is the check's. A module without a `--!` line is checked as
+    /// `mode`, and each for at most `timeLimit`, 10 seconds for Null, past which it gives a
+    /// diagnostic of "TimeLimit" rather than run on; 0 checks for as long as it takes.
+    ///
+    /// # Panics
+    ///
+    /// For a time limit below 0.
+    @PanicsAtCaller
+    Public New(reader: Func(String): String? Throws Error,
+               mode: LuauCheckMode = LuauCheckMode.NONSTRICT, timeLimit: Duration? = Null)
+        Local limit = timeLimit ?? 10.Seconds
+        If limit < 0.Seconds Then Panic("a checker's time limit of {limit} is below 0")
+        Self.reader = reader
+        Local modes = [FBL_CHECK_STRICT, FBL_CHECK_NONSTRICT, FBL_CHECK_NOCHECK]
+        handle = fbl_check_new(modes[mode As Int], limit.TotalSeconds)
+        If handle == 0 Then Panic(LastError())
+    End New
+
+    Method Destroy()
+        fbl_check_free(handle)
+    End Method
+
+    /// Adds `definitions`, Luau's `declare` syntax, as `LuauState.Definitions` writes them, to
+    /// what every module it checks sees, named `name` in its errors.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for definitions that don't parse or check, saying where.
+    Public Method AddDefinitions(definitions: String, name: String = "definitions") Throws LuauError
+        Local bytes = definitions.Bytes
+        Local status: Int32 = FBL_OK
+        Unsafe
+            status = fbl_check_definitions(handle, PointerOf(ByRef bytes), bytes.Count, name)
+        End Unsafe
+        If status == FBL_SYNTAX Then Throw LuauError(LuauErrorKind.SYNTAX, LastError())
+        If status == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, LastError())
+        If status != FBL_OK Then Panic(LastError())
+    End Method
+
+    /// Checks the module at `module`, a module path from the root like "mods/doors", which is
+    /// "mods/doors.luau", "mods/doors.lua", "mods/doors/init.luau", or "mods/doors/init.lua", and
+    /// every module it requires: what each gives, its type errors, its syntax errors, and its
+    /// lint's errors and warnings, as luau-analyze gives them, module by module.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of RUNTIME for no such module, two of its files, or a path that goes above
+    /// the root; the reader's error, as a LuauError of OTHER with it as its Cause.
+    Public Method Check(module: String): LuauDiagnostic[] Throws LuauError
+        While True
+            Local wanted = fbl_check_run(handle, module)
+            If wanted < 0 Then Throw LuauError(LuauErrorKind.RUNTIME, LastError())
+            If wanted == 0 Then Return Diagnostics()
+            Local paths: String[] = []
+            For index = 0 Until wanted
+                Unsafe
+                    paths.Add(fbl_check_wanted(handle, index).ToString())
+                End Unsafe
+            End For
+            For path In paths
+                Try Give(path)
+            End For
+        End While
+    End Method
+
+    /// Forgets every file it's read and what it checked, keeping its definitions, so the next
+    /// check reads each file again, as when they've changed.
+    Public Method Forget()
+        If fbl_check_forget(handle) != FBL_OK Then Panic(LastError())
+    End Method
+
+    /// Reads the file at `path` and gives it to the shim, or says there's none.
+    Method Give(path: String) Throws LuauError
+        Local text: String? = Null
+        Try
+            text = Try reader(path)
+        Catch error
+            Throw LuauError(LuauErrorKind.OTHER, "the checker's reader failed on '{path}': " +
+                            error.Message, "", error)
+        End Try
+        Local bytes: UInt8[] = text?.Bytes ?? []
+        Local status: Int32 = FBL_OK
+        Unsafe
+            status = fbl_check_give(handle, path, PointerOf(ByRef bytes), bytes.Count,
+                                    text == Null ? 0 : 1)
+        End Unsafe
+        If status == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, LastError())
+        If status != FBL_OK Then Throw LuauError(LuauErrorKind.RUNTIME, LastError())
+    End Method
+
+    /// The last check's diagnostics.
+    Method Diagnostics(): LuauDiagnostic[]
+        Local found: LuauDiagnostic[] = []
+        Local count = fbl_check_count(handle)
+        For index = 0 Until count
+            Local numbers: Int[] = []
+            For which = 0 Until 6
+                Local number = fbl_check_number(handle, index, which)
+                If number < 0 Then Panic(LastError())
+                numbers.Add(number)
+            End For
+            Unsafe
+                found.Add(LuauDiagnostic(fbl_check_text(handle, index, 0).ToString(), numbers,
+                                         fbl_check_text(handle, index, 1).ToString(),
+                                         fbl_check_text(handle, index, 2).ToString()))
+            End Unsafe
+        End For
+        Return found
+    End Method
+End Class
