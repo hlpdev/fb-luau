@@ -74,9 +74,10 @@ typedef struct fbl_state_options_t {
 // or FBL_MISUSE for options out of range.
 FBL_API uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status);
 
-// Closes a State: its VM and everything in it go, frames the program left open too, and its handle
-// is refused from then on. False, changing nothing, while it runs a call, as inside a function of
-// the program's that Luau called, or for a handle that isn't a State's.
+// Closes a State: its VM and everything in it go, frames the program left open too, and a turn it
+// began and didn't end, and its handle is refused from then on. False, changing nothing, while it
+// runs a call, as inside a function of the program's that Luau called, or for a handle that isn't
+// a State's.
 FBL_API bool fbl_state_close(uint64_t state);
 
 // Runs a step of the collector, as collectgarbage("step") does, of about `kilobytes`, or Luau's

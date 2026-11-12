@@ -857,9 +857,10 @@ bool fbl_state_close(uint64_t state) try {
     if (found == nullptr) {
         return false;
     }
-    // A frame the program left open goes with it; a call running, or a function of the program's
-    // that Luau called, doesn't.
-    if (found->depth > 0 || found->current != found->main) {
+    // A frame the program left open goes with it, and a driver's turn it left open, in which
+    // nothing runs; a call running, or a function of the program's that Luau called, doesn't.
+    const int running = found->depth - (found->turn_open ? 1 : 0);
+    if (running > 0 || found->current != found->main) {
         fbl::fail("a State can't be closed while it runs a call");
         return false;
     }

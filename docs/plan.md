@@ -805,10 +805,19 @@ docs/                    plan.md, decisions.md, guide.md
     container signed by its key before Luau sees it, and the compiler's own output for fuzzed
     source, which must load and run. Raw bytecode isn't fuzzed into Luau, since Luau trusts its
     bytecode by design and the package never gives it untrusted bytes;
-  - the C API: a sequence of calls with arbitrary arguments, handles, and indexes, which must
-    each give a status, never crash, since its checks are what stand between misuse and Luau's
-    unchecked API;
-  - the checker: arbitrary source to `LuauChecker`, within its time limit.
+  - the C API: a sequence of calls with arbitrary arguments, handles, and indexes, of every
+    export, with a callback that gives every status, those it may and those it may not, which
+    must each give a status, never crash, since its checks are what stand between misuse and
+    Luau's unchecked API;
+  - a mod, as a game runs one: arbitrary source in a script environment of a frozen State, with
+    the program's functions, which call back into the State, raise, and yield, a registered type
+    and its objects, and require over a module the input gives, run on a thread resumed until it
+    ends;
+  - the checker: arbitrary source, a module it requires, and definitions, enforced or not, within
+    its time limit.
+
+  An exception that reaches an export's catch is a finding, though the export gives a status
+  (fbl_core_escaped, which each fuzzer watches).
 
   Their corpora start from the conformance scripts, and each crash becomes a test. Where
   libFuzzer isn't (the Debug and Release builds, and GCC), each fuzzer is linked with

@@ -2,7 +2,7 @@
 # program, which stability.yml runs for 10 minutes from its corpus; without it, each is linked with
 # replay.cpp, and ctest runs it over its corpus and a few thousand random inputs, so what a fuzzer
 # found stays found on every target.
-set(fbl_fuzzers load bytecode api check)
+set(fbl_fuzzers load bytecode api check mod)
 
 foreach(fuzzer IN LISTS fbl_fuzzers)
   if(FBL_FUZZ)

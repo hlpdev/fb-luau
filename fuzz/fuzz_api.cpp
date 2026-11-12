@@ -73,6 +73,20 @@ constexpr std::array<std::string_view, 8> snippets = {
 // The call the step makes, which a finding names.
 int current_call = 0;
 
+// The program's functions: each gives a status its number picks, of those a callback may give and
+// of those it may not, so the shim's handling of each is fuzzed; one that yields does so wherever
+// it's called, which is refused where nothing can wait.
+int32_t callback(uint64_t state, int32_t frame, int64_t function) {
+    if (fbl_frame_count(state, frame) < 0) {
+        finding("a callback's frame has no count");
+    }
+    return static_cast<int32_t>(function % 13) - 1;
+}
+
+// A field of a type's metatable, often one that's refused.
+constexpr std::array<const char*, 6> fields = { "__add",       "__tostring", "__index",
+                                                "__metatable", "__eq",       "" };
+
 void check_status(int32_t status) {
     if (!is_status(status)) {
         std::fputs(std::format("call {} gave {}\n", current_call, status).c_str(), stderr);
@@ -96,7 +110,7 @@ void step(reader_t& in, uint64_t state, uint64_t other) {
     const int32_t frame = in.small();
     const uint8_t op = in.byte();
     std::array<uint8_t, 16> bytes{};
-    current_call = op % 40;
+    current_call = op % 72;
     switch (current_call) {
     case 0:
         fbl_frame_open(handle);
@@ -233,6 +247,110 @@ void step(reader_t& in, uint64_t state, uint64_t other) {
         check_status(fbl_udata_new(handle, frame, in.wide(), in.small()));
         break;
     }
+    case 39:
+        fbl_buffer_length(handle, frame, in.small());
+        break;
+    case 40:
+        check_status(fbl_callback_function(handle, frame, in.wide(), "f"));
+        break;
+    case 41:
+        check_status(fbl_callback_namecall(handle, frame, in.wide(), "m"));
+        break;
+    case 42: {
+        std::array<int64_t, 8> released{};
+        fbl_callback_released(handle, released.data(), in.small() % 9);
+        fbl_udata_released(handle, released.data(), in.small() % 9);
+        break;
+    }
+    case 43:
+        check_status(fbl_callback_where(handle, frame));
+        break;
+    case 44: {
+        bool flag = false;
+        double number = 0;
+        int64_t integer = 0;
+        fbl_vector_t vector{};
+        int64_t length = 0;
+        const int32_t slot = in.small();
+        fbl_frame_type(handle, frame, slot);
+        fbl_frame_boolean(handle, frame, slot, &flag);
+        fbl_frame_number(handle, frame, slot, &number);
+        fbl_frame_integer(handle, frame, slot, &integer);
+        fbl_frame_vector(handle, frame, slot, &vector);
+        fbl_frame_string(handle, frame, slot, &length);
+        break;
+    }
+    case 45:
+        check_status(fbl_frame_push_boolean(handle, frame, in.byte() % 2 == 0));
+        break;
+    case 46: {
+        const fbl_vector_t vector{
+            .x = static_cast<float>(in.number()),
+            .y = static_cast<float>(in.number()),
+            .z = static_cast<float>(in.number()),
+        };
+        check_status(fbl_frame_push_vector(handle, frame, &vector));
+        break;
+    }
+    case 47: {
+        const std::string_view source = snippets.at(in.byte() % snippets.size());
+        check_status(fbl_load_source_in(handle, frame,
+                                        reinterpret_cast<const uint8_t*>(source.data()),
+                                        static_cast<int64_t>(source.size()), "=api", in.small()));
+        break;
+    }
+    case 48:
+        check_status(fbl_require_open(handle, frame, in.small()));
+        break;
+    case 49:
+        check_status(fbl_require_forget(handle));
+        break;
+    case 50:
+        fbl_sandbox_is_frozen(handle);
+        fbl_table_is_frozen(handle, frame, in.small());
+        break;
+    case 51: {
+        int64_t length = 0;
+        fbl_state_error_kind(handle);
+        fbl_state_error_message(handle, &length);
+        fbl_state_error_traceback(handle, &length);
+        check_status(fbl_state_error_value(handle, frame));
+        break;
+    }
+    case 52:
+        fbl_state_memory(handle);
+        fbl_state_native_functions(handle);
+        fbl_state_native_memory(handle);
+        fbl_state_native_supported();
+        break;
+    case 53: {
+        const int32_t turned = fbl_state_turn(handle, (in.small() % 5) - 1);
+        if (turned < -1 || turned > FBL_MISUSE) {
+            finding("a turn gave what it doesn't say it gives");
+        }
+        break;
+    }
+    case 54:
+        fbl_thread_can_yield(handle, frame);
+        check_status(fbl_thread_current(handle, frame));
+        fbl_thread_waits_in(handle, frame, in.small());
+        break;
+    case 55:
+        check_status(fbl_udata_push(handle, frame, in.wide()));
+        break;
+    case 56:
+        check_status(
+            fbl_udata_type(handle, frame, in.small(), "T", in.small(), in.small(), in.small()));
+        break;
+    case 57:
+        check_status(fbl_udata_type_set(handle, frame, in.small(),
+                                        fields.at(in.byte() % fields.size()), in.small()));
+        break;
+    case 58:
+        fbl_core_version();
+        fbl_core_luau_version();
+        fbl_core_resident();
+        break;
     default: {
         check_status(fbl_state_collect(handle));
         // A step gives 1 for a cycle finished, 0 for not, and -1 for misuse.
@@ -249,6 +367,10 @@ void step(reader_t& in, uint64_t state, uint64_t other) {
 
 // NOLINTNEXTLINE(readability-identifier-naming): libFuzzer names it.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    static const bool set = fbl_callback_set(callback);
+    if (!set) {
+        finding("the callback wasn't set");
+    }
     const no_escape_t watched;
     {
         const fuzz_state_t lua;

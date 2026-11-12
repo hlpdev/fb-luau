@@ -577,3 +577,13 @@ Written while the PC was kept free for the user: none of it built or run until t
   later unlocks what it never held). It showed as an assertion in `fb test luau` when the checker's
   tests first ran together. The lock is now made by a function's static, which locks and unlocks
   it once, alone; it's the only shared_mutex in the shim and Luau, and std::mutex has no such race.
+- **The fuzzers reach every export (118):** the API fuzzer calls each of the 104, with a callback
+  whose function's number picks the status it gives, valid or not; a new fuzzer, `mod`, runs the
+  input as a mod does, in a frozen State's script environment with the program's functions that
+  call back in, raise, and yield, a registered type, and require over a module the input gives;
+  the checker's fuzzer gives definitions, and is enforced and forgets for some inputs. stability.yml
+  runs `mod` as it does the others.
+- **A State closes with a driver's turn left open:** fbl_state_close refused a State whose
+  program began a turn and didn't end it, as a turn counts as a call, so the State never closed;
+  the API fuzzer found it. Nothing runs in a turn the program holds open, so close now ends it;
+  a call running, or a function of the program's that Luau called, still refuses the close.

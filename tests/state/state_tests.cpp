@@ -12,7 +12,9 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -98,6 +100,27 @@ TEST_CASE("a State with a frame the program left open closes, the frame with it"
     CHECK(fbl_state_close(handle));
     CHECK_FALSE(fbl_frame_close(handle, frame));
     CHECK(fbl_frame_count(handle, frame) == -1);
+}
+
+TEST_CASE("a driver's turn begins once, ends once, and a State closes with one left open") {
+    {
+        const test_state_t lua;
+        CHECK(fbl_state_turn(lua.handle, 3) == 0);
+        REQUIRE(fbl_state_turn(lua.handle, 1) == FBL_OK);
+        CHECK(fbl_state_turn(lua.handle, 3) == 1);
+        CHECK(fbl_state_turn(lua.handle, 1) == FBL_MISUSE);
+        CHECK(fbl_state_turn(lua.handle, 0) == FBL_OK);
+        CHECK(fbl_state_turn(lua.handle, 0) == FBL_MISUSE);
+        CHECK(fbl_state_turn(lua.handle, 3) == 0);
+        CHECK(fbl_state_turn(lua.handle, 4) == FBL_MISUSE);
+        CHECK(fbl_state_turn(0, 2) == -1);
+    }
+    // Found by the API's fuzzer: a turn left open made the State one that never closed.
+    test_state_t lua;
+    REQUIRE(fbl_state_turn(lua.handle, 1) == FBL_OK);
+    CHECK(fbl_state_close(lua.handle));
+    lua.handle = 0;
+    CHECK(fbl_state_count(1) == 0);
 }
 
 TEST_CASE("a slot whose generations are spent is retired, so no handle names two States") {
