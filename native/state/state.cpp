@@ -330,6 +330,17 @@ void interrupt(lua_State* stack, int gc) {
     if (gc >= 0) {
         return;
     }
+    // Every Luau call is a safe point, so a script nesting C calls is stopped by its native stack
+    // before the thread's runs out, which would end the process.
+    const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
+    if (state != nullptr && state->stack_base != 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
+        const auto here = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
+        if (here < state->stack_base && state->stack_base - here > fbl::most_native_stack) {
+            luaL_error(stack, "stack overflow: the script's calls nest deeper than the program's "
+                              "native stack holds");
+        }
+    }
     fbl::check_deadline(stack);
 }
 
@@ -573,6 +584,8 @@ namespace fbl {
 
 entered_t::entered_t(state_t& state) noexcept : m_state(state), m_outermost(state.depth == 0) {
     if (m_outermost) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stack's place, as a number.
+        m_state.stack_base = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
         m_state.timed_out = false;
         if (m_state.time_budget.count() > 0) {
             // now + budget, or the clock's last time point when that's past it.
@@ -591,6 +604,7 @@ entered_t::~entered_t() {
     m_state.depth--;
     if (m_outermost) {
         m_state.deadline = {};
+        m_state.stack_base = 0;
     }
 }
 

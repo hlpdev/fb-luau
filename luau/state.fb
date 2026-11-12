@@ -813,10 +813,6 @@ Public Class LuauState
     /// one, or before `lua.Start()`.
     Package Method Waited(waiting: LuauWaiting) Throws LuauError
         Local id = waiting.Thread.Id
-        // A thread that waits itself, while a wait of its own is kept, went around that one, as
-        // a script's coroutine.resume does: the old one's dropped.
-        Local old = Waits.Get(id)
-        If old != Null && old.Within != 0 && waiting.Within != 0 Then Waits.Remove(id)
         Try CanWait(waiting.Thread)
         Local driver = DriverOf(CurrentDriver) ?? DriverOf(StateDriver)
         If driver == Null
@@ -845,6 +841,10 @@ Public Class LuauState
     ///
     /// A LuauError of RUNTIME for a thread that waits already, or past MostWaiting.
     Package Method CanWait(thread: LuauThread) Throws LuauError
+        // A wait of the thread's own that it isn't in any more, as a script's coroutine.resume
+        // went around it, is dropped: the thread is waiting anew.
+        Local old = Waits.Get(thread.Id)
+        If old != Null && old.Within != 0 && !old.IsHeld() Then Waits.Remove(thread.Id)
         If Waits.Contains(thread.Id)
             Throw LuauError(LuauErrorKind.RUNTIME,
                             "the thread waits already, for one thing at a time")

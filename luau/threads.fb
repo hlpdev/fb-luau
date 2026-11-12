@@ -370,6 +370,10 @@ Package Class LuauDriver
             If waiting == Null Then Continue
             If heir == Null
                 held.Waits.Remove(id)
+                held.Failed(LuauError(LuauErrorKind.YIELD,
+                                      "a thread waited with nothing to resume it once the " +
+                                      "scheduler its driver ran on went; lua.Start() runs the " +
+                                      "State's waits"))
             Else
                 HandTo(waiting, heir)
             End If
@@ -456,6 +460,8 @@ Package Class LuauDriver
         End If
         If fbl_state_turn(held.Handle, 3) == 1 Then Return True
         Now = Scheduler.Current.Time().TotalSeconds
+        Local clock = Stopwatch.StartNew()
+        turnClock = clock
         Local due: LuauWaiting[] = []
         For entry In held.Waits
             Local waiting = entry.1
@@ -468,8 +474,6 @@ Package Class LuauDriver
         End For
         Local failed: LuauError? = Null
         If due.Count > 0
-            Local clock = Stopwatch.StartNew()
-            turnClock = clock
             Local budget = held.TickBudget
             held.Turning = True
             InTurn = True
@@ -478,7 +482,10 @@ Package Class LuauDriver
                 // The tick's budget decides only whether another thread starts; each resume has
                 // the State's budget of its own, so only what spins is ended.
                 If budget > 0.Seconds && clock.Elapsed >= budget Then Break
-                If !held.Waits.Contains(waiting.Thread.Id) Then Continue
+                // The entry it collected, which another resumed in this turn may have replaced
+                // with a wait of its own since.
+                Local now = held.Waits.Get(waiting.Thread.Id)
+                If now == Null || !RefEquals(now, waiting) Then Continue
                 held.Waits.Remove(waiting.Thread.Id)
                 // A wait a script went around, resuming or closing the thread itself, is dropped.
                 If !waiting.IsHeld() Then Continue
@@ -492,9 +499,9 @@ Package Class LuauDriver
                 End Try
             End For
             InTurn = False
-            turnClock = Null
             held.Turning = False
         End If
+        turnClock = Null
         If held.IsOpen Then held.Report()
         If failed != Null Then Throw failed
         If !held.IsOpen
