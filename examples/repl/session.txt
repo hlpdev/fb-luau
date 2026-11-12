@@ -1,0 +1,13 @@
+1 + 2
+x = 10
+function twice(n)
+	return n * 2
+end
+twice(x)
+print("hello from luau")
+error("oops")
+"a", true, nil
+t = {
+	1, 2, 3,
+}
+#t

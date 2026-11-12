@@ -285,3 +285,14 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   record is `any`, as nothing reaches its fields from its name; arguments are `a1`, `a2`, as
   reflection gives no parameter names. What the State sets for itself, `print` and `task`, isn't
   the program's: `task` is declared by hand.
+
+## L12 (2026-11-11)
+
+- **The guide's programs are checked by running them:** tools/guide_programs.py runs every vb
+  block of docs/guide.md as a program of its own on the package, as ctest's docs.guide_programs
+  does, and each checks what it shows with Expect.
+- **The REPL reads its input from stdin, as a REPL does;** ctest gives it a session through a
+  CMake script (tests/run_with_input.cmake), as add_test can't give a program input.
+- **fb 1.3.0's EmbedFolder leaves out dotfiles,** so examples/modded_game embeds its mods'
+  .luaurc as luaurc.json, saying why; a game that reads its mods folder needs none of it. For the
+  fb lane: fbengine-notes/luau/embed_dotfiles.fb.

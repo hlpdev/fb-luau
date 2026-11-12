@@ -1,0 +1,48 @@
+// A REPL, as Luau's own is: each line is run in one State, whose globals stay; a line that's an
+// expression shows its values; one that ends before its statement does, like a function's first
+// line, waits for the rest. The end of the input ends it.
+
+Import std.collections
+Import std.core
+Import std.text
+Import luau
+
+// `values`, as Luau's print shows them, with tabs between.
+Function Shown(values: LuauTable): String Throws LuauError
+    Local count = Try values.Get<Int, String>("n")
+    Local shown: String[] = []
+    For index = 1 To count
+        shown.Add((Try values.Get<LuauValue, Int>(index)).ToString())
+    End For
+    Return shown.Join("\t")
+End Function
+
+// Runs `source`, one or more lines, and shows what it gives: False when it isn't whole yet.
+Function Ran(lua: LuauState, source: String): Bool
+    Try
+        // An expression first, its values packed, so `1 + 2` shows 3.
+        Local values = Try? lua.Load("return table.pack(" + source + "\n)", "=stdin")
+        If values != Null
+            Local shown = Try Shown(Try values.Call<LuauTable>())
+            If shown != "" Then Print(shown)
+            Return True
+        End If
+        Try lua.Run(source, "=stdin")
+    Catch error As LuauError
+        // A statement that ends at the end of what's given waits for its next line.
+        If error.Kind == LuauErrorKind.SYNTAX && error.Message.Contains("<eof>") Then Return False
+        Print(error.Message)
+    End Try
+    Return True
+End Function
+
+Local lua = LuauState()
+Print("Luau {LuauVersion()}, in luau {LuauLibraryVersion()}")
+Local pending = ""
+While True
+    Local line = Input(pending == "" ? "> " : ">> ")
+    If line == Null Then Break
+    Local source = pending == "" ? line : pending + "\n" + line
+    pending = Ran(lua, source) ? "" : source
+End While
+Print("")

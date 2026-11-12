@@ -147,6 +147,29 @@ if(FBL_FB_TESTS)
   set_tests_properties(examples.bytecode PROPERTIES
                        PASS_REGULAR_EXPRESSION "hello, player.*door opened.*a changed container is refused")
 
+  # The guide's programs, each run as its own.
+  if(FBL_PYTHON)
+    add_test(NAME docs.guide_programs
+             COMMAND "${FBL_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/guide_programs.py" "${FBL_FB}"
+                     "${PROJECT_BINARY_DIR}/guide")
+  endif()
+  add_test(NAME examples.repl
+           COMMAND "${CMAKE_COMMAND}" -DFB=${FBL_FB} -DPROGRAM=${PROJECT_SOURCE_DIR}/examples/repl
+                   -DINPUT=${PROJECT_SOURCE_DIR}/examples/repl/session.txt
+                   -P "${CMAKE_CURRENT_SOURCE_DIR}/run_with_input.cmake")
+  set_tests_properties(examples.repl PROPERTIES
+                       PASS_REGULAR_EXPRESSION "> 3
+.*> 20
+> hello from luau
+> stdin:1: oops
+> a	true	nil
+.*> 3
+")
+  add_test(NAME examples.modded_game
+           COMMAND "${FBL_FB}" --color never run "${PROJECT_SOURCE_DIR}/examples/modded_game")
+  set_tests_properties(examples.modded_game PROPERTIES
+                       PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*its waits ended: True")
+
   # A marked Method of a shape that doesn't compile when it's registered: @LuauExpose on one that
   # gives nothing, which the exposing loop's Where line on its result names.
   add_test(NAME luau.compile.expose-nothing

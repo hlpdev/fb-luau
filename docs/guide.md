@@ -1,0 +1,459 @@
+# The luau guide
+
+`luau` runs [Luau](https://luau.org) scripts in a FutureBlitz program: scripts a program didn't
+write, like a game's mods, sandboxed, with a typed API where Luau's stack is never seen. This
+guide goes through it a part at a time, each with a program that runs; `tools/guide_programs.py`
+runs every one of them, as ctest does.
+
+Each program is whole: put it in a project whose `project.toml` has
+
+```toml
+[dependencies]
+luau = "0.1"
+```
+
+and `fb run` it. They check what they show with `Expect`, so a program that runs is one that
+did what the guide says.
+
+## A State, and running code
+
+A `LuauState` is a Luau VM of its own: its globals, its memory, its scripts. `Run` runs source,
+`Evaluate<T>` gives what it returns as a T, and `Get` and `Set` read and write its globals.
+
+```vb
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Try lua.Run("greeting = 'hello, ' .. 'world'")
+Expect(Try lua.Get<String>("greeting") == "hello, world")
+Expect(Try lua.Evaluate<Int>("return 6 * 7") == 42)
+
+Try lua.Set("speed", 4.5)
+Expect(Try lua.Evaluate<Float64>("return speed * 2") == 9.0)
+
+// Load compiles once; the function it gives runs as often as it's called.
+Local count = Try lua.Load("calls = (calls or 0) + 1")
+Try count.Invoke()
+Try count.Invoke()
+Expect(Try lua.Get<Int>("calls") == 2)
+lua.Close()
+```
+
+A State goes when the program drops it, or at `Close()`, which is final: what it gave the
+program, a table or a function, can't be used after.
+
+## Values
+
+A value crosses by its type, the one the program names: `Bool` is a boolean, every number type
+is a number, `String` is a string, `Vec3` is a vector, and a `Map` is a table, copied. A value of
+another type is a `LuauError` of `CONVERSION`, saying what it was. `LuauValue` takes any value,
+for when its type is known only as the program runs.
+
+```vb
+Import std.collections
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Local scores: Map<String, Int> = { "ana": 3, "bo": 5 }
+Try lua.Set("scores", scores)
+Expect(Try lua.Evaluate<Int>("return scores.ana + scores.bo") == 8)
+
+Local error = ExpectThrows<LuauError>(lua.Evaluate<Int>("return 'seven'"))
+Expect(error != Null && error.Kind == LuauErrorKind.CONVERSION)
+
+Local any = Try lua.Evaluate<LuauValue>("return 'hi'")
+Expect(any.Kind == LuauValueKind.STRING && any.AsString() == "hi")
+```
+
+A Struct or Class that lists `LuauRecord` crosses as a table of its Fields, by name, both ways:
+
+```vb
+Import std.test
+Import luau
+
+Struct Spawn Implements LuauRecord
+    Field Name: String
+    Field Count: Int = 1
+    Field Tags: String[]
+End Struct
+
+Local lua = LuauState()
+Local spawn = Try lua.Evaluate<Spawn>(r"return { Name = 'rat', Tags = { 'small' } }")
+Expect(spawn.Name == "rat" && spawn.Count == 1 && spawn.Tags == ["small"])
+```
+
+## Tables
+
+A `LuauTable` is a handle to a table in the VM, not a copy: what the program sets, the script
+sees. `Get` and `Set` go through its metatable, as a script's do; `RawGet` and `RawSet` don't.
+
+```vb
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Local config = Try lua.NewTable()
+Try config.Set("volume", 0.8)
+Try lua.Set("config", config)
+Try lua.Run("config.muted = config.volume == 0")
+Expect(!(Try config.Get<Bool, String>("muted")))
+
+Local list = Try lua.Evaluate<LuauTable>(r"return { 'a', 'b', 'c' }")
+Expect(list.Length() == 3 && (Try list.ToArray<String>()) == ["a", "b", "c"])
+```
+
+## Functions both ways
+
+`SetFunction` gives a script a FutureBlitz function, its arguments read by their types and its
+result given back by its type; a script that passes the wrong type gets an error worded as
+Luau's own are. An error the function throws is raised in the script, which its `pcall` catches,
+and one the script lets go comes back out of the program's call as the `LuauError`'s `Cause`.
+
+```vb
+Import std.core
+Import std.test
+Import std.text
+Import luau
+
+Function ReadSave(name: String): String Throws IOError
+    Throw IOError(IOErrorKind.NOT_FOUND, "{name} doesn't exist")
+End Function
+
+Local lua = LuauState()
+Try lua.SetFunction("add", Function(a: Int, b: Int) => a + b)
+Try lua.SetFunction("read_save", ReadSave)
+Expect(Try lua.Evaluate<Int>("return add(2, 3)") == 5)
+
+Local wrong = ExpectThrows<LuauError>(lua.Run("add(1, 'two')", "=mod"))
+Expect(wrong != Null && wrong.Message.Contains("invalid argument #2 to 'add'"))
+
+Expect(!(Try lua.Evaluate<Bool>("return (pcall(read_save, 'slot1'))")))
+Local thrown = ExpectThrows<LuauError>(lua.Run("read_save('slot1')"))
+Expect(thrown != Null && thrown.Cause Is IOError)
+```
+
+A Luau function is a `LuauFunction` the program calls: `Call<R>` gives its first result as an R,
+`Invoke` none, `CallAll` every one, and `ToFunc` makes it a Func the program passes around.
+
+```vb
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Try lua.Run("function area(w, h) return w * h, 'square units' end")
+Local area = Try lua.Get<LuauFunction>("area")
+Expect(Try area.Call<Float64>(2.0, 3.0) == 6.0)
+Expect((Try area.CallAll(2.0, 3.0)).Count == 2)
+
+Local f = Try area.ToFunc<Float64, Float64, Float64>()
+Expect(Try f(4.0, 5.0) == 20.0)
+```
+
+A function given to Luau that needs its State captures it `[Weak lua]`, so the State can still
+go: one that holds it strongly keeps it alive through the State's own map of its functions.
+
+## Errors
+
+Every call that runs Luau throws a `LuauError`: its `Kind` (`SYNTAX`, `RUNTIME`, `MEMORY`,
+`TIMEOUT`, `CONVERSION`, `YIELD`, `CLOSED`), its `Message` as Luau writes it, its `Traceback`,
+and the `Value` a script raised, when it raised one that isn't a string.
+
+```vb
+Import std.text
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Local syntax = ExpectThrows<LuauError>(lua.Run("local = 1", "=mod"))
+Expect(syntax != Null && syntax.Kind == LuauErrorKind.SYNTAX)
+
+Local raised = ExpectThrows<LuauError>(lua.Run(r"error({ code = 7 })"))
+Expect(raised != Null && raised.Kind == LuauErrorKind.RUNTIME)
+Local value = raised?.Value
+Expect(value != Null && (Try (Try value.Read<LuauTable>()).Get<Int, String>("code")) == 7)
+```
+
+## Registering types, and what to expose
+
+A Class that lists `LuauObject` crosses as itself: a script holds the object, not a copy.
+`Register<T>()` exposes only what's marked: `@LuauExpose` for a Method that gives a value,
+`@LuauAction` for one that gives nothing, `@LuauGet` and `@LuauSet` for a field, each named as
+it is or by the name given. What isn't marked can't be reached; a marked Method of a shape that
+can't be exposed panics where it's registered, saying why.
+
+```vb
+Import std.test
+Import luau
+
+Class Player Implements LuauObject
+    Field health: Int = 100
+    Field secret: String = "not for mods"
+
+    @LuauGet("Health") Method GetHealth(): Int => health
+    @LuauExpose Method Damage(amount: Int): Int
+        health -= amount
+        Return health
+    End Method
+    @LuauAction("heal") Method Heal()
+        health = 100
+    End Method
+End Class
+
+Local lua = LuauState()
+Try lua.Register<Player>()
+Local player = Player()
+Try lua.Set("player", player)
+Expect(Try lua.Evaluate<Int>("return player:Damage(30)") == 70)
+Try lua.Run("player:heal()")
+Expect(player.GetHealth() == 100)
+Expect(Try lua.Evaluate<String>("return typeof(player)") == "Player")
+Expect(ExpectThrows<LuauError>(lua.Run("return player.secret")) != Null)
+```
+
+`Register` gives a `LuauTypeBuilder`, whose `AddMethod`, `AddGetter`, `AddSetter`, and
+`AddOperator` add what reflection can't, written in Luau.
+
+## Lifetimes, and the cycle to avoid
+
+An object a script holds stays alive while the script holds it, and goes when neither side
+does; a handle, like a `LuauTable`, holds its value in the VM until the handle goes. Two
+collectors see each side, and neither sees across: an object that holds a `LuauTable` that holds
+the object is a cycle neither frees, which lives until its State closes. Hold a `Weak<T>`, or a
+key, where the cycle would be.
+
+```vb
+Import std.test
+Import luau
+
+Class Door Implements LuauObject
+    // Not a LuauTable of the door's: the door's own state, which the script reads by Methods.
+    Field openedBy: String = ""
+    @LuauAction Method Open(who: String)
+        openedBy = who
+    End Method
+End Class
+
+Local before = LuauStatesOpen(here: True)
+Local lua = LuauState()
+Try lua.Register<Door>()
+Try lua.Set("door", Door())
+Try lua.Run("door:Open('ana')")
+lua.Close()
+Expect(LuauStatesOpen(here: True) == before)
+```
+
+`LuauStatesOpen()` gives how many States the process has open and the bytes they hold, which a
+program's tests and soaks watch come back to what they were.
+
+## Vectors and buffers
+
+Luau's vector is std.math's `Vec3`, crossing as a value; a `LuauBuffer` is a handle to a buffer
+the program reads and writes in place.
+
+```vb
+Import std.math
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Try lua.Set("up", Vec3(0, 1, 0))
+Local moved = Try lua.Evaluate<Vec3>("return up * 2 + vector.create(1, 0, 0)")
+Expect(moved == Vec3(1, 2, 0))
+
+Local bytes = Try lua.NewBuffer(4)
+Try lua.Set("bytes", bytes)
+Try lua.Run("buffer.writeu32(bytes, 0, 0xDEADBEEF)")
+Expect(bytes.ReadUInt32(0) == 0xDEADBEEF)
+```
+
+## Threads on the scheduler
+
+A script's `task.wait(2)` waits as an `Await Wait(2.Seconds)` does, while the program goes on. A
+`LuauThread`'s `Start()` runs it on the scheduler running the code, and `lua.Start()` runs what
+`task.spawn` and `task.delay` start. A Scheduler of the program's own, which a pause stops and
+whose `Tick` scales time, runs them where it's given them. `SetAsync` gives a script an Async
+Function: its thread waits for the Task.
+
+```vb
+Import std.core
+Import std.test
+Import luau
+
+Async Function Fetched(name: String): String
+    Await NextTick()
+    Return "{name}'s save"
+End Function
+
+Local lua = LuauState()
+Try lua.SetAsync("fetch", Function(name: String) => Fetched(name))
+Try lua.Run(r"function main() task.wait(1) result = fetch('ana') end")
+Local world = Scheduler()
+Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+world.Run(done)
+Local time = 0.0
+While !done.IsDone()
+    world.Tick(0.25)
+    time += 0.25
+End While
+Expect(time >= 1.0 && Try lua.Get<String>("result") == "ana's save")
+```
+
+A wait with nothing to run it, as in `lua.Run`, which runs on the program's own stack, is a
+`LuauError` of `YIELD`. A thread that waits is `WAITING`: the program follows it by its Task, not
+by `Resume`. A State closed while its threads wait ends every wait, and each Start's Task throws
+`CLOSED`.
+
+## Sandboxing a game's mods
+
+A State is sandboxed as Luau's own sandbox makes it: `Freeze()` makes the globals and every
+library read-only, and each `LuauScript` has globals of its own over them, so one mod can't
+change what another sees. `LuauOptions` sets a memory limit for the whole State and a time
+budget for each call into it; past either, the script meets a `LuauError` its own `pcall` can't
+keep it from, and the State goes on.
+
+```vb
+Import std.test
+Import std.text
+Import std.time
+Import luau
+
+Local options = LuauOptions()
+options.MemoryLimit = 8 * 1024 * 1024
+options.TimeBudget = 20.Milliseconds
+Local lua = Try LuauState(options)
+Try lua.SetFunction("say", Function(text: String): Int => text.Length)
+Try lua.Freeze()
+
+Local first = Try lua.NewScript("=first")
+Local second = Try lua.NewScript("=second")
+Try first.Run("name = 'first'")
+Expect(Try second.Evaluate<Bool>("return name == nil"))
+// A script's own global hides the shared one only for itself; the shared ones are read-only.
+Try first.Run("say = nil")
+Expect(Try second.Evaluate<Int>("return say('hi')") == 2)
+Expect(ExpectThrows<LuauError>(first.Run("string.upper = nil")) != Null)
+
+Local spin = ExpectThrows<LuauError>(first.Run("while true do end"))
+Expect(spin != Null && spin.Kind == LuauErrorKind.TIMEOUT)
+Local hog = ExpectThrows<LuauError>(first.Run("local big = string.rep('x', 16 * 1024 * 1024)"))
+Expect(hog != Null && hog.Kind == LuauErrorKind.MEMORY)
+Expect(Try second.Evaluate<Int>("return say('still here')") == 10)
+```
+
+The libraries a State opens are Luau's safe ones; `loadstring`, `getfenv`, `setfenv`, and all
+of `collectgarbage` are off unless the options turn them on. Nothing reaches a file or the OS
+unless the program gives a function that does.
+
+## Require
+
+`require` is Luau's own, with its rules for paths: `./` and `../` from the requiring module,
+`@self`, and the aliases of a `.luaurc`; a module that's a folder's `init.luau` is the
+folder, so its `./` is beside the folder, and `@self/` is inside it. The program gives the files
+through
+`LuauOptions.Modules`, by their paths from the modules' root, so a mod requires only what the
+program gives it, from wherever it keeps them. Each module runs once per State, and its table is
+frozen, as every script that requires it shares it.
+
+```vb
+Import std.collections
+Import std.test
+Import luau
+
+Local files: Map<String, String> = {
+    "lib/words.luau": r"return { shout = function(s) return string.upper(s) .. '!' end }",
+    "mods/doors/init.luau": r"local words = require('../lib/words') return words.shout('open')"
+}
+Local options = LuauOptions()
+options.Modules = Function(path: String): String? => files.Get(path)
+Local lua = Try LuauState(options)
+Local doors = Try lua.NewScript("@mods/doors/main.luau")
+Expect(Try doors.Evaluate<String>(files["mods/doors/init.luau"] ?? "", "@mods/doors/init.luau") ==
+       "OPEN!")
+```
+
+## Bytecode
+
+A game's own scripts can be compiled ahead, as its build does, into bytecode a State runs
+without compiling. Luau runs bytecode as it's given, checking nothing, so bytecode crosses a file
+system only in `Save`'s container, signed with the program's own key, which `Load` checks before
+Luau sees a byte. A mod is source, always.
+
+```vb
+Import std.test
+Import luau
+
+Local key = "the game's own secret, not this".Bytes
+Local shipped = (Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")).Save(key)
+Local loaded = Try LuauBytecode.Load(shipped, key)
+Expect(Try LuauState().Evaluate<Int>(loaded) == 42)
+Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, "another key, as long".Bytes)) != Null)
+```
+
+examples/bytecode is a build step and its game, in one program.
+
+## Native code
+
+Where Luau's code generator is supported, x64 and arm64, a State compiles code to native code
+as it loads: by default what's marked, a chunk that starts with `--!native` and a function marked
+`@native`; with `LuauNativeCode.ALL`, everything. Where it isn't, the interpreter runs it, with
+the same results.
+
+```vb
+Import std.test
+Import luau
+
+Local options = LuauOptions()
+options.NativeCode = LuauNativeCode.ALL
+Local lua = Try LuauState(options)
+Expect(Try lua.Evaluate<Int>("local s = 0 for i = 1, 100 do s += i end return s") == 5050)
+Expect(!LuauNativeCodeSupported() || lua.NativeFunctions > 0)
+```
+
+## Checking mods
+
+`LuauChecker` is Luau's type checker and lint, as `luau-analyze` runs them, over files the
+program reads. `lua.Definitions()` writes what a State gives its scripts, its registered types
+and the globals it set, as a definitions file, so a mod is checked against the game's real API
+before it's loaded, and a mod's editor can know it too.
+
+```vb
+Import std.collections
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Try lua.SetFunction("spawn_item", Function(name: String, count: Int) => count)
+Local files: Map<String, String> = {
+    "good.luau": "--!strict\nspawn_item('rat', 2)\n",
+    "bad.luau": "--!strict\nspawn_item(2, 'rat')\n"
+}
+Local checker = LuauChecker(Function(path: String): String? => files.Get(path))
+Try checker.AddDefinitions(lua.Definitions(), "game")
+Expect((Try checker.Check("good")).Count == 0)
+Local found = Try checker.Check("bad")
+Expect(found.Count == 2 && found[0].Name == "TypeError" && found[0].Line == 2)
+```
+
+Each `LuauDiagnostic` has its module, line and column, its severity, Luau's code and name for
+it, and its message, as luau-analyze gives them.
+
+## A game's modding
+
+The parts above make the shape a game's modding takes, the one SCP: Containment Breach X's mods
+take, which any game can follow:
+
+1. **One State for the game's mods**, with a memory limit and a time budget, and its `Modules`
+   over the mods' folder. Its `Print` goes to the game's log.
+2. **What mods reach, and nothing else:** the game's types registered, marking only what a mod
+   may use, its functions set, events a mod hooks by giving a function, then `Freeze()`.
+3. **Its scheduler started first:** `world.Run(lua.Start())` on the game's own Scheduler, so a
+   mod's waits run on the game's time, stop when it pauses, and a mod can wait as it loads.
+4. **Each mod checked, then loaded:** `LuauChecker` with `lua.Definitions()` finds what a mod
+   gets wrong before it runs; each mod runs in a `NewScript` of its own.
+5. **Each mod's failure its own:** a handler that errors, or runs past its budget, is dropped,
+   and the game goes on. `ThreadError` hears of a thread that failed on the scheduler.
+
+examples/modded_game is that game, small: four mods, one refused by the checker, one stopped at
+its budget, one that waits and requires a shared module, and one that hooks the game's tick.

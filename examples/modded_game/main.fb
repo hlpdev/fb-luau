@@ -1,0 +1,127 @@
+// A toy game with mods, the shape a game's modding takes: the game registers what mods reach and
+// sets what they call, checks each mod against that API with Luau's type checker before it loads
+// it, runs each in a script of its own, sandboxed, with a memory limit and a time budget, and
+// drives their waits on its own scheduler, a tick at a time. A mod that breaks the rules is
+// stopped, and the game goes on.
+
+Import std.collections
+Import std.core
+Import std.text
+Import std.time
+Import luau
+
+// A door a mod can open, and read the name of.
+Class Door Implements LuauObject
+    Field name: String
+    Field open: Bool = False
+
+    New(name: String)
+        Self.name = name
+    End New
+
+    @LuauGet Method Name(): String => name
+    @LuauGet("Open") Method IsOpen(): Bool => open
+    @LuauSet("Open") Method SetOpen(value: Bool)
+        open = value
+        Print("[game] the {name} door is {open ? "open" : "shut"}")
+    End Method
+End Class
+
+// The mods, as a game would read them from its mods folder; here they're in the program.
+Const Mods = EmbedFolder("mods")
+
+// A mod's file by its path from the mods folder, or Null. fb 1.3.0's EmbedFolder leaves out a
+// file whose name starts with ".", so the mods' .luaurc is embedded as luaurc.json
+// (fbengine-notes/luau/embed_dotfiles.fb); a game reading its mods folder needs none of this.
+Function ModFile(path: String): String?
+    Local name = path == ".luaurc" ? "luaurc.json" : path
+    Local bytes = Mods.Get(name)
+    If bytes == Null Then Return Null
+    Return String.FromUtf8(bytes)
+End Function
+
+// What each mod's on_tick gave, by its mod, which the game calls each tick.
+Class Ticks
+    Field Handlers: (String, LuauFunction)[] = []
+End Class
+
+Function Play() Throws LuauError
+    Local options = LuauOptions()
+    options.MemoryLimit = 16 * 1024 * 1024
+    options.TimeBudget = 50.Milliseconds
+    options.Modules = Function(path: String): String? => ModFile(path)
+    options.Print = Function(line: String)
+        Print("[mod] {line}")
+    End Function
+    Local lua = Try LuauState(options)
+
+    // What mods reach: a door, and three functions.
+    Local front = Door("front")
+    Local ticks = Ticks()
+    Local current = ""
+    Try lua.Register<Door>()
+    Try lua.Set("front", front)
+    Try lua.SetFunction("log", Function(text: String)
+        Print("[log] {text}")
+    End Function)
+    Try lua.SetFunction("spawn_item", Function(kind: String, number: Int)
+        Print("[game] {current} spawned {kind} {number}")
+    End Function)
+    Try lua.SetFunction("on_tick", Function(handler: LuauFunction)
+        ticks.Handlers.Add((current, handler))
+    End Function)
+    Try lua.Freeze()
+
+    // The game's scheduler runs the mods' waits, from before they load, as a mod can wait as it
+    // loads: a pause stops it, and its Tick's time is the mods' time.
+    Local world = Scheduler()
+    Local waits = lua.Start()
+    world.Run(waits)
+
+    // Each mod checked against the game's API before it's loaded.
+    Local checker = LuauChecker(Function(path: String): String? => ModFile(path),
+                                LuauCheckMode.STRICT)
+    Try checker.AddDefinitions(lua.Definitions(), "game")
+    For mod In ["broken", "doors", "greedy", "spawner"]
+        Local errors = 0
+        For found In Try checker.Check(mod)
+            If found.Severity != LuauSeverity.ERROR Then Continue
+            Print("[checker] {found}")
+            errors++
+        End For
+        If errors > 0
+            Print("[game] {mod} isn't loaded: {errors} errors")
+            Continue
+        End If
+        current = mod
+        Local script = Try lua.NewScript("@{mod}/init.luau")
+        Try script.Run(ModFile("{mod}/init.luau") ?? "", "@{mod}/init.luau")
+        Print("[game] {mod} is loaded")
+    End For
+
+    // The game's loop: each tick calls the mods' handlers. A handler that fails is dropped, and
+    // the game goes on.
+    For tick = 1 To 10
+        world.Tick(0.1)
+        Local kept: (String, LuauFunction)[] = []
+        For handler In ticks.Handlers
+            current = handler.0
+            Try
+                Try handler.1.Invoke(tick)
+                kept.Add(handler)
+            Catch error As LuauError
+                Print("[game] {handler.0} is stopped at tick {tick}: {error.Kind}")
+            End Try
+        End For
+        ticks.Handlers = kept
+    End For
+    lua.Close()
+    world.Tick(1.0)
+    Print("[game] the State closed, its waits ended: {waits.IsDone()}")
+End Function
+
+Try
+    Try Play()
+Catch error
+    Print("[game] {error.Message}")
+End Try

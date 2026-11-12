@@ -1,0 +1,6 @@
+[project]
+name = "modded_game_example"
+version = "0.1.0"
+
+[dependencies]
+luau = { path = "../../luau" }
