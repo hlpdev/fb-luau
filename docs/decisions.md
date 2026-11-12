@@ -442,3 +442,8 @@ Written while the PC was kept free for the user: none of it built or run until t
   while no check runs (a shared lock each check holds). A time limit of 0, "as long as it
   takes", is refused, so a loop in a type function always ends. The C API's fbl_check_new takes
   the heap limit.
+- **The modded game survives each bad mod (110):** its check and load are caught for it alone,
+  as a LuauError, and a mod that fails is dropped with the tick hooks it gave; four more mods
+  show it, one for each way a mod failed to load before (a MEMORY error, a loop with its
+  checking off, an error after hooking the tick, and two init files), which ctest's regular
+  expression expects, beside the good ones playing.

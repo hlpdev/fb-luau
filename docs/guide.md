@@ -482,8 +482,13 @@ take, which any game can follow:
    mod's waits run on the game's time, stop when it pauses, and a mod can wait as it loads.
 4. **Each mod checked, then loaded:** `LuauChecker` with `lua.Definitions()` finds what a mod
    gets wrong before it runs; each mod runs in a `NewScript` of its own.
-5. **Each mod's failure its own:** a handler that errors, or runs past its budget, is dropped,
-   and the game goes on. `ThreadError` hears of a thread that failed on the scheduler.
+5. **Each mod's failure its own:** each mod's check, its load, and every call of the game's
+   into it are caught for that mod alone, as a LuauError of the mod's: one that fails is dropped,
+   with what it gave the game, and the game goes on. `ThreadError` hears of a thread that failed
+   on the scheduler.
 
-examples/modded_game is that game, small: four mods, one refused by the checker, one stopped at
-its budget, one that waits and requires a shared module, and one that hooks the game's tick.
+examples/modded_game is that game, small, with eight mods: one refused by the checker, one that
+runs out of memory as it loads, one that loops as it loads with its checking turned off, one
+that fails as it loads after hooking the tick, one of two files where it can have one, one
+stopped at its budget in a tick, one that waits and requires a shared module, and one that
+hooks the game's tick; the last two play to the end.
