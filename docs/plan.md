@@ -829,7 +829,7 @@ and `fb doc luau --check`. Its flags are fbengine's: `--build`, `--base`, `--no-
   without a compiler, `fb test luau` against that Release library and the conformance program;
   a Debug build and ctest on each target; and the format job (clang-format, `fb fmt --check`,
   the bindings' and arity code's checks, `fb doc --check`). fb comes from the `install-fb`
-  action at the version `FB_VERSION` pins, 1.3.0, as fbengine's does.
+  action at the version `FB_VERSION` pins, 1.3.2, as fbengine's does.
 - **stability.yml**, nightly and by hand: ASan with UBSan, and TSan, over the stability tests;
   each fuzzer for 10 minutes; and the soak.
 - **targeted.yml**, by hand: a ctest pattern on the targets it names.

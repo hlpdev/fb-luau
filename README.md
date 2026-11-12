@@ -23,9 +23,11 @@ Print(Try lua.Evaluate<Int>("return add(2, 3)"))      // 5
 - Classes registered by compile-time reflection, exposing only what's marked.
 - A sandbox by default: per-script globals, a memory limit, a time budget per call, and no file
   or OS access unless the program gives it.
-- Luau's threads on FutureBlitz's schedulers, so `task.wait(2)` waits as an Await does.
-- `require` resolved by the program, bytecode compiled ahead and signed, native code, and Luau's
-  type checker with its diagnostics, against a definitions file of what a State gives.
+- Luau's threads on FutureBlitz's schedulers, so `task.wait(2)` waits as an Await does, once
+  the program has called `lua.Start()`, which runs a State's waits until it closes.
+- `require` resolved by the program, bytecode compiled ahead and signed by the build's Ed25519
+  key, native code, and Luau's type checker with its diagnostics, against a definitions file of
+  what a State gives.
 
 The examples, which ctest runs: [examples/modded_game](examples/modded_game), a toy game with
 mods; [examples/repl](examples/repl), a REPL; [examples/bytecode](examples/bytecode), a game's
@@ -33,7 +35,7 @@ build step for its own scripts.
 
 ## Building
 
-fb-luau needs fb 1.3.0, CMake 3.28, Ninja, Python 3, and a C++23 compiler: GCC or Clang on Linux
+fb-luau needs fb 1.3.2, CMake 3.28, Ninja, Python 3, and a C++23 compiler: GCC or Clang on Linux
 and macOS, and on Windows a GCC built for the UCRT, as MSYS2's UCRT64 has, or winlibs' UCRT
 build. The library is built into `luau/native/<target>/`, where the package finds it, and ctest
 runs the tests:
