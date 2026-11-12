@@ -751,9 +751,14 @@ docs/                    plan.md, decisions.md, guide.md
 - **The package, in .fb:** `luau/tests/`, which `fb test luau` runs, a test for each public
   declaration and each error, and the `# Examples` in its `///` docs, which run as tests too.
 - **Luau's conformance tests through the package:** the 59 scripts in Luau's `tests/conformance`,
-  at the pinned release, run by a FutureBlitz program through the package's API, each in a
-  State with the options they need (`collectgarbage` in full, `loadstring` on, `print` silent)
-  and checked to return `"OK"`, as Luau's own runner does. About 30 need nothing else; those
+  at the pinned release, copied into tests/conformance/scripts, run by a FutureBlitz program
+  through the package's API, each in a State with the options they need (`collectgarbage` in
+  full, `loadstring` on, `print` silent), its native code off and then on, and checked to return
+  `"OK"`, as Luau's own runner does. 35 run and pass, both ways; the other 24 are listed in
+  tests/conformance/main.fb, each with why: what only Luau's runner has (its C functions, its C
+  API, its debugger, RTTI, userdata, vector metatable), class syntax behind an experimental flag,
+  the main thread, which the package's scripts aren't on, and the sandbox's refusal of a thread's
+  globals, `getfenv(0)`. About 30 need nothing else; those
   that need host functions of Luau's runner (`userdata`, `vector`, `cyield`, `interrupt`,
   `coroutinehost`, ...) get them written in FutureBlitz over the package where the package can
   do what the runner does, and the rest are listed, each with why it can't run here (a debugger
@@ -770,16 +775,23 @@ docs/                    plan.md, decisions.md, guide.md
     unchecked API;
   - the checker: arbitrary source to `LuauChecker`, within its time limit.
 
-  Their corpora start from the conformance scripts, and each crash becomes a test.
+  Their corpora start from the conformance scripts, and each crash becomes a test. Where
+  libFuzzer isn't (the Debug and Release builds, and GCC), each fuzzer is linked with
+  fuzz/replay.cpp, and ctest runs it over its corpus and a few thousand random changes of it. The
+  container is checked in FutureBlitz, so its fuzzer is a FutureBlitz program, fuzz/containers,
+  which changes saved containers at random for as long as it's given.
 - **Leaks and sanitizers:** the C++ tests under ASan and UBSan, with LeakSanitizer, and under
   TSan for States on several threads at once; every State's memory back to 0 at its close, by
   its allocator's count; and FutureBlitz's own leak report, which `fb test` fails on, for the
   objects and functions a State held.
-- **A soak:** a program that makes and closes States, loads scripts, calls both ways, makes and
-  drops userdata, tables, threads, and buffers, and runs scripts that hit their memory limits and
-  time budgets, for 30 minutes, sampling its memory, the shim's counts, and FutureBlitz's object
-  counts each minute, and failing when they grow: a slope past a few bytes per iteration, after
-  the first minutes, catches a slow leak a short test misses.
+- **A soak:** tests/soak, a program that makes and closes States, loads scripts, calls both ways,
+  makes and drops userdata, tables, threads, and buffers, waits on a scheduler, and runs scripts
+  that hit their memory limits and time budgets, for 30 minutes, sampling the process's memory
+  (`LuauProcessMemory`: private bytes on Windows, the resident set elsewhere) and the States' counts
+  each minute. It fails when a State outlives its close, or when the memory grows past 64 bytes an
+  iteration in both the middle third and the last, as a leak grows at every stretch where a heap
+  that grows once steps once. std has no count of FutureBlitz's live objects; their leaks show in
+  the process's memory, and in fb test's leak report.
 
 `python tools/verify.py` runs what a landing needs and prints "everything passed": the Debug
 build, ctest (the C++ tests, `fb test luau`, the conformance program, the examples, and the
@@ -1044,7 +1056,8 @@ passes.
 
 Done means: each fuzzer has run 10 minutes nightly without a finding for a week of runs, the
 sanitizers are clean, the soak's slopes are flat, and every conformance script that can run
-through the package passes, with the rest listed and why.
+through the package passes, with the rest listed and why. The week of nightly runs is
+stability.yml's, once it's on master; the lane runs each fuzzer 10 minutes before it lands.
 
 ### L14: the first release
 

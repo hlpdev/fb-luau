@@ -54,6 +54,19 @@ Public Function LuauStatesOpen(here: Bool = False): (Int64, Int64)
     Return (fbl_state_count(flag), fbl_state_memory_all(flag))
 End Function
 
+/// The bytes of memory the process holds now, as the OS counts them: on Windows its private
+/// bytes, and on Linux and macOS its resident set; or -1 where they can't be read. What a soak
+/// watches, beside [LuauStatesOpen], to catch a slow leak of the program's own, which a State's
+/// count doesn't see.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Expect(LuauProcessMemory() != 0)
+/// ```
+Public Function LuauProcessMemory(): Int64 => fbl_core_resident()
+
 /// Whether Luau's code generator is supported where the program runs, its processor and system:
 /// where it isn't, a State's code runs in Luau's interpreter, whatever its NativeCode says.
 ///

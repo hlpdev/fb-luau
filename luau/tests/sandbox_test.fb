@@ -154,3 +154,26 @@ Function ATimeBudgetUnderAMicrosecondIsOneAndTheLongestRuns() Throws LuauError
     Local loose = Try LuauState(options)
     Expect(Try loose.Evaluate<Int>("local n = 0 for i = 1, 100 do n += i end return n") == 5050)
 End Function
+
+@Test
+Function LoadstringNamesAChunkByItsSourceAsLuauDoes() Throws LuauError
+    Local options = LuauOptions()
+    options.LoadString = True
+    Local lua = Try LuauState(options)
+    Local said = Try lua.Evaluate<String>("local f, e = loadstring('hello world') return e")
+    Expect(said.StartsWith("[string \"hello world\"]:1:"), said)
+    Local named = Try lua.Evaluate<String>("local f, e = loadstring('x x', '=mine') return e")
+    Expect(named.StartsWith("mine:1:"), named)
+End Function
+
+@Test
+Function SourceThatIsntUtf8LoadsAsItsBytes() Throws LuauError
+    // "é" in Latin-1, one byte, 0xE9, in a string, which no String can hold.
+    Local source: UInt8[] = "return #'".Bytes
+    source.Add(0xE9)
+    source.Add(39)
+    Local lua = LuauState()
+    Expect(Try (Try lua.Load(source)).Call<Int>() == 1)
+    Local script = Try lua.NewScript("=latin")
+    Expect(Try (Try script.Load(source)).Call<Int>() == 1)
+End Function

@@ -153,6 +153,19 @@ if(FBL_FB_TESTS)
              COMMAND "${FBL_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/guide_programs.py" "${FBL_FB}"
                      "${PROJECT_BINARY_DIR}/guide")
   endif()
+  # Luau's conformance scripts through the package, each that can run here.
+  add_test(NAME luau.conformance
+           COMMAND "${FBL_FB}" --color never run --release "${CMAKE_CURRENT_SOURCE_DIR}/conformance")
+  set_tests_properties(luau.conformance PROPERTIES PASS_REGULAR_EXPRESSION " 0 failed")
+  # The bytecode container's fuzzer, in FutureBlitz, for 5 seconds; stability.yml's is 10 minutes.
+  add_test(NAME fuzz.containers
+           COMMAND "${FBL_FB}" --color never run --release "${PROJECT_SOURCE_DIR}/fuzz/containers" -- 5)
+  set_tests_properties(fuzz.containers PROPERTIES PASS_REGULAR_EXPRESSION "inputs, no finding")
+  # The soak, short: stability.yml runs it for 30 minutes.
+  add_test(NAME luau.soak
+           COMMAND "${FBL_FB}" --color never run --release "${CMAKE_CURRENT_SOURCE_DIR}/soak" -- 15 9)
+  set_tests_properties(luau.soak PROPERTIES PASS_REGULAR_EXPRESSION "soak: [0-9]+ iterations"
+                       FAIL_REGULAR_EXPRESSION "a leak|outlived its close")
   add_test(NAME examples.repl
            COMMAND "${CMAKE_COMMAND}" -DFB=${FBL_FB} -DPROGRAM=${PROJECT_SOURCE_DIR}/examples/repl
                    -DINPUT=${PROJECT_SOURCE_DIR}/examples/repl/session.txt

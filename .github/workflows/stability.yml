@@ -1,0 +1,135 @@
+name: Stability
+
+# Nightly and by hand: the C++ tests under ASan with UBSan and under TSan, built with Clang, Luau
+# too; each fuzzer for 10 minutes with libFuzzer, its corpus kept from run to run; and the soak, for
+# 30 minutes, then the container's fuzzer, for 10, on linux-x64's Release library. A fuzzer's
+# finding is kept as an artifact.
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      fuzz-seconds:
+        description: How long each fuzzer runs
+        default: '600'
+      soak-seconds:
+        description: How long the soak runs
+        default: '1800'
+
+concurrency:
+  group: stability-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FB_VERSION: 1.3.0
+  CLANG_VERSION: 19
+  FUZZ_SECONDS: ${{ inputs.fuzz-seconds || '600' }}
+  SOAK_SECONDS: ${{ inputs.soak-seconds || '1800' }}
+
+jobs:
+  sanitizers:
+    name: sanitize ${{ matrix.sanitize }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: ['address,undefined', 'thread']
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Clang and Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${CLANG_VERSION} ninja-build
+
+      - name: Build and test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang-${CLANG_VERSION} -DCMAKE_CXX_COMPILER=clang++-${CLANG_VERSION} \
+            -DFBL_SANITIZE=${{ matrix.sanitize }} -DFBL_FB_TESTS=OFF
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure -E '^tools\.'
+
+  fuzz:
+    name: fuzz ${{ matrix.fuzzer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzzer: [load, bytecode, api, check]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Clang and Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${CLANG_VERSION} ninja-build
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang-${CLANG_VERSION} -DCMAKE_CXX_COMPILER=clang++-${CLANG_VERSION} \
+            -DFBL_FUZZ=ON -DFBL_SANITIZE=address,undefined -DFBL_FB_TESTS=OFF
+          cmake --build build --parallel 2 --target fbl_fuzz_${{ matrix.fuzzer }}
+
+      # What earlier runs found grows the corpus, run to run.
+      - uses: actions/cache@v5
+        with:
+          path: work
+          key: fuzz-${{ matrix.fuzzer }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.fuzzer }}-
+
+      - name: Fuzz
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          mkdir -p work findings
+          seeds="fuzz/corpus/${{ matrix.fuzzer }}"
+          if [ "${{ matrix.fuzzer }}" != "api" ]; then seeds="$seeds tests/conformance/scripts"; fi
+          ./build/fuzz/fbl_fuzz_${{ matrix.fuzzer }} work $seeds -max_total_time=$FUZZ_SECONDS \
+            -timeout=20 -rss_limit_mb=4096 -artifact_prefix=findings/ -print_final_stats=1
+
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: findings-${{ matrix.fuzzer }}
+          path: findings
+
+  native:
+    uses: ./.github/workflows/native.yml
+
+  soak:
+    name: soak linux-x64
+    needs: native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-linux-x64
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Soak
+        run: |
+          tar -xf native-linux-x64.tar
+          fb run --release tests/soak -- $SOAK_SECONDS 30
+
+      # The bytecode container's fuzzer, which is FutureBlitz's, as Load checks it there.
+      - name: Fuzz containers
+        run: fb run --release fuzz/containers -- $FUZZ_SECONDS

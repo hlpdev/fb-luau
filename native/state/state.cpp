@@ -158,7 +158,9 @@ int load_string(lua_State* stack) {
     const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
     size_t length = 0;
     const char* source = luaL_checklstring(stack, 1, &length);
-    const char* name = luaL_optstring(stack, 2, "=loadstring");
+    // Named by its source when it isn't given a name, as Luau's and Lua's loadstring name it,
+    // which its errors show as [string "..."].
+    const char* name = luaL_optstring(stack, 2, source);
     // The compiler's memory isn't the State's, so a source bigger than what the limit leaves is
     // refused before it's compiled.
     if (state != nullptr && state->memory_limit > 0 &&
@@ -301,7 +303,8 @@ int guarded_debug(lua_State* stack) {
     if (own) {
         const int first = threaded ? 2 : 1;
         const int index = traceback ? first + 1 : first;
-        if (lua_type(stack, index) == LUA_TNUMBER) {
+        // A negative level stays as it is, which Luau refuses, as it does its own.
+        if (lua_type(stack, index) == LUA_TNUMBER && lua_tointeger(stack, index) >= 0) {
             lua_pushinteger(stack, lua_tointeger(stack, index) + 1);
             lua_replace(stack, index);
         } else if (traceback && lua_type(stack, index) == LUA_TNONE) {

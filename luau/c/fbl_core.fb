@@ -17,4 +17,5 @@ Package Extern "C" Lib "luau_native"
     Function fbl_core_version(): CString
     Function fbl_core_luau_version(): CString
     Function fbl_core_error(): CString
+    Function fbl_core_resident(): Int64
 End Extern

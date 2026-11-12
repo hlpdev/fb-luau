@@ -1,0 +1,159 @@
+// The soak: a loop of what a program does with the package, for as long as it's given, making and
+// closing States, loading scripts, calling both ways, making and dropping objects, tables, threads,
+// and buffers, waiting on a scheduler, and running scripts into their memory limits and time
+// budgets. It samples the process's memory and the States' counts as it goes, and fails when, past
+// its first third, the memory grows by more than a few bytes an iteration, or a State outlives its
+// close: a slow leak a short test misses.
+//
+// `fb run --release tests/soak -- <seconds> <samples>`: 20 seconds and 10 samples by default;
+// stability.yml's soak is 1800 seconds and 30 samples, one a minute.
+
+Import std.collections
+Import std.core
+Import std.os
+Import std.time
+Import luau
+
+// A crate a script makes, weighs, and drops.
+Class Crate Implements LuauObject
+    Field weight: Int
+
+    New(weight: Int)
+        Self.weight = weight
+    End New
+
+    @LuauGet Method Weight(): Int => weight
+    @LuauAction Method Lighten()
+        weight -= 1
+    End Method
+End Class
+
+Const Script = r"local crates = {} " +
+               "for i = 1, 40 do crates[i] = make(i) end " +
+               "total = 0 " +
+               "for _, crate in crates do crate:Lighten() total += crate.Weight end " +
+               r"names = {} for i = 1, 40 do names['n' .. i] = string.rep('x', i) end " +
+               "function twice(n) return back(n) * 2 end"
+
+// One iteration: a State made, used every way, and closed.
+Function Iterate(iteration: Int, world: Scheduler) Throws LuauError
+    Local options = LuauOptions()
+    options.MemoryLimit = 4 * 1024 * 1024
+    options.TimeBudget = 20.Milliseconds
+    Local lua = Try LuauState(options)
+    Local waits = lua.Start()
+    world.Run(waits)
+    Try lua.Register<Crate>()
+    Try lua.SetFunction("make", Function(weight: Int) => Crate(weight))
+    Try lua.SetFunction("back", Function(n: Int) => n + 1)
+    Try lua.Run(Script)
+    If Try lua.Get<Int>("total") != 780 Then Panic("the crates weigh {Try lua.Get<Int>("total")}")
+    // Calls both ways.
+    Local twice = Try lua.Get<LuauFunction>("twice")
+    If Try twice.Call<Int>(iteration) != (iteration + 1) * 2 Then Panic("twice is wrong")
+    // Tables, a buffer, a thread, and a script of its own.
+    Local items = Try lua.NewTable([1, 2, 3])
+    Try items.Set("crate", Crate(iteration))
+    Local bytes = Try lua.NewBuffer(64)
+    bytes.WriteInt32(0, iteration)
+    Try lua.Set("bytes", bytes)
+    If Try lua.Evaluate<Int>("return buffer.readi32(bytes, 0)") != iteration Then Panic("bytes")
+    Local thread = Try lua.Spawn(Try lua.Load("local n = ... coroutine.yield(n) return n + 1"))
+    Try thread.Resume(iteration)
+    Try thread.Resume()
+    Local script = Try lua.NewScript("=soak")
+    Try script.Run(r"mine = {} for i = 1, 20 do mine[i] = make(i) end")
+    // A wait on the scheduler, which the State's driver runs.
+    Try script.Run("task.spawn(function() task.wait(0.01) done = true end)")
+    world.Tick(0.02)
+    world.Tick(0.02)
+    // Past the memory limit and the time budget, which the State goes on from.
+    Local memory = Failed(lua, "local big = string.rep('y', 8 * 1024 * 1024)")
+    If memory != LuauErrorKind.MEMORY Then Panic("the memory limit gave another error, or none")
+    Local time = Failed(lua, "while true do end")
+    If time != LuauErrorKind.TIMEOUT Then Panic("the time budget gave another error, or none")
+    // An error both ways, kept as the Cause.
+    Local raised = Failed(lua, "make('not a number')")
+    If raised == Null Then Panic("a wrong argument gave no error")
+    lua.Close()
+    world.Tick(0.02)
+End Function
+
+// The kind of error running `source` in `lua` threw, or Null.
+Function Failed(lua: LuauState, source: String): LuauErrorKind?
+    Try
+        Try lua.Run(source)
+    Catch error As LuauError
+        Return error.Kind
+    End Try
+    Return Null
+End Function
+
+// The slope of `ys` over `xs`, by least squares, from index `from` until `until`.
+Function SlopeOf(xs: Float64[], ys: Float64[], from: Int, until: Int): Float64
+    Local count = (until - from) As Float64
+    Local meanX: Float64 = 0.0
+    Local meanY: Float64 = 0.0
+    For index = from Until until
+        meanX += xs[index]
+        meanY += ys[index]
+    End For
+    meanX /= count
+    meanY /= count
+    Local above: Float64 = 0.0
+    Local below: Float64 = 0.0
+    For index = from Until until
+        above += (xs[index] - meanX) * (ys[index] - meanY)
+        below += (xs[index] - meanX) * (xs[index] - meanX)
+    End For
+    Return below == 0.0 ? 0.0 : above / below
+End Function
+
+Local arguments = Process.Arguments()
+Local seconds = arguments.Count > 0 ? (Int.Parse(arguments[0]) ?? 20) : 20
+Local samples = arguments.Count > 1 ? (Int.Parse(arguments[1]) ?? 10) : 10
+Local world = Scheduler()
+Local before = LuauStatesOpen(here: True)
+Local clock = Stopwatch.StartNew()
+Local iterations: Float64[] = []
+Local resident: Float64[] = []
+Local iteration = 0
+Local failed = False
+For sample = 1 To samples
+    Local until = (seconds * sample * 1000) / samples
+    While clock.Elapsed.TotalMilliseconds < until
+        iteration++
+        Try
+            Try Iterate(iteration, world)
+        Catch error As LuauError
+            Print("iteration {iteration} failed: {error.Kind}: {error.Message}")
+            failed = True
+        End Try
+    End While
+    Local open = LuauStatesOpen(here: True)
+    Local memory = LuauProcessMemory()
+    Print("sample {sample}: {iteration} iterations, {memory} bytes held, " +
+          "{open.0} States of {open.1} bytes")
+    If open != before
+        Print("a State, or its memory, outlived its close: {open.0} of {open.1} bytes")
+        failed = True
+    End If
+    iterations.Add(iteration As Float64)
+    resident.Add(memory As Float64)
+End For
+// A leak grows the memory at every stretch of the run; a heap that grows once, to what it holds,
+// steps once. So it's a leak when the memory grows in both the middle third and the last.
+Local third = samples / 3
+Local middle = SlopeOf(iterations, resident, third, 2 * third)
+Local last = SlopeOf(iterations, resident, 2 * third, samples)
+Print(
+    "soak: {iteration} iterations; bytes an iteration, the middle third {middle}, the last {last}")
+// A short run's few hundred iterations are within the memory's noise, so its slopes aren't
+// judged; the States' counts, which are exact, are.
+If iteration < 5000
+    Print("too few iterations to judge the memory's slope")
+ElseIf middle > 64.0 && last > 64.0
+    Print("the process's memory grows: a leak")
+    failed = True
+End If
+If failed Then Process.Exit(1)

@@ -37,6 +37,17 @@ if(FBL_SANITIZE)
   add_link_options(-fsanitize=${FBL_SANITIZE})
 endif()
 
+# libFuzzer's build, as stability.yml makes with Clang: every target compiled for its coverage, and
+# the fuzzers linked with its driver. Without it, each fuzzer is linked with fuzz/replay.cpp, which
+# runs its corpus and random inputs as a test.
+option(FBL_FUZZ "Build the fuzzers with libFuzzer (Clang)" OFF)
+if(FBL_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "FBL_FUZZ is for Clang, whose libFuzzer it links")
+  endif()
+  add_compile_options(-fsanitize=fuzzer-no-link)
+endif()
+
 # MSVC otherwise reads source files in the ANSI code page.
 if(MSVC)
   add_compile_options(/utf-8)
@@ -52,4 +63,5 @@ add_subdirectory(native)
 if(FBL_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+  add_subdirectory(fuzz)
 endif()

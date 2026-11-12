@@ -296,3 +296,27 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
 - **fb 1.3.0's EmbedFolder leaves out dotfiles,** so examples/modded_game embeds its mods'
   .luaurc as luaurc.json, saying why; a game that reads its mods folder needs none of it. For the
   fb lane: fbengine-notes/luau/embed_dotfiles.fb.
+
+## L13 (2026-11-11)
+
+- **Luau's conformance scripts are copied in** (tests/conformance/scripts), so CI's test job, which
+  has no Luau source, runs them. 35 of 59 pass, native code off and on; the rest are listed with
+  why. A script's `is_native` is the runner's, which reads Luau's internals; the program's stands
+  in from the native-code mode, so the two scripts that ask it of each function run only with
+  native code on, as Luau's runner runs them, and native_types, which asks it of a function that
+  left native code, is listed.
+- **What the conformance scripts found, each fixed with a test:** the shim's debug.info guard
+  turned a negative level into 0, so `debug.info(-1)` read the guard's own frame where Luau refuses
+  it; loadstring named a chunk "loadstring" where Luau and Lua name it by its source, so its errors
+  said `loadstring:1:` where scripts expect `[string "..."]:1:`; and the package had no way to load
+  source that isn't UTF-8, which Luau's source can be: `Load` takes bytes now too.
+- **UBSan's float-cast-overflow is off for Luau's own code, on for the shim's:** Luau casts a
+  double to an int and keeps what the processor gives, a NaN's too (luaH_get, lua_tointegerx, the
+  VM's loops), which the sanitizers and the fuzzers found at once.
+- **The fuzzers run everywhere ctest does,** over their corpora and random changes of them by
+  fuzz/replay.cpp, and for real with libFuzzer, ASan, and UBSan in stability.yml.
+- **`LuauProcessMemory`** is new and public: std has no way to read a process's memory or its
+  live objects (for the fb lane), which a soak needs. On Windows it's private bytes, as the
+  working set jumps by megabytes as Windows trims and grows it.
+- **The soak judges memory by thirds,** and only from 5,000 iterations: a heap that grows once
+  steps once, where a leak grows at every stretch; a short run's slopes are within its noise.

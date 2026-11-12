@@ -105,3 +105,11 @@ Function AKeptThreadsHandlerCantBeTakenFromIt() Throws LuauError
     Expect(Try lua.Evaluate<Bool>("return refused"))
     Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
 End Function
+
+@Test
+Function DebugInfoRefusesANegativeLevelAsLuauDoes() Throws LuauError
+    // The guard adds one to a level of the caller's own, which turned -1 into 0, debug.info's own.
+    Local lua = LuauState()
+    Expect(Try lua.Evaluate<Bool>("local ok, e = pcall(debug.info, -1, 's') " +
+                                  "return not ok and e:find(\"level can't be negative\") ~= nil"))
+End Function

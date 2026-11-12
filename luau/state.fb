@@ -348,7 +348,7 @@ Public Class LuauState
     Public Method Run(source: String, name: String = "=chunk") Throws LuauError
         Local frame = Opened()
         Defer Closed(frame)
-        Try Check(Loaded(frame, source, name))
+        Try Check(Loaded(frame, source.Bytes, name))
         Try Check(fbl_call_function(Handle, frame, 0, 0))
     End Method
 
@@ -361,7 +361,7 @@ Public Class LuauState
     Public Method Evaluate<T: LuauType>(source: String, name: String = "=chunk"): T Throws LuauError
         Local frame = Opened()
         Defer Closed(frame)
-        Try Check(Loaded(frame, source, name))
+        Try Check(Loaded(frame, source.Bytes, name))
         Try Check(fbl_call_function(Handle, frame, 0, 1))
         Return Try T.FromLuau(LuauSlots(Self, frame), 0)
     End Method
@@ -413,6 +413,17 @@ Public Class LuauState
     /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
     @PanicsAtCaller
     Public Method Load(source: String, name: String = "=chunk"): LuauFunction Throws LuauError
+        Return Try Load(source.Bytes, name)
+    End Method
+
+    /// Compiles `source`, its bytes as they are, which Luau's source is, so a file that isn't
+    /// UTF-8, like one of Latin-1, loads as it would in Luau's own tools.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
+    @PanicsAtCaller
+    Public Method Load(source: UInt8[], name: String = "=chunk"): LuauFunction Throws LuauError
         Local frame = Opened()
         Defer Closed(frame)
         Try Check(Loaded(frame, source, name))
@@ -991,8 +1002,8 @@ Public Class LuauState
     End Method
 
     /// Compiles `source` as `name` into the frame's next slot, as a function: a status.
-    Package Method Loaded(frame: Int32, source: String, name: String): Int32
-        Local bytes = source.Bytes
+    Package Method Loaded(frame: Int32, source: UInt8[], name: String): Int32
+        Local bytes = source
         Unsafe
             Return fbl_load_source(Handle, frame, PointerOf(ByRef bytes), bytes.Count, name)
         End Unsafe

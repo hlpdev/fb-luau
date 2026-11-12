@@ -36,4 +36,10 @@ set(fbl_luau_libraries Luau.Require Luau.Analysis Luau.Config Luau.CodeGen Luau.
     Luau.Inliner Luau.Bytecode Luau.Ast Luau.VM Luau.Common)
 foreach(library IN LISTS fbl_luau_libraries)
   set_target_properties(${library} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  # Luau casts a double to an int and keeps what the processor gives, a NaN's or a huge one's too
+  # (luaH_get, lua_tointegerx, the VM's loops): its design, which UBSan's float-cast-overflow calls
+  # undefined. The check stays on for the shim's own code.
+  if(FBL_SANITIZE MATCHES "undefined")
+    target_compile_options(${library} PRIVATE -fno-sanitize=float-cast-overflow)
+  endif()
 endforeach()

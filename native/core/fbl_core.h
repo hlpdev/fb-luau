@@ -58,6 +58,11 @@ FBL_API const char* fbl_core_luau_version(void);
 // What the last call that failed on this thread says went wrong, or "" before any has.
 FBL_API const char* fbl_core_error(void);
 
+// The bytes of memory the process holds now, as the OS counts them, which a soak watches for a
+// slow leak: on Windows its private bytes, and on Linux and macOS its resident set; or -1 where
+// they can't be read.
+FBL_API int64_t fbl_core_resident(void);
+
 #ifdef __cplusplus
 }
 #endif

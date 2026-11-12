@@ -137,7 +137,7 @@ Public Class LuauScript
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try Loaded(state, frame, source, name == "" ? Name : name)
+        Try Loaded(state, frame, source.Bytes, name == "" ? Name : name)
         Try state.Check(fbl_call_function(state.Handle, frame, 1, 0))
     End Method
 
@@ -151,7 +151,7 @@ Public Class LuauScript
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try Loaded(state, frame, source, name == "" ? Name : name)
+        Try Loaded(state, frame, source.Bytes, name == "" ? Name : name)
         Try state.Check(fbl_call_function(state.Handle, frame, 1, 1))
         Return Try T.FromLuau(LuauSlots(state, frame), 1)
     End Method
@@ -192,6 +192,17 @@ Public Class LuauScript
     /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
     @PanicsAtCaller
     Public Method Load(source: String, name: String = ""): LuauFunction Throws LuauError
+        Return Try Load(source.Bytes, name)
+    End Method
+
+    /// Compiles `source` in it, its bytes as they are, which Luau's source is, so a file that
+    /// isn't UTF-8 loads as it would in Luau's own tools.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
+    @PanicsAtCaller
+    Public Method Load(source: UInt8[], name: String = ""): LuauFunction Throws LuauError
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
@@ -228,10 +239,10 @@ Public Class LuauScript
         Try state.Check(state.LoadedCode(frame, code, 0))
     End Method
 
-    Method Loaded(state: LuauState, frame: Int32, source: String, name: String) Throws LuauError
+    Method Loaded(state: LuauState, frame: Int32, source: UInt8[], name: String) Throws LuauError
         Local slots = LuauSlots(state, frame)
         Try slots.PushRef(Ref)
-        Local bytes = source.Bytes
+        Local bytes = source
         Local status: Int32
         Unsafe
             status = fbl_load_source_in(state.Handle, frame, PointerOf(ByRef bytes), bytes.Count,

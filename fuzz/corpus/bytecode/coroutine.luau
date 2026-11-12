@@ -1,0 +1,1 @@
+local co = coroutine.wrap(function(a) coroutine.yield(a) end) return co(1)

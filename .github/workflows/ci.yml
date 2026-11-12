@@ -65,6 +65,10 @@ jobs:
           fb --version
           fb test luau
 
+      # Luau's conformance scripts through the package, native code off and on.
+      - name: Conformance
+        run: fb run --release tests/conformance
+
       # The docs check reads the package, which needs its library.
       - name: Docs
         if: matrix.target == 'linux-x64'

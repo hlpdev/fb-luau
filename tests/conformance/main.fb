@@ -1,0 +1,121 @@
+// Luau's conformance scripts, from its tests/conformance at the pinned release, run through the
+// package as Luau's own runner runs them (tests/Conformance.test.cpp): each in a State of its own,
+// with collectgarbage in full, loadstring and the environments on, print silent, the State frozen
+// and the script in a LuauScript, as luaL_sandbox and luaL_sandboxthread make it, and _G its
+// globals; each must return "OK". Each runs twice, its native code OFF and ALL. A script that needs
+// what only Luau's own runner has, its C API or its debugger, is listed with why, and not run.
+//
+// `fb run tests/conformance` runs them all; `fb run tests/conformance -- <name>` one.
+
+Import std.collections
+Import std.core
+Import std.os
+Import std.text
+Import luau
+
+// The scripts, as they are in Luau's repository.
+Const Scripts = EmbedFolder("scripts")
+
+// Scripts that can't run here, and why: what only Luau's own runner has, its C functions, its
+// C API, its debugger, or its internals; and what the package's sandbox refuses by design.
+Const Skipped: Map<String, String> = {
+    "apicalls.luau": "calls Luau's C API from C functions of the runner's own",
+    "classes.luau": "is in class syntax, which an experimental flag of Luau's turns on",
+    "closure.luau": "sets a thread's globals, setfenv(0), which the sandbox refuses",
+    "coroutine.luau": "expects its chunk on Luau's main thread, where the package runs a " +
+    "script on a thread of its call's",
+    "coroutinehost.luau": "resumes coroutines from the runner's C code",
+    "coverage.luau": "reads coverage counters, which the package doesn't give",
+    "cyield.luau": "needs C functions of the runner's that yield and continue",
+    "debugger.luau": "sets breakpoints and single-steps through Luau's debugger callbacks",
+    "events.luau": "reads a thread's globals, getfenv(0), which the sandbox refuses",
+    "exceptions.luau": "throws C++ exceptions through the runner's C functions",
+    "gc.luau": "needs the runner's setblockallocations, of Luau's allocator",
+    "interrupt.luau": "needs the runner's own interrupt callback",
+    "iter.luau": "needs the runner's cYieldingIterator, a C function that yields",
+    "jit_inliner.luau": "turns on the code generator's inliner, an experimental option",
+    "locals.luau": "reads a thread's globals, getfenv(0), which the sandbox refuses",
+    "native_types.luau": "asks is_native of a function that's left native code, which only " +
+    "Luau's internals know",
+    "native_userdata.luau": "needs the runner's userdata types, by tag, for native code",
+    "ndebug_upvalues.luau": "is compiled at debug level 0 by the runner",
+    "pcall.luau": "needs the runner's cxxthrow, a C++ exception through Luau",
+    "tables.luau": "needs the runner's makelud, a light userdata",
+    "types.luau": "needs the runner's RTTI, the type checker's builtin types as a table",
+    "udata_direct.luau": "needs the runner's userdata, with direct access by tag",
+    "userdata.luau": "needs the runner's userdata types and their metatables",
+    "vector.luau": "needs the runner's metatable for vectors, its Magnitude and Unit"
+}
+
+// Scripts Luau's runner runs only when its code is native, as they ask is_native.
+Const NativeOnly: String[] = ["integers_regspill.luau", "native.luau"]
+
+// Runs one script with native code `native`: Null when it gave "OK", or what went wrong.
+Function Ran(name: String, source: UInt8[], native: LuauNativeCode): String?
+    Local options = LuauOptions()
+    options.CollectGarbage = LuauCollectGarbage.FULL
+    options.LoadString = True
+    options.Environments = True
+    options.NativeCode = native
+    options.Print = Function(line: String)
+    End Function
+    options.Tasks = False
+    Try
+        Local lua = Try LuauState(options)
+        // As a debug build of Luau's runner does, the deep recursions are shallower.
+        Try lua.Set("limitedstack", True)
+        // The runner's is_native reads Luau's internals for whether its caller runs as native
+        // code; here, it's whether the State compiles everything and the generator runs, which is
+        // what the scripts that ask expect.
+        Local compiled = native == LuauNativeCode.ALL && LuauNativeCodeSupported()
+        Try lua.SetFunction("is_native", Function() => compiled)
+        Try lua.SetFunction("is_native_if_supported", Function(): Bool
+            Return native == LuauNativeCode.OFF || !LuauNativeCodeSupported() || compiled
+        End Function)
+        Try lua.Freeze()
+        Local script = Try lua.NewScript("=" + name)
+        Try script.Set("_G", Try script.Globals())
+        Local result = Try (Try script.Load(source, "=" + name)).Call<LuauValue>()
+        lua.Close()
+        If result.AsString() == "OK" Then Return Null
+        Return "gave {result}, not OK"
+    Catch error As LuauError
+        Return "{error.Kind}: {error.Message}"
+    End Try
+End Function
+
+Local arguments = Process.Arguments()
+Local only = arguments.Count > 0 ? arguments[0] : ""
+Local passed = 0
+Local failed = 0
+Local skipped = 0
+Local names: String[] = []
+For entry In Scripts
+    names.Add(entry.0)
+End For
+names.Sort()
+For name In names
+    If only != "" && name != only && name != only + ".luau" Then Continue
+    Local why = Skipped.Get(name)
+    If why != Null
+        Print("skip {name}: {why}")
+        skipped++
+        Continue
+    End If
+    Local source = Scripts[name]
+    For native In [LuauNativeCode.OFF, LuauNativeCode.ALL]
+        // A script of native code's own runs only where it's native, as Luau's runner has it.
+        If NativeOnly.Contains(name) && (native == LuauNativeCode.OFF || !LuauNativeCodeSupported())
+            Continue
+        End If
+        Local wrong = Ran(name, source, native)
+        If wrong == Null
+            passed++
+        Else
+            Print("FAIL {name} ({native}): {wrong}")
+            failed++
+        End If
+    End For
+End For
+Print("conformance: {passed} passed, {failed} failed, {skipped} skipped")
+If failed > 0 Then Process.Exit(1)
