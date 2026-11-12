@@ -166,8 +166,13 @@ int load_string(lua_State* stack) {
     size_t length = 0;
     const char* source = luaL_checklstring(stack, 1, &length);
     // Named by its source when it isn't given a name, as Luau's and Lua's loadstring name it,
-    // which its errors show as [string "..."].
-    const char* name = luaL_optstring(stack, 2, source);
+    // which its errors show as [string "..."]. A name a script gives that starts with "@", a
+    // path's, is marked "=" instead, which shows the same, so require never resolves from a
+    // path a script picked.
+    std::string name = luaL_optstring(stack, 2, source);
+    if (name.starts_with('@')) {
+        name[0] = '=';
+    }
     // The compiler's memory isn't the State's, so a source bigger than what the limit leaves is
     // refused before it's compiled.
     if (state != nullptr && state->memory_limit > 0 &&
@@ -194,7 +199,7 @@ int load_string(lua_State* stack) {
     lua_pushvalue(stack, 3);
     lua_xmove(stack, loader, 1);
     lua_replace(loader, LUA_GLOBALSINDEX);
-    const int failed = luau_load(loader, name, bytecode.get(), size, 0);
+    const int failed = luau_load(loader, name.c_str(), bytecode.get(), size, 0);
     lua_xmove(loader, stack, 1);
     if (failed == 0) {
         if (state != nullptr) {

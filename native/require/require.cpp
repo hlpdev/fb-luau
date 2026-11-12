@@ -24,6 +24,10 @@ LUAU_FASTFLAG(LuauCyclicRequireShortCircuit)
 
 namespace {
 
+// The module a chunk that isn't named for a path requires as: one at the root, so "./x" is
+// the root's "x".
+constexpr std::string_view root_module = "=";
+
 fbl::state_t& state_of(void* context) {
     return *static_cast<fbl::state_t*>(context);
 }
@@ -157,12 +161,17 @@ luarequire_NavigateResult reset(lua_State* /*stack*/, void* context, const char*
     state.require_walk = {};
     const std::string_view name = requirer;
     if (!name.starts_with('@')) {
-        // A chunk of another name requires from the root, as a module there.
-        state.require_walk.parts = { std::string(name) };
+        // A chunk of another name, the program's own code's, or one loadstring made, whose name a
+        // script picks, requires from the root, as a module there; its name is never a path.
+        state.require_walk.parts = { std::string(root_module) };
         return NAVIGATE_SUCCESS;
     }
+    // A path's parts are checked, as require's argument's are, before anything's read.
+    if (name.size() > fbl::most_path_bytes) {
+        return NAVIGATE_NOT_FOUND;
+    }
     std::optional<std::vector<std::string>> parts = fbl::module_parts(name.substr(1));
-    if (!parts) {
+    if (!parts || fbl::is_too_long(*parts)) {
         return NAVIGATE_NOT_FOUND;
     }
     state.require_walk.parts = std::move(*parts);
@@ -237,6 +246,8 @@ std::string config_file(const fbl::state_t& state) {
 
 luarequire_ConfigStatus get_config_status(lua_State* stack, void* context) {
     fbl::state_t& state = state_of(context);
+    // The search for a .luaurc climbs a folder at a time, which the budget holds to.
+    fbl::check_deadline(stack);
     const std::string file = config_file(state);
     return read_file(state, stack, file).has_value() ? CONFIG_PRESENT_JSON : CONFIG_ABSENT;
 }
