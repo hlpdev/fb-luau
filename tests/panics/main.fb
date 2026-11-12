@@ -34,6 +34,11 @@ Function Run(name: String) Throws LuauError
             Local lua = LuauState()
             Local data = Try lua.NewBuffer(4)
             data.ReadUInt32(1)
+        // A read so far past a buffer's end that making room for it first would fail.
+        Case "buffer-read-huge"
+            Local lua = LuauState()
+            Local data = Try lua.NewBuffer(4)
+            data.Read(0, 1099511627776)
         // A memory limit below 0.
         Case "negative-limit"
             Local options = LuauOptions()

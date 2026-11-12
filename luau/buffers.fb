@@ -108,7 +108,7 @@ Public Class LuauBuffer Implements LuauType
             Local state = Owner
             Local frame = state.Opened()
             Defer state.Closed(frame)
-            Try? LuauSlots(state, frame).PushRef(Ref)
+            LuauSlots(state, frame).PushHeld(Ref)
             Local length = fbl_buffer_length(state.Handle, frame, 0)
             If length < 0 Then Panic(LastError())
             Return length
@@ -125,8 +125,13 @@ Public Class LuauBuffer Implements LuauType
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try? LuauSlots(state, frame).PushRef(Ref)
-        If count < 0 Then Panic("{count} bytes aren't any")
+        LuauSlots(state, frame).PushHeld(Ref)
+        Local length = fbl_buffer_length(state.Handle, frame, 0)
+        If length < 0 Then Panic(LastError())
+        // Within it before anything's made for them.
+        If count < 0 || offset < 0 || offset > length - count
+            Panic("{count} bytes at {offset} aren't within a buffer of {length}")
+        End If
         Local bytes = Buffer<UInt8>(Max(count, 1))
         Local read: Bool
         Unsafe
@@ -146,7 +151,7 @@ Public Class LuauBuffer Implements LuauType
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try? LuauSlots(state, frame).PushRef(Ref)
+        LuauSlots(state, frame).PushHeld(Ref)
         Local kept = bytes
         Local written: Bool
         Unsafe

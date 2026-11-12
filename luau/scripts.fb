@@ -79,10 +79,13 @@ Public Class LuauScript
     ReadOnly Field owner: Weak<LuauState>
     /// The State's reference to its globals' table.
     Package ReadOnly Field Ref: Int32
+    /// Its name: the chunk name its code has when it's given none.
+    Public ReadOnly Field Name: String
 
-    Package New(owner: LuauState, ref: Int32)
+    Package New(owner: LuauState, ref: Int32, name: String)
         Self.owner = owner
         Ref = ref
+        Self.Name = name
     End New
 
     Method Destroy()
@@ -111,17 +114,18 @@ Public Class LuauScript
         Return Try LuauTable.FromLuau(slots, 0)
     End Method
 
-    /// Compiles and runs `source` in it, as the chunk `name`, as LuauState.Run does.
+    /// Compiles and runs `source` in it, as the chunk `name`, or its Name for "", as LuauState.Run
+    /// does.
     ///
     /// # Errors
     ///
     /// What LuauState.Run throws.
     @PanicsAtCaller
-    Public Method Run(source: String, name: String = "=script") Throws LuauError
+    Public Method Run(source: String, name: String = "") Throws LuauError
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try Loaded(state, frame, source, name)
+        Try Loaded(state, frame, source, name == "" ? Name : name)
         Try state.Check(fbl_call_function(state.Handle, frame, 1, 0))
     End Method
 
@@ -131,12 +135,11 @@ Public Class LuauScript
     ///
     /// What Run throws, and a LuauError of CONVERSION when its result isn't a T.
     @PanicsAtCaller
-    Public Method Evaluate<T: LuauType>(source: String,
-                                        name: String = "=script"): T Throws LuauError
+    Public Method Evaluate<T: LuauType>(source: String, name: String = ""): T Throws LuauError
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try Loaded(state, frame, source, name)
+        Try Loaded(state, frame, source, name == "" ? Name : name)
         Try state.Check(fbl_call_function(state.Handle, frame, 1, 1))
         Return Try T.FromLuau(LuauSlots(state, frame), 1)
     End Method
@@ -147,11 +150,11 @@ Public Class LuauScript
     ///
     /// A LuauError of SYNTAX for source that doesn't compile, or of MEMORY.
     @PanicsAtCaller
-    Public Method Load(source: String, name: String = "=script"): LuauFunction Throws LuauError
+    Public Method Load(source: String, name: String = ""): LuauFunction Throws LuauError
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)
-        Try Loaded(state, frame, source, name)
+        Try Loaded(state, frame, source, name == "" ? Name : name)
         Return Try LuauFunction.FromLuau(LuauSlots(state, frame), 1)
     End Method
 

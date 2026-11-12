@@ -159,7 +159,7 @@ Public Class LuauTable Implements LuauType
     Public Method Length(): Int
         Local frame = Owner.Opened()
         Defer Owner.Closed(frame)
-        Try? LuauSlots(Owner, frame).PushRef(Ref)
+        LuauSlots(Owner, frame).PushHeld(Ref)
         Local length = fbl_table_length(Owner.Handle, frame, 0)
         If length < 0 Then Panic(LastError())
         Return length
@@ -264,7 +264,7 @@ Public Class LuauTable Implements LuauType
         Get
             Local frame = Owner.Opened()
             Defer Owner.Closed(frame)
-            Try? LuauSlots(Owner, frame).PushRef(Ref)
+            LuauSlots(Owner, frame).PushHeld(Ref)
             Local frozen = fbl_table_is_frozen(Owner.Handle, frame, 0)
             If frozen < 0 Then Panic(LastError())
             Return frozen == 1

@@ -66,6 +66,11 @@ FBL_API uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* stat
 // the program's that Luau called, or for a handle that isn't a State's.
 FBL_API bool fbl_state_close(uint64_t state);
 
+// Runs a step of the collector, as collectgarbage("step") does, of about `kilobytes`, or Luau's
+// own step for 0: 1 when it finished a cycle, 0 when it didn't, or -1 for a handle that isn't a
+// State's, or kilobytes below 0.
+FBL_API int32_t fbl_state_step(uint64_t state, int32_t kilobytes);
+
 // How many States the process has open, on every thread, which a program's tests and soaks watch
 // come back to what it was.
 FBL_API int64_t fbl_state_count(void);

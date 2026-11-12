@@ -279,6 +279,33 @@ Public Struct LuauSlots
         Return FBL_YIELD
     End Method
 
+    /// Nothing when slot `index` holds a value a table's key can be.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION for nil or NaN, which no table's key is.
+    Package Method KeyAt(index: Int32) Throws LuauError
+        Local type = TypeAt(index)
+        If type == FBL_TYPE_NIL
+            Throw LuauError(LuauErrorKind.CONVERSION, "a table's key can't be nil")
+        End If
+        If type == FBL_TYPE_NUMBER
+            Local number = Try Float64.FromLuau(Self, index)
+            If number != number Then Throw LuauError(LuauErrorKind.CONVERSION, "a table's key can't be NaN")
+        End If
+    End Method
+
+    /// Adds the value of the State's reference `ref`, for a member that can't throw, panicking at
+    /// the caller with what happened when the State has no memory left for it.
+    @PanicsAtCaller
+    Package Method PushHeld(ref: Int32)
+        Try
+            Try PushRef(ref)
+        Catch error As LuauError
+            Panic("the Luau State has no memory left to reach the value: {error.Message}")
+        End Try
+    End Method
+
     /// Gives a number to Luau.
     @PanicsAtCaller
     Package Method PushNumber(value: Float64) Throws LuauError

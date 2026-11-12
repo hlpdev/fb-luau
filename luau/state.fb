@@ -250,6 +250,30 @@ Public Class LuauState
         Closed(Opened())
     End Method
 
+    /// Runs a step of its collector, of about `kilobytes`, or Luau's own step for 0, as a game's
+    /// frame might, and outside a call, lets go of what Luau collected: whether it finished a cycle.
+    ///
+    /// # Panics
+    ///
+    /// For kilobytes below 0.
+    @PanicsAtCaller
+    Public Method Step(kilobytes: Int32 = 0): Bool
+        Local finished = fbl_state_step(Live(), kilobytes)
+        If finished < 0 Then Panic(LastError())
+        Closed(Opened())
+        Return finished == 1
+    End Method
+
+    /// Whether the global `name` is set, to anything but nil, as a script reads it.
+    ///
+    /// # Errors
+    ///
+    /// What its globals' metatable raises.
+    @PanicsAtCaller
+    Public Method Has(name: String): Bool Throws LuauError
+        Return !(Try Get<LuauValue>(name)).IsNil
+    End Method
+
     /// Compiles and runs `source`, as the chunk `name`, which its errors and tracebacks show: Luau
     /// names a file's chunk "@path", and any other "=name".
     ///
@@ -374,6 +398,7 @@ Public Class LuauState
         Try Check(fbl_table_new(Handle, frame, 0, entries.Count))
         For entry In entries
             Try K.ToLuau(slots, entry.0)
+            Try slots.KeyAt(1)
             Try V.ToLuau(slots, entry.1)
             Try Check(fbl_table_raw_set(Handle, frame, 0, 1, 2))
             slots.Truncate(1)
@@ -458,18 +483,20 @@ Public Class LuauState
         Try Check(fbl_require_forget(Live()))
     End Method
 
-    /// A new script, with globals of its own over its State's, which it freezes.
+    /// A new script, with globals of its own over its State's, which it freezes, named `name`: the
+    /// chunk name its code has when it's given none, which tracebacks show, as "=doors", or
+    /// "@mods/doors/main.luau", which `require` goes from.
     ///
     /// # Errors
     ///
     /// A LuauError of MEMORY.
     @PanicsAtCaller
-    Public Method NewScript(): LuauScript Throws LuauError
+    Public Method NewScript(name: String = "=script"): LuauScript Throws LuauError
         Local frame = Opened()
         Defer Closed(frame)
         Try Check(fbl_sandbox_environment(Handle, frame))
         Local slots = LuauSlots(Self, frame)
-        Return LuauScript(Self, Try slots.RefAt(0))
+        Return LuauScript(Self, Try slots.RefAt(0), name)
     End Method
 
     /// Sets `print` to write through `printer`, or std's Print for Null, when it has Luau's print.

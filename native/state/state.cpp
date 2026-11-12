@@ -687,6 +687,21 @@ bool fbl_state_close(uint64_t state) try {
     return false;
 }
 
+int32_t fbl_state_step(uint64_t state, int32_t kilobytes) try {
+    const fbl::state_t* found = fbl::find_state(state);
+    if (found == nullptr) {
+        return -1;
+    }
+    if (kilobytes < 0) {
+        fbl::fail(fbl::formatted("a step of {} kilobytes isn't one", kilobytes));
+        return -1;
+    }
+    return lua_gc(found->main, LUA_GCSTEP, kilobytes) != 0 ? 1 : 0;
+} catch (...) {
+    fbl::escaped();
+    return -1;
+}
+
 int64_t fbl_state_count(void) try {
     const std::scoped_lock lock(slots_mutex);
     return std::ranges::count_if(slots, [](const slot_t& slot) { return slot.state != nullptr; });

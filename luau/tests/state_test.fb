@@ -1,3 +1,4 @@
+Import std.collections
 Import std.test
 Import std.text
 Import luau
@@ -171,4 +172,31 @@ Function AStateThatFailsAsItsMadeIsClosed() Throws LuauError
         Expect(LuauStatesOpen() == before, "{kilobytes} KiB")
     End For
     Expect(failed > 0)
+End Function
+
+@Test
+Function ATableOfANaNKeyIsAConversionError() Throws LuauError
+    Local lua = LuauState()
+    Local entries: Map<Float64, Int> = {}
+    Local zero = 0.0
+    entries[zero / zero] = 1
+    Expect(ExpectThrows<LuauError>(lua.NewTable(entries))?.Kind == LuauErrorKind.CONVERSION)
+End Function
+
+@Test
+Function StepHasAndAScriptsName() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Run(r"made = {}")
+    Expect(Try lua.Has("made"))
+    Expect(!(Try lua.Has("missing")))
+    Local finished = False
+    For step = 0 Until 1000
+        If lua.Step(64) Then finished = True
+        If finished Then Break
+    End For
+    Expect(finished)
+    Local script = Try lua.NewScript("=doors")
+    Expect(script.Name == "=doors")
+    Local error = ExpectThrows<LuauError>(script.Run("error('stuck')"))
+    Expect(error != Null && error.Message == "doors:1: stuck", error?.Message ?? "")
 End Function
