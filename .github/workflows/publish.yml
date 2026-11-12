@@ -1,0 +1,133 @@
+name: Publish
+
+# A release, only on the user's yes: on a tag v<version>, which the user pushes, or by hand with the
+# registry named. Each target's library (native.yml), all five unpacked into the package, a check
+# that they're there and that the tag is the package's version, a dry run, then `fb publish` by
+# trusted publishing to the registry; then on each target a new project that adds that version of
+# luau from the registry and runs a script.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: Where to publish, by a name in [registries], futureblitz.dev by default
+        default: futureblitz.dev
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FB_VERSION: 1.3.0
+  REGISTRY: ${{ inputs.registry || 'futureblitz.dev' }}
+
+jobs:
+  native:
+    uses: ./.github/workflows/native.yml
+
+  publish:
+    name: publish
+    needs: native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    # An environment the repository's settings can give required reviewers.
+    environment: publish
+    permissions:
+      contents: read
+      # Trusted publishing: the registry takes the workflow's OIDC token, no secret.
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Unpack each target's library
+        run: |
+          for target in windows-x64 linux-x64 linux-arm64 macos-arm64 macos-x64; do
+            tar -xf native-$target.tar
+            ls luau/native/$target/*luau_native* > /dev/null
+          done
+
+      - name: Check the version
+        id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' luau/project.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "v$version" != "$GITHUB_REF_NAME" ]]; then
+            echo "the tag is $GITHUB_REF_NAME, but luau/project.toml says $version"
+            exit 1
+          fi
+
+      - name: Publish
+        run: |
+          fb publish --dry-run --registry "$REGISTRY" luau
+          fb publish --registry "$REGISTRY" luau
+
+  # A new project on each target that adds the published luau and runs a script.
+  installed:
+    name: installed ${{ matrix.target }}
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-2025
+          - target: linux-x64
+            os: ubuntu-22.04
+          - target: linux-arm64
+            os: ubuntu-22.04-arm
+          - target: macos-arm64
+            os: macos-15
+          - target: macos-x64
+            os: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+
+      - uses: ./.github/actions/install-fb
+        with:
+          version: ${{ env.FB_VERSION }}
+
+      - name: Add luau and run a script
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          fb new hello
+          cd hello
+          # The index can take a moment to have the new version.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            fb add "luau@$VERSION" --registry "$REGISTRY" && break
+            sleep 30
+          done
+          grep -q "luau" project.toml
+          cat > main.fb <<'PROGRAM'
+          Import std.core
+          Import luau
+
+          Local lua = LuauState()
+          Try lua.SetFunction("add", Function(a: Int, b: Int) => a + b)
+          Print("luau {LuauLibraryVersion()}: {Try lua.Evaluate<Int>("return add(2, 3)")}")
+          PROGRAM
+          fb run 2>&1 | tee run.log
+          grep -q ": 5" run.log

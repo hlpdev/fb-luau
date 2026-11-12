@@ -814,10 +814,13 @@ and `fb doc luau --check`. Its flags are fbengine's: `--build`, `--base`, `--no-
 - **stability.yml**, nightly and by hand: ASan with UBSan, and TSan, over the stability tests;
   each fuzzer for 10 minutes; and the soak.
 - **targeted.yml**, by hand: a ctest pattern on the targets it names.
-- **publish.yml**, by hand, only on the user's yes: on a tag `v<version>`, native.yml, every
-  target's library into the package, a check that all five are there, `fb publish` by trusted
-  publishing to the registry it's given, staging or futureblitz.dev, and a check that a new
-  project can `fb add luau` and run a script on each target.
+- **publish.yml**, by hand, only on the user's yes: on a tag `v<version>`, or by hand with a
+  registry named in `[registries]`, native.yml, every target's library into the package, a check
+  that all five are there and that the tag is the package's version, a dry run, then `fb publish`
+  by trusted publishing (the workflow's OIDC token, in an environment `publish` whose settings can
+  ask for a reviewer) to the registry, futureblitz.dev by default, and a check that a new project
+  on each target can `fb add` that version and run a script. ctest's tools.publish_dry_run builds
+  and checks the archives against a registry in a build folder, with the target's own library.
 
 The coordinating session watches CI; the lane doesn't.
 

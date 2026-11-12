@@ -157,6 +157,16 @@ if(FBL_FB_TESTS)
   add_test(NAME luau.conformance
            COMMAND "${FBL_FB}" --color never run --release "${CMAKE_CURRENT_SOURCE_DIR}/conformance")
   set_tests_properties(luau.conformance PROPERTIES PASS_REGULAR_EXPRESSION " 0 failed")
+  # A dry run of fb publish, which builds and checks the package's archives as a registry would,
+  # against a registry in a folder of the build's, with this target's library.
+  file(WRITE "${PROJECT_BINARY_DIR}/registry/config.json"
+       "{\"api\":\"http://127.0.0.1:1/api/v1\",\"dl\":\"http://127.0.0.1:1/dl/{name}/{version}/{file}\",\"v\":1}
+")
+  add_test(NAME tools.publish_dry_run
+           COMMAND "${FBL_FB}" --color never publish --dry-run --offline
+                   --registry "${PROJECT_BINARY_DIR}/registry" "${PROJECT_SOURCE_DIR}/luau")
+  set_tests_properties(tools.publish_dry_run PROPERTIES
+                       PASS_REGULAR_EXPRESSION "Finished the dry run of luau v")
   # The bytecode container's fuzzer, in FutureBlitz, for 5 seconds; stability.yml's is 10 minutes.
   add_test(NAME fuzz.containers
            COMMAND "${FBL_FB}" --color never run --release "${PROJECT_SOURCE_DIR}/fuzz/containers" -- 5)

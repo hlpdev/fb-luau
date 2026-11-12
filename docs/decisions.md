@@ -320,3 +320,12 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   working set jumps by megabytes as Windows trims and grows it.
 - **The soak judges memory by thirds,** and only from 5,000 iterations: a heap that grows once
   steps once, where a leak grows at every stretch; a short run's slopes are within its noise.
+
+## L14 (2026-11-11)
+
+- **publish.yml publishes only from a tag the user pushes, or a run the user starts,** and only
+  after a dry run of the same archives; its job is in an environment, `publish`, so the
+  repository's settings can ask for a reviewer too. The installed check retries `fb add` for up to
+  five minutes, as the registry's index can lag the publish.
+- **The release's notes are a draft for the user** (fbengine-notes/luau/release-0.1.0.md): the
+  tag, the GitHub release, and publishing are the user's to do.
