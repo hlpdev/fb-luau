@@ -322,8 +322,13 @@ by `Resume`. A State closed while its threads wait ends every wait, and each Sta
 ## Sandboxing a game's mods
 
 A State is sandboxed as Luau's own sandbox makes it: `Freeze()` makes the globals and every
-library read-only, and each `LuauScript` has globals of its own over them, so one mod can't
+library read-only, and each `LuauScript` has globals of its own over them, so one script can't
 change what another sees; a State's first `NewScript` freezes it, if the program hasn't.
+
+A State is what keeps one mod from another. Its memory limit, its waits, its threads, and its
+modules are the State's: scripts in one State share them, and a thread or a function one script
+hands to another's code is theirs to resume, close, or call. So the scripts of one State are one
+author's files, and each mod, a stranger's code, gets a State of its own.
 `LuauOptions` sets a memory limit for the whole State, 256 MB unless the program sets one, and a
 time budget for each call into it, 10 seconds unless it sets one; 0 is none, by the program's
 choice. `LuauOptions.Sandbox()` is a mod's, tighter: 64 MB, 50 ms a call, and 1,000 waits.
@@ -332,9 +337,9 @@ Past the time budget, the script meets a `LuauError` of `TIMEOUT` at every safe 
 own `pcall` can't keep it from, and the call ends. Past the memory limit, the allocation that
 went past fails with "not enough memory", which a script's `pcall` does catch, as Luau's does, so
 a script can go on; the call gives a `MEMORY` error only when the script doesn't catch it. And
-the limit is the State's, not a script's: a mod that hoards makes every other mod's calls fail
-for want of memory until it lets go. A State for each mod gives each its own memory, at the
-cost of what it shares.
+the limit is the State's, not a script's: a script that hoards makes every other script's calls
+in its State fail for want of memory until it lets go, which a State for each mod keeps to the
+mod.
 
 ```vb
 Import std.test
@@ -485,20 +490,18 @@ a `type function` is refused, with a diagnostic named "TypeFunction" at each, an
 The parts above make the shape a game's modding takes, the one SCP: Containment Breach X's mods
 take, which any game can follow:
 
-1. **One State for the game's mods**, with a memory limit and a time budget, and its `Modules`
-   over the mods' folder. Its `Print` goes to the game's log.
+1. **A State for each mod**, made with `LuauOptions.Sandbox()`, and its `Modules` over the mods'
+   folder. Its `Print` goes to the game's log.
 2. **What mods reach, and nothing else:** the game's types registered, marking only what a mod
    may use, its functions set, events a mod hooks by giving a function, then `Freeze()`.
 3. **Its scheduler started first:** `world.Run(lua.Start())` on the game's own Scheduler, so a
    mod's waits run on the game's time, stop when it pauses, and a mod can wait as it loads.
 4. **Each mod checked, then loaded:** `LuauChecker` with `lua.Definitions()` finds what a mod
-   gets wrong before it runs; each mod runs in a `NewScript` of its own.
+   gets wrong before it runs; then it runs in its State's `NewScript`.
 5. **Each mod's failure its own:** each mod's check, its load, and every call of the game's
    into it are caught for that mod alone, as a LuauError of the mod's: one that fails is dropped,
-   with what it gave the game, and the game goes on. `ThreadError` hears of a thread that failed
-   on the scheduler. Memory is the exception: the limit is the State's, so a mod that hoards
-   fails the others' calls too, until it's dropped and its garbage collected; a game that can't
-   have that gives each mod a State of its own.
+   its State closed, which ends its waits and threads, and the game goes on. `ThreadError` hears
+   of a thread that failed on the scheduler.
 
 examples/modded_game is that game, small, with eight mods: one refused by the checker, one that
 runs out of memory as it loads, one that loops as it loads with its checking turned off, one

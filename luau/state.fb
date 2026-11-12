@@ -227,7 +227,8 @@ Public Class LuauState
     /// What gets an error that ends a thread nothing waits for.
     Package Field ThreadError: Func(LuauError)
 
-    /// Makes a State with the default options: no memory limit, and Luau's libraries.
+    /// Makes a State with the default options, as `LuauOptions()` has them: a memory limit of
+    /// 256 MB, a time budget of 10 seconds a call, and every library.
     @PanicsAtCaller
     Public New()
         Functions = {}
@@ -246,11 +247,13 @@ Public Class LuauState
         ThreadError = Function(error: LuauError)
             Reported(error)
         End Function
-        Local made = Made(LuauOptions())
+        Local options = LuauOptions()
+        MostWaiting = options.MostWaiting
+        TickBudget = options.TimeBudget
+        Local made = Made(options)
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
-        TickBudget = Duration.FromNanoseconds(0)
         Try? Printing(Null)
         Try
             Try TaskLibrary(Self)

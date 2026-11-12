@@ -485,4 +485,12 @@ Written while the PC was kept free for the user: none of it built or run until t
   and nested calls ran in the host's strings, arena, and native stack, which no limit held. The
   heap limit of 109 stays as a second fence.
 - **An own level of INT_MAX isn't shifted (128),** which would overflow; Luau refuses it.
+- **A State a mod (125):** in one State a mod's memory, waits, threads, and required modules are
+  every mod's, so one that hoards to just under the limit, or holds every wait, fails the
+  others, and a dropped mod's threads run on. The modded game gives each mod a State of its own,
+  made with Sandbox(), closed when the mod's dropped; the guide says a State is what keeps one
+  mod from another, scripts in one State being one author's files. The checker's definitions
+  come from a State given the API the same way, closed after.
+- **LuauState() is LuauState(LuauOptions()) (126):** its tick budget and waits limit are the
+  defaults', 10 seconds and 10,000, where the tick budget was none.
 

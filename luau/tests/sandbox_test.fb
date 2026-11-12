@@ -246,17 +246,17 @@ Function AModulesCoroutinesWorkForTheScriptsThatRequireIt() Throws LuauError
     // given, and a signal that keeps a thread and spawns it later all work for a script.
     Local files: Map<String, String> = {
         "words.luau": r"return { each = function(list) return coroutine.wrap(function() " +
-                      r"for _, w in list do coroutine.yield(w) end end) end }",
+        r"for _, w in list do coroutine.yield(w) end end) end }",
         "helpers.luau": r"return { run = function(f, ...) local co = coroutine.create(f) " +
-                        r"return coroutine.resume(co, ...) end, " +
-                        r"close = function(co) return coroutine.close(co) end }",
+        r"return coroutine.resume(co, ...) end, " +
+        r"close = function(co) return coroutine.close(co) end }",
         "signal.luau": r"local Signal = {} Signal.__index = Signal " +
-                       r"function Signal.new() return setmetatable({ waiting = {} }, Signal) end " +
-                       r"function Signal.Wait(self) table.insert(self.waiting, coroutine.running()) " +
-                       r"return coroutine.yield() end " +
-                       r"function Signal.Fire(self, ...) local waiting = self.waiting " +
-                       r"self.waiting = {} for _, t in waiting do task.spawn(t, ...) end end " +
-                       r"return Signal"
+        r"function Signal.new() return setmetatable({ waiting = {} }, Signal) end " +
+        r"function Signal.Wait(self) table.insert(self.waiting, coroutine.running()) " +
+        r"return coroutine.yield() end " +
+        r"function Signal.Fire(self, ...) local waiting = self.waiting " +
+        r"self.waiting = {} for _, t in waiting do task.spawn(t, ...) end end " +
+        r"return Signal"
     }
     Local options = LuauOptions()
     options.Modules = Function(path: String): String? => files.Get(path)
@@ -292,6 +292,8 @@ Function ADefaultStateEndsARunawayScript() Throws LuauError
     Local options = LuauOptions()
     Expect(options.MemoryLimit == 256 * 1024 * 1024 && options.TimeBudget == 10.Seconds)
     Local lua = LuauState()
+    // A driver's tick has the call's budget, LuauState() as LuauState(LuauOptions()).
+    Expect(lua.TickBudget == options.TimeBudget && lua.MostWaiting == options.MostWaiting)
     Local hoard = ExpectThrows<LuauError>(lua.Run("local t = {{}} for i = 1, 1e9 do " +
                                                   "t[i] = string.rep('x', 4096) .. i end"))
     Expect(hoard?.Kind == LuauErrorKind.MEMORY)
