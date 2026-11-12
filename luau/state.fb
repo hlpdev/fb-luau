@@ -907,14 +907,14 @@ Public Class LuauState
     End Method
 
     /// T's registration, if it has one.
-    Package Method KeptType<T: LuauObject>(): LuauTypeBuilder<T>?
+    Package Method KeptType<T: LuauObject & Class>(): LuauTypeBuilder<T>?
         Local kept = Types.Get(LuauTypeId<T>.Of())
         If kept == Null Then Return Null
         Return kept As LuauTypeBuilder<T>
     End Method
 
     /// A new registration of T, which Finished finishes.
-    Package Method NewType<T: LuauObject>(): LuauTypeBuilder<T>
+    Package Method NewType<T: LuauObject & Class>(): LuauTypeBuilder<T>
         nextType++
         DeclaredTypes[TypeName<T>()] = {}
         Return LuauTypeBuilder<T>(Self, nextType, TypeName<T>())
@@ -923,7 +923,7 @@ Public Class LuauState
     /// Gives `type`'s objects their metatable, of its __index, __newindex, and __namecall, and its
     /// Methods each a Luau function, and keeps it.
     @PanicsAtCaller
-    Package Method Finished<T: LuauObject>(type: LuauTypeBuilder<T>) Throws LuauError
+    Package Method Finished<T: LuauObject & Class>(type: LuauTypeBuilder<T>) Throws LuauError
         For entry In type.Methods
             type.Functions[entry.0] = Try NewFunction(entry.0, entry.1)
         End For
@@ -951,7 +951,7 @@ Public Class LuauState
 
     /// T's registration, panicking at the caller when it has none.
     @PanicsAtCaller
-    Package Method TypeOf<T: LuauObject>(): LuauTypeBuilder<T>
+    Package Method TypeOf<T: LuauObject & Class>(): LuauTypeBuilder<T>
         Local kept = Types.Get(LuauTypeId<T>.Of())
         If kept == Null Then Panic("{TypeName<T>()} isn't registered; Register<{TypeName<T>()}>() first")
         Return kept As LuauTypeBuilder<T>
@@ -959,9 +959,11 @@ Public Class LuauState
 
     /// Adds `value`'s userdata to the frame: the one Luau has for it, or a new one.
     @PanicsAtCaller
-    Package Method PushObject<T: LuauObject>(slots: LuauSlots, value: T) Throws LuauError
+    Package Method PushObject<T: LuauObject & Class>(slots: LuauSlots, value: T) Throws LuauError
         Local type = TypeOf<T>()
-        Local id = type.Ids.Get(value)
+        // By which object it is, never its Class's own == or Hash: two equal objects are two
+        // userdata, and one whose Hash changes while Luau has it is still the one.
+        Local id = type.Ids.Get(Identity(value))
         If id != Null && fbl_udata_push(Live(), slots.Frame, id) == FBL_OK Then Return
         nextObject++
         Local object = nextObject
@@ -969,12 +971,12 @@ Public Class LuauState
         Try Check(status)
         Objects[object] = LuauBox<T>(value)
         ObjectTypes[object] = type.Number
-        type.Ids[value] = object
+        type.Ids[Identity(value)] = object
     End Method
 
     /// The object a userdata slot holds, as a T.
     @PanicsAtCaller
-    Package Method ObjectAt<T: LuauObject>(slots: LuauSlots, index: Int32): T Throws LuauError
+    Package Method ObjectAt<T: LuauObject & Class>(slots: LuauSlots, index: Int32): T Throws LuauError
         Local name = TypeName<T>()
         If slots.TypeAt(index) != FBL_TYPE_USERDATA Then Throw slots.Wrong(name, index)
         Local id: Int64 = 0

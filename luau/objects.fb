@@ -109,7 +109,7 @@ End Enum
 /// Expect(Try lua.Evaluate<Bool>("return door.IsOpen"))
 /// Expect(ExpectThrows<LuauError>(lua.Run("return door.secret")) != Null)
 /// ```
-Public Interface LuauObject Extends LuauType, Hashable
+Public Interface LuauObject Extends LuauType
     /// Gives it to Luau as its userdata, the one Luau has for it, if it has it.
     Static Method ToLuau(slots: LuauSlots, value: Self) Throws LuauError
         Try slots.Owner.PushObject(slots, value)
@@ -160,7 +160,7 @@ End Class
 /// Try lua.Set("b", Money(250))
 /// Expect(Try lua.Evaluate<Int>("return (a + b).cents") == 400)
 /// ```
-Public Class LuauTypeBuilder<T: LuauObject>
+Public Class LuauTypeBuilder<T: LuauObject & Class>
     // Its State, held weakly, as a handle holds it.
     ReadOnly Field owner: Weak<LuauState>
     /// Its number in its State.
@@ -176,7 +176,7 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Package Field AddedGetters: Map<String, LuauFunction>
     Package Field AddedSetters: Map<String, LuauFunction>
     /// The number of each object Luau has, which its userdata holds.
-    Package Field Ids: Map<T, Int64>
+    Package Field Ids: Map<Identity<T>, Int64>
     /// The metamethods reflection gives it before its metatable is made, which then has them.
     Package Field Pending: (LuauOperator, LuauFunction)[] = []
     /// The member each Luau name is, of the Methods reflection exposes, by kind, so two of one name
@@ -383,7 +383,7 @@ Public Class LuauTypeBuilder<T: LuauObject>
         Local kept = state.Objects.Get(id)
         If kept == Null Then Return
         Local box = kept As? LuauBox<T>
-        If box != Null && Ids.Get(box.Value) == id Then Ids.Remove(box.Value)
+        If box != Null && Ids.Get(Identity(box.Value)) == id Then Ids.Remove(Identity(box.Value))
     End Method
 
     /// What a script's `object.key` reads: a field, a Method, or an error saying there's none.

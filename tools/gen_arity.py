@@ -300,7 +300,7 @@ def expose_members():
                         "saying which. A marked Static, ByRef, or Unsafe Method isn't exposed, and isn't\n"
                         "said, as FutureBlitz's reflection doesn't go over them.")
     lines += ["    @PanicsAtCaller",
-              "    Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError",
+              "    Public Method Register<T: LuauObject & Class>(): LuauTypeBuilder<T> Throws LuauError",
               "        Local kept = KeptType<T>()",
               "        If kept != Null Then Return kept",
               "        Local type = NewType<T>()"]
