@@ -53,7 +53,7 @@ int32_t fbl_buffer_new(uint64_t state, int32_t frame, int64_t size) try {
         lua_newbuffer(stack, static_cast<size_t>(size));
         return 1;
     };
-    return fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+    return fbl::run_protected(*found, in->thread, 0, 1, work);
 } catch (...) {
     return fbl::escaped();
 }

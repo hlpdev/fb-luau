@@ -67,17 +67,18 @@ void* allocate(void* data, void* block, size_t old_size, size_t new_size) {
     return made;
 }
 
-// What protect() calls: the work its light userdata names.
-struct work_t {
-    fbl::work_function_t function;
-    void* data;
-};
-
+// What protect() calls: the work it left in the State, which it takes, so the work's own code, or
+// a script that reaches this function as it runs, finds none. Its caller isn't trusted: called
+// with no work pending, it raises.
 int run_work(lua_State* stack) {
-    const auto* work = static_cast<const work_t*>(lua_touserdata(stack, 1));
-    lua_remove(stack, 1);
+    const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
+    if (state == nullptr || state->pending_work.function == nullptr) {
+        luaL_error(stack, "the shim's own function can't be called");
+    }
+    const fbl::work_t work = state->pending_work;
+    state->pending_work = {};
     try {
-        return work->function(stack, work->data);
+        return work.function(stack, work.data);
     } catch (const std::exception&) {
         // Luau takes these as errors itself.
         throw;
@@ -112,15 +113,34 @@ int collect_garbage(lua_State* stack) {
     return 1;
 }
 
+// Pushes the environment of the function at `level` above the C function running, or the
+// globals' for a C function's, as a C function's own is its creator's globals.
+void push_caller_environment(lua_State* stack, int level) {
+    lua_Debug info{};
+    if (lua_getinfo(stack, level, "f", &info) != 0) {
+        if (lua_isfunction(stack, -1) && !lua_iscfunction(stack, -1)) {
+            lua_getfenv(stack, -1);
+            lua_remove(stack, -2);
+            return;
+        }
+        lua_pop(stack, 1);
+    }
+    lua_pushvalue(stack, LUA_GLOBALSINDEX);
+}
+
 // loadstring: compiles source with the State's options, never loading bytecode, into a function of
-// the caller's environment, which it marks unsafe for Luau's fast paths, as Luau's own does; nil
-// and the error for source that doesn't compile.
+// its caller's environment, which it marks unsafe for Luau's fast paths, as Luau's own does; nil
+// and the error for source that doesn't compile. The chunk loads on a thread whose globals are
+// that environment, as Luau resolves a chunk's globals from the loading thread's.
 int load_string(lua_State* stack) {
     const auto* state = static_cast<const fbl::state_t*>(lua_callbacks(stack)->userdata);
     size_t length = 0;
     const char* source = luaL_checklstring(stack, 1, &length);
     const char* name = luaL_optstring(stack, 2, "=loadstring");
-    lua_setsafeenv(stack, LUA_ENVIRONINDEX, 0);
+    lua_settop(stack, 2);
+    luaL_checkstack(stack, 4, "loadstring");
+    push_caller_environment(stack, 1);
+    lua_setsafeenv(stack, -1, 0);
     lua_CompileOptions options = state == nullptr ? lua_CompileOptions{} : state->compile_options;
     size_t size = 0;
     const std::unique_ptr<char, decltype(&std::free)> bytecode(
@@ -128,12 +148,64 @@ int load_string(lua_State* stack) {
     if (bytecode == nullptr) {
         luaL_error(stack, "not enough memory to compile");
     }
-    if (luau_load(stack, name, bytecode.get(), size, 0) == 0) {
+    lua_State* loader = lua_newthread(stack);
+    lua_pushvalue(stack, 3);
+    lua_xmove(stack, loader, 1);
+    lua_replace(loader, LUA_GLOBALSINDEX);
+    const int failed = luau_load(loader, name, bytecode.get(), size, 0);
+    lua_xmove(loader, stack, 1);
+    if (failed == 0) {
         return 1;
     }
     lua_pushnil(stack);
     lua_insert(stack, -2);
     return 2;
+}
+
+// The function getfenv or setfenv names by its first argument, pushed: a function given, or the
+// one at a level from 1; a thread's globals, level 0, are refused, as their table is the shared
+// one, or a runner's, which every call reuses.
+void environment_function(lua_State* stack, bool optional) {
+    if (lua_isfunction(stack, 1)) {
+        lua_pushvalue(stack, 1);
+    } else {
+        const int level =
+            optional ? luaL_optinteger(stack, 1, 1) : luaL_checkinteger(stack, 1);
+        luaL_argcheck(stack, level > 0, 1, "a thread's globals can't be reached; give a level from 1");
+        lua_Debug info{};
+        if (lua_getinfo(stack, level, "f", &info) == 0) {
+            luaL_argerror(stack, 1, "invalid level");
+        }
+        if (lua_isnil(stack, -1)) {
+            luaL_error(stack, "no function environment for tail call at level %d", level);
+        }
+    }
+    // A C function's environment is its creator's globals, which aren't a script's to reach.
+    if (lua_iscfunction(stack, -1)) {
+        luaL_error(stack, "a C function's environment can't be reached");
+    }
+}
+
+// getfenv, where the options turn it on: a Luau function's environment, marked unsafe for Luau's
+// fast paths, as Luau's own does.
+int get_environment(lua_State* stack) {
+    environment_function(stack, true);
+    lua_getfenv(stack, -1);
+    lua_setsafeenv(stack, -1, 0);
+    return 1;
+}
+
+// setfenv, where the options turn it on: sets a Luau function's environment, and gives the
+// function, as Luau's own does.
+int set_environment(lua_State* stack) {
+    luaL_checktype(stack, 2, LUA_TTABLE);
+    environment_function(stack, false);
+    lua_pushvalue(stack, 2);
+    lua_setsafeenv(stack, -1, 0);
+    if (lua_setfenv(stack, -2) == 0) {
+        luaL_error(stack, "'setfenv' cannot change environment of given object");
+    }
+    return 1;
 }
 
 // The interrupt, at Luau's safe points: past the running call's deadline, it raises the timeout,
@@ -179,11 +251,18 @@ int set_up(lua_State* stack) {
     open(stack, *state, FBL_LIBRARY_BUFFER, LUA_BUFFERLIBNAME, luaopen_buffer);
     open(stack, *state, FBL_LIBRARY_VECTOR, LUA_VECLIBNAME, luaopen_vector);
     open(stack, *state, FBL_LIBRARY_INTEGER, LUA_INTLIBNAME, luaopen_integer);
-    if ((state->libraries & static_cast<uint32_t>(FBL_LIBRARY_BASE)) != 0U &&
-        !state->environments) {
-        lua_pushnil(stack);
+    if ((state->libraries & static_cast<uint32_t>(FBL_LIBRARY_BASE)) != 0U) {
+        if (state->environments) {
+            lua_pushcfunction(stack, get_environment, "getfenv");
+        } else {
+            lua_pushnil(stack);
+        }
         lua_setglobal(stack, "getfenv");
-        lua_pushnil(stack);
+        if (state->environments) {
+            lua_pushcfunction(stack, set_environment, "setfenv");
+        } else {
+            lua_pushnil(stack);
+        }
         lua_setglobal(stack, "setfenv");
     }
     if (state->collect_garbage != FBL_COLLECT_NONE) {
@@ -326,17 +405,19 @@ int32_t kind_of(int status) noexcept {
 
 int protect_erased(const state_t& state, lua_State* thread, int arguments, int results,
                    work_function_t function, void* data) noexcept {
-    // Room for the function, its own argument, and what it gives, which lua_checkstack makes
-    // without raising, or says it couldn't.
-    if (lua_checkstack(thread, 2 + results) == 0) {
+    // Room for the function and what it gives, which lua_checkstack makes without raising, or
+    // says it couldn't.
+    if (lua_checkstack(thread, 1 + results) == 0) {
         return no_room;
     }
-    work_t work{ .function = function, .data = data };
     lua_rawgeti(thread, LUA_REGISTRYINDEX, state.protect_ref);
     lua_insert(thread, -(arguments + 1));
-    lua_pushlightuserdata(thread, &work);
-    lua_insert(thread, -(arguments + 1));
-    return lua_pcall(thread, arguments + 1, results, 0);
+    // Pending until the function takes it; what was pending, for protect() in protect(), after.
+    const work_t before = state.pending_work;
+    state.pending_work = { .function = function, .data = data };
+    const int status = lua_pcall(thread, arguments, results, 0);
+    state.pending_work = before;
+    return status;
 }
 
 int32_t settle(state_t& state, lua_State* thread, int status) noexcept {

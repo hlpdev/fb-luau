@@ -74,7 +74,7 @@ int32_t fbl_table_new(uint64_t state, int32_t frame, int32_t array, int32_t hash
         lua_createtable(stack, array, hash);
         return 1;
     };
-    return fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+    return fbl::run_protected(*found, in->thread, 0, 1, work);
 } catch (...) {
     return fbl::escaped();
 }

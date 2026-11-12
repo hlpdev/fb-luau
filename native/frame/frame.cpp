@@ -255,8 +255,7 @@ int32_t fbl_frame_push_string(uint64_t state, int32_t frame, const uint8_t* byte
         lua_pushlstring(stack, value.data(), value.size());
         return 1;
     };
-    return fbl::settle(*found.state, found.frame->thread,
-                       fbl::protect(*found.state, found.frame->thread, 0, 1, work));
+    return fbl::run_protected(*found.state, found.frame->thread, 0, 1, work);
 } catch (...) {
     return fbl::escaped();
 }
@@ -377,8 +376,7 @@ int32_t fbl_frame_get_global(uint64_t state, int32_t frame, const uint8_t* name,
         lua_gettable(stack, LUA_GLOBALSINDEX);
         return 1;
     };
-    return fbl::settle(*found.state, found.frame->thread,
-                       fbl::protect(*found.state, found.frame->thread, 0, 1, work));
+    return fbl::run_protected(*found.state, found.frame->thread, 0, 1, work);
 } catch (...) {
     return fbl::escaped();
 }

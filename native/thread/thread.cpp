@@ -76,7 +76,7 @@ int32_t fbl_thread_new(uint64_t state, int32_t frame, int32_t slot) try {
         lua_xmove(stack, made, 1);
         return 1;
     };
-    return fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 1, 1, work));
+    return fbl::run_protected(*found, in->thread, 1, 1, work);
 } catch (...) {
     return fbl::escaped();
 }

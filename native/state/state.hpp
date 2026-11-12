@@ -28,6 +28,13 @@ struct frame_t {
     int base = 0;
 };
 
+// Work protect() runs: a function and its data, as C++ erases a lambda's type.
+using work_function_t = int (*)(lua_State*, void*);
+struct work_t {
+    work_function_t function = nullptr;
+    void* data = nullptr;
+};
+
 // A State: a Luau VM of its own, with its allocator's count and limit, the options its code
 // compiles with, and what the program has open on it.
 struct state_t {
@@ -50,8 +57,11 @@ struct state_t {
     bool environments = false;
     bool frozen = false;
     lua_CompileOptions compile_options{};
-    // The registry's reference to the C function protect() runs work in, made with the State.
+    // The registry's reference to the C function protect() runs work in, made with the State, and
+    // the work it runs next, which only protect() sets, and which that function takes and clears
+    // before it runs it, so a script that reaches the function finds nothing to run.
     int protect_ref = LUA_NOREF;
+    mutable work_t pending_work;
     std::vector<frame_t> frames;
     // A thread for each depth of calls, which the registry keeps.
     std::vector<int> runner_refs;
@@ -120,7 +130,6 @@ int32_t kind_of(int status) noexcept;
 // pushed, when the stack can't grow. `work` is called with the thread and gives how many values it
 // pushed, as a C function does.
 constexpr int no_room = -1;
-using work_function_t = int (*)(lua_State*, void*);
 int protect_erased(const state_t& state, lua_State* thread, int arguments, int results,
                    work_function_t function, void* data) noexcept;
 
@@ -135,6 +144,15 @@ int protect(const state_t& state, lua_State* thread, int arguments, int results,
 // What a protect()'s status is to the program: FBL_OK, or the error, kept as the State's, its
 // value taken off `thread`'s stack.
 int32_t settle(state_t& state, lua_State* thread, int status) noexcept;
+
+// protect() then settle(), on `thread`, which is taken by value before the work runs: the work can
+// run a script's code, which can call the program, which opens frames, so nothing in `frames` is
+// read after it.
+template <typename Work>
+int32_t run_protected(state_t& state, lua_State* thread, int arguments, int results,
+                      Work& work) noexcept {
+    return settle(state, thread, protect(state, thread, arguments, results, work));
+}
 
 // The userdata tag of a program's function's number, whose destructor gives it back.
 constexpr int function_tag = 1;

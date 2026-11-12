@@ -356,16 +356,17 @@ int32_t fbl_require_open(uint64_t state, int32_t frame, int32_t reader_slot) try
         return 0;
     };
     const int arguments = has_reader ? 1 : 0;
-    const int status = fbl::protect(*found, in->thread, arguments, 0, work);
+    lua_State* const thread = in->thread;
+    const int status = fbl::protect(*found, thread, arguments, 0, work);
     if (status == fbl::no_room) {
-        lua_pop(in->thread, arguments);
+        lua_pop(thread, arguments);
     }
-    const int32_t settled = fbl::settle(*found, in->thread, status);
+    const int32_t settled = fbl::settle(*found, thread, status);
     if (settled == FBL_OK) {
         found->require_reader = made;
         found->require_open = true;
     } else if (made != LUA_NOREF) {
-        lua_unref(in->thread, made);
+        lua_unref(thread, made);
     }
     return settled;
 } catch (...) {
@@ -381,7 +382,7 @@ int32_t fbl_require_forget(uint64_t state) try {
         luarequire_clearcache(stack);
         return 0;
     };
-    return fbl::settle(*found, found->current, fbl::protect(*found, found->current, 0, 0, work));
+    return fbl::run_protected(*found, found->current, 0, 0, work);
 } catch (...) {
     return fbl::escaped();
 }

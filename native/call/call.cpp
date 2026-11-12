@@ -145,11 +145,16 @@ int32_t fbl_call_function(uint64_t state, int32_t frame, int32_t slot, int32_t r
             fbl::formatted("calls into Luau and back went more than {} deep", fbl::max_depth));
     }
     lua_State* co = runner(*found, thread, found->depth);
-    if (co == nullptr || lua_checkstack(co, count) == 0) {
+    if (co == nullptr || lua_checkstack(co, count + 1) == 0 ||
+        lua_checkstack(found->main, 1) == 0) {
         lua_settop(thread, index - 1);
         return co == nullptr ? found->error_kind
                              : fbl::record_error(*found, FBL_MEMORY, "not enough memory");
     }
+    // Its globals are the main thread's for every call, whatever a call before did to them.
+    lua_pushvalue(found->main, LUA_GLOBALSINDEX);
+    lua_xmove(found->main, co, 1);
+    lua_replace(co, LUA_GLOBALSINDEX);
     lua_xmove(thread, co, count);
     const int status = fbl::resume_from(*found, thread, co, count - 1, false);
     if (status != LUA_OK) {

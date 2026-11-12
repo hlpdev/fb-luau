@@ -80,14 +80,17 @@ int32_t load(uint64_t state, int32_t frame, const uint8_t* source, int64_t lengt
             return 1;
         };
         const int arguments = in_environment ? 1 : 0;
-        const int status = fbl::protect(*found, in->thread, arguments, 1, work);
+        // Taken before the work, which can't run a script's code here, but nothing in frames is
+        // read after protect().
+        lua_State* const thread = in->thread;
+        const int status = fbl::protect(*found, thread, arguments, 1, work);
         if (status == fbl::no_room) {
-            lua_pop(in->thread, arguments);
+            lua_pop(thread, arguments);
         }
         if (!compiled && status == LUA_ERRRUN) {
-            return fbl::take_error(*found, in->thread, FBL_SYNTAX);
+            return fbl::take_error(*found, thread, FBL_SYNTAX);
         }
-        return fbl::settle(*found, in->thread, status);
+        return fbl::settle(*found, thread, status);
     } catch (const std::exception&) {
         return fbl::record_error(*found, FBL_MEMORY, "not enough memory to compile");
     }

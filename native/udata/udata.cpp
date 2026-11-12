@@ -243,8 +243,7 @@ int32_t fbl_udata_new(uint64_t state, int32_t frame, int64_t object, int32_t typ
         lua_pop(stack, 1);
         return 1;
     };
-    const int32_t status = fbl::settle(*found.state, found.frame->thread,
-                                       fbl::protect(*found.state, found.frame->thread, 0, 1, work));
+    const int32_t status = fbl::run_protected(*found.state, found.frame->thread, 0, 1, work);
     if (status == FBL_OK) {
         found.state->live_objects++;
     }

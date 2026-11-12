@@ -132,7 +132,7 @@ int32_t fbl_callback_namecall(uint64_t state, int32_t frame, int64_t function,
         return 1;
     };
     const int32_t status =
-        fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+        fbl::run_protected(*found, in->thread, 0, 1, work);
     if (status == FBL_OK) {
         found->live_functions++;
     }
@@ -167,7 +167,7 @@ int32_t fbl_callback_function(uint64_t state, int32_t frame, int64_t function,
         return 1;
     };
     const int32_t status =
-        fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+        fbl::run_protected(*found, in->thread, 0, 1, work);
     if (status == FBL_OK) {
         found->live_functions++;
     }
@@ -210,7 +210,7 @@ int32_t fbl_callback_where(uint64_t state, int32_t frame) try {
         luaL_where(stack, 2);
         return 1;
     };
-    return fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+    return fbl::run_protected(*found, in->thread, 0, 1, work);
 } catch (...) {
     return fbl::escaped();
 }

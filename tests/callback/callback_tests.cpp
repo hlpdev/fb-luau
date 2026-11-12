@@ -17,6 +17,7 @@ constexpr int64_t boom = 2;
 constexpr int64_t nested = 3;
 constexpr int64_t where = 4;
 constexpr int64_t silent = 5;
+constexpr int64_t deep = 6;
 
 // What the test's callback has called, for the nesting test.
 int depth_reached = 0;
@@ -65,6 +66,19 @@ int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
     case silent:
         fbl_frame_truncate(state, frame, 0);
         return FBL_OK;
+    case deep: {
+        // Opens frames enough to move the State's frames elsewhere in memory, then fails.
+        std::array<int32_t, 200> opened{};
+        for (int32_t& each : opened) {
+            each = fbl_frame_open(state);
+        }
+        for (auto each = opened.rbegin(); each != opened.rend(); ++each) {
+            fbl_frame_close(state, *each);
+        }
+        fbl_frame_truncate(state, frame, 0);
+        fbl_frame_push_string(state, frame, bytes_of("deep failed"), 11);
+        return FBL_RUNTIME;
+    }
     default:
         return FBL_OTHER;
     }
@@ -173,4 +187,29 @@ TEST_CASE("an error's value is kept, whatever it is") {
     REQUIRE(fbl_state_error_value(lua.handle, frame) == FBL_OK);
     CHECK(fbl_frame_type(lua.handle, frame, 0) == FBL_TYPE_STRING);
     REQUIRE(fbl_frame_close(lua.handle, frame));
+}
+
+TEST_CASE("a script's code run by the program's get or set, which opens frames, fails cleanly") {
+    const test_state_t lua;
+    REQUIRE(fbl_callback_set(test_callback));
+    set_function(lua, "deep", deep);
+    REQUIRE(lua.run("hooked = setmetatable({}, { __index = function() deep() end, "
+                    "__newindex = function() deep() end }) "
+                    "setmetatable(_G, { __index = function() deep() end, "
+                    "__newindex = function() deep() end })") == FBL_OK);
+    const int32_t frame = fbl_frame_open(lua.handle);
+    CHECK(fbl_frame_get_global(lua.handle, frame, bytes_of("missing"), 7) == FBL_RUNTIME);
+    CHECK(lua.error_message().ends_with("deep failed"));
+    REQUIRE(fbl_frame_push_number(lua.handle, frame, 1) == FBL_OK);
+    CHECK(fbl_frame_set_global(lua.handle, frame, bytes_of("late"), 4, 0) == FBL_RUNTIME);
+    CHECK(lua.error_message().ends_with("deep failed"));
+    fbl_frame_truncate(lua.handle, frame, 0);
+    REQUIRE(fbl_frame_get_global(lua.handle, frame, bytes_of("hooked"), 6) == FBL_OK);
+    REQUIRE(fbl_frame_push_string(lua.handle, frame, bytes_of("x"), 1) == FBL_OK);
+    CHECK(fbl_table_get(lua.handle, frame, 0, 1) == FBL_RUNTIME);
+    CHECK(lua.error_message().ends_with("deep failed"));
+    REQUIRE(fbl_frame_push_number(lua.handle, frame, 2) == FBL_OK);
+    CHECK(fbl_table_set(lua.handle, frame, 0, 1, 2) == FBL_RUNTIME);
+    CHECK(lua.error_message().ends_with("deep failed"));
+    CHECK(fbl_frame_close(lua.handle, frame));
 }

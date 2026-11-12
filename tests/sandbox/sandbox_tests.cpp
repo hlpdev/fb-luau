@@ -102,3 +102,83 @@ TEST_CASE("a load into what isn't a table is refused") {
     CHECK(fbl_frame_count(lua.handle, frame) == 1);
     CHECK(fbl_frame_close(lua.handle, frame));
 }
+
+namespace {
+
+// A script, run inside the shim's protected work by a table's __index, that finds the shim's own
+// C function on the stack, and calls it with nothing, a number, a table, and a proxy: each call an
+// error, as it trusts no caller. It counts the calls that failed in `refused`.
+constexpr std::string_view probe =
+    "refused = 0\n"
+    "probe = setmetatable({}, { __index = function()\n"
+    "  for level = 1, 50 do\n"
+    "    local f, n = debug.info(level, 'fn')\n"
+    "    if f == nil then break end\n"
+    "    if n == 'fbl' then\n"
+    "      for _, arg in { false, 1, {}, newproxy() } do\n"
+    "        if arg == false then arg = nil end\n"
+    "        if not pcall(f, arg) then refused += 1 end\n"
+    "      end\n"
+    "    end\n"
+    "  end\n"
+    "  return 7\n"
+    "end })";
+
+} // namespace
+
+TEST_CASE("the shim's own function, reached by a script, runs nothing") {
+    const test_state_t lua;
+    REQUIRE(lua.run(probe) == FBL_OK);
+    const int32_t frame = fbl_frame_open(lua.handle);
+    REQUIRE(fbl_frame_get_global(lua.handle, frame, bytes_of("probe"), 5) == FBL_OK);
+    REQUIRE(fbl_frame_push_string(lua.handle, frame, bytes_of("x"), 1) == FBL_OK);
+    REQUIRE(fbl_table_get(lua.handle, frame, 0, 1) == FBL_OK);
+    double got = 0;
+    CHECK(fbl_frame_number(lua.handle, frame, 2, &got));
+    CHECK(got == 7);
+    CHECK(fbl_frame_close(lua.handle, frame));
+    // It was found and called four times, each refused, and the State goes on.
+    CHECK(lua.run("assert(refused == 4, refused)") == FBL_OK);
+}
+
+TEST_CASE("getfenv and setfenv reach no thread's globals and no C function's environment") {
+    fbl_state_options_t options = default_options();
+    options.environments = true;
+    options.load_string = true;
+    const test_state_t lua(options);
+    CHECK(lua.run("setfenv(0, {})") == FBL_RUNTIME);
+    CHECK(lua.error_message().contains("a thread's globals can't be reached"));
+    CHECK(lua.run("getfenv(0)") == FBL_RUNTIME);
+    CHECK(lua.run("getfenv(print)") == FBL_RUNTIME);
+    CHECK(lua.error_message().contains("a C function's environment can't be reached"));
+    CHECK(lua.run("setfenv(print, {})") == FBL_RUNTIME);
+    // A Luau function's, and the caller's, as Luau's own.
+    CHECK(lua.run("local function f() return x end setfenv(f, { x = 5 }) assert(f() == 5)\n"
+                  "assert(getfenv(1) == _G and getfenv() == _G)") == FBL_OK);
+}
+
+TEST_CASE("one script can't take over another's loadstring through a reused runner") {
+    fbl_state_options_t options = default_options();
+    options.environments = true;
+    options.load_string = true;
+    const test_state_t lua(options);
+    // Script A tries to put its own table in as the runner's globals.
+    CHECK(run_in_environment(lua, "_spy = setmetatable({}, { __index = getfenv(0) }) "
+                                  "setfenv(0, _spy)") == FBL_RUNTIME);
+    CHECK(run_in_environment(lua, "spy = {} setfenv(1, spy)") == FBL_OK);
+    // Script B's loaded code writes and reads its own environment.
+    CHECK(run_in_environment(lua, "loadstring('token = 1')() assert(token == 1)") == FBL_OK);
+    CHECK(run_in_environment(lua, "assert(token == nil)") == FBL_OK);
+}
+
+TEST_CASE("loadstring loads into its caller's environment") {
+    fbl_state_options_t options = default_options();
+    options.load_string = true;
+    const test_state_t lua(options);
+    CHECK(lua.run("x = 1 assert(loadstring('return x')() == 1) loadstring('y = 2')() "
+                  "assert(y == 2)") == FBL_OK);
+    CHECK(run_in_environment(lua, "x = 3 assert(loadstring('return x')() == 3) "
+                                  "loadstring('z = 4')() assert(z == 4)") == FBL_OK);
+    CHECK(run_in_environment(lua, "assert(z == nil and x == 1)") == FBL_OK);
+    CHECK(lua.run("local f, e = loadstring('return +') assert(f == nil and e)") == FBL_OK);
+}

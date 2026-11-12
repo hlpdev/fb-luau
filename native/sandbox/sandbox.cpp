@@ -88,7 +88,7 @@ int32_t fbl_sandbox_environment(uint64_t state, int32_t frame) try {
     if (lua_checkstack(main, 1) == 0) {
         return fbl::record_error(*found, FBL_MEMORY, "not enough memory");
     }
-    return fbl::settle(*found, in->thread, fbl::protect(*found, in->thread, 0, 1, work));
+    return fbl::run_protected(*found, in->thread, 0, 1, work);
 } catch (...) {
     return fbl::escaped();
 }
