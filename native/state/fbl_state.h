@@ -66,6 +66,14 @@ FBL_API uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* stat
 // the program's that Luau called, or for a handle that isn't a State's.
 FBL_API bool fbl_state_close(uint64_t state);
 
+// How many States the process has open, on every thread, which a program's tests and soaks watch
+// come back to what it was.
+FBL_API int64_t fbl_state_count(void);
+
+// The bytes every State of the process holds, on every thread, which a program's tests and soaks
+// watch come back to what it was.
+FBL_API int64_t fbl_state_memory_all(void);
+
 // The bytes the State's VM holds, or -1 for a handle that isn't a State's.
 FBL_API int64_t fbl_state_memory(uint64_t state);
 

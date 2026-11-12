@@ -186,3 +186,74 @@ Function AFunctionCanHoldItsStateWeakly() Throws LuauError
     End Function)
     Expect(Try lua.Evaluate<Int>("return count()") == 42)
 End Function
+
+/// An error that says which raise it was.
+Class Numbered Extends Error
+    ReadOnly Field Number: Int
+
+    New(message: String, number: Int)
+        Super.New(message)
+        Number = number
+    End New
+End Class
+
+@Test
+Function ANestedCallsErrorKeepsItsKindThroughTheProgramsFunction() Throws LuauError
+    Local options = LuauOptions()
+    options.MemoryLimit = 1024 * 1024
+    Local lua = Try LuauState(options)
+    Local weak: Weak<LuauState> = lua
+    Try lua.SetFunction("eat", Function() Throws Error
+        Local held: LuauState? = weak
+        If held != Null Then Try held.Run(r"local t = {} for i = 1, 1e7 do t[i] = { i } end")
+    End Function)
+    Local error = ExpectThrows<LuauError>(lua.Run("eat()"))
+    Expect(error != Null && error.Kind == LuauErrorKind.MEMORY)
+End Function
+
+@Test
+Function AnotherStatesErrorCrossesByItsMessage() Throws LuauError
+    Local lua = LuauState()
+    Local other = LuauState()
+    Local closing = LuauState()
+    Try lua.SetFunction("other", Function() Throws Error
+        Try other.Run(r"error({})")
+    End Function)
+    Try lua.SetFunction("closing", Function() Throws Error
+        Try
+            Try closing.Run(r"error({ code = 5 })")
+        Catch failed As LuauError
+            closing.Close()
+            Throw failed
+        End Try
+    End Function)
+    For name In ["other", "closing"]
+        Local error = ExpectThrows<LuauError>(lua.Run("{name}()"))
+        Expect(error != Null && error.Cause Is LuauError, name)
+        Expect(error != Null && error.Message.Contains("table value"), error?.Message ?? "")
+    End For
+End Function
+
+@Test
+Function TheCauseIsTheMostRecentRaiseOfItsMessage() Throws LuauError
+    Local lua = LuauState()
+    Local raised = 0
+    Try lua.SetFunction("fail", Function() Throws Error
+        raised++
+        Throw Numbered("same", raised)
+    End Function)
+    Local error = ExpectThrows<LuauError>(lua.Run("pcall(fail) fail()"))
+    Expect(error != Null && error.Cause Is Numbered)
+    Expect(error != Null && (error.Cause As Numbered).Number == 2)
+End Function
+
+@Test
+Function ACopiedValueReadsOnceItsStateIsGone() Throws LuauError
+    Local lua = LuauState()
+    Local number = Try lua.Evaluate<LuauValue>("return 5")
+    Local text = Try lua.Evaluate<LuauValue>("return 'five'")
+    lua.Close()
+    Expect(Try number.Read<Int>() == 5)
+    Expect(Try text.Read<String>() == "five")
+    Expect(number.AsNumber() == 5)
+End Function

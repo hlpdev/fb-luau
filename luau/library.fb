@@ -1,6 +1,8 @@
-//! The package's library, luau_native: the versions it was built at, and what it says went wrong.
+//! The package's library, luau_native: the versions it was built at, what it says went wrong, and
+//! the States it has open.
 
 Import "./c/fbl_core"
+Import "./c/fbl_state"
 
 /// The version of the luau package's library the program runs with, like "0.1.0", which is the
 /// package's.
@@ -30,3 +32,18 @@ Package Function LastError(): String
         Return fbl_core_error().ToString()
     End Unsafe
 End Function
+
+/// How many States the process has open, on every thread, and the bytes they hold: what a
+/// program's tests and soaks watch come back to what it was.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local before = LuauStatesOpen()
+/// Local lua = LuauState()
+/// Expect(LuauStatesOpen().0 == before.0 + 1)
+/// lua.Close()
+/// Expect(LuauStatesOpen() == before)
+/// ```
+Public Function LuauStatesOpen(): (Int64, Int64) => (fbl_state_count(), fbl_state_memory_all())

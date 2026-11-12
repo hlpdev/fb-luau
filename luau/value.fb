@@ -112,6 +112,14 @@ Public Class LuauValue Implements LuauType, Printable
         End Select
     End Method
 
+    /// Whether it can be given to `state`: a copied value can to any, and one it keeps only to its
+    /// own, while it's open.
+    Package Method CanGoTo(state: LuauState): Bool
+        If ref == 0 Then Return True
+        Local held: LuauState? = owner
+        Return held != Null && held.IsOpen && RefEquals(held, state)
+    End Method
+
     /// Any slot's value.
     Public Static Method FromLuau(slots: LuauSlots, index: Int32): LuauValue Throws LuauError
         Local type = slots.TypeAt(index)
@@ -158,14 +166,31 @@ Public Class LuauValue Implements LuauType, Printable
     /// A string's bytes, a copy, or Null for any other.
     Public Method AsBytes(): UInt8[]? => Kind == LuauValueKind.STRING ? bytes.Clone() : Null
 
-    /// It as a T, as a slot of it would be read.
+    /// It as a T, as a slot of it would be read. A copied value, a nil, a boolean, a number, an
+    /// integer, or a string, reads once its State is gone too.
     ///
     /// # Errors
     ///
     /// A LuauError of CONVERSION when it isn't a T.
+    ///
+    /// # Panics
+    ///
+    /// For a value its State keeps, once the State is closed.
     @PanicsAtCaller
     Public Method Read<T: LuauType>(): T Throws LuauError
-        Local state = Owner
+        Local held: LuauState? = owner
+        If ref == 0 && (held == Null || !held.IsOpen)
+            // A State of its own to read it through, as its own is gone.
+            Local scratch = LuauState()
+            Defer scratch.Close()
+            Return Try ReadIn<T>(scratch)
+        End If
+        Return Try ReadIn<T>(Owner)
+    End Method
+
+    /// It as a T, read through `state`.
+    @PanicsAtCaller
+    Method ReadIn<T: LuauType>(state: LuauState): T Throws LuauError
         Local frame = state.Opened()
         Defer state.Closed(frame)
         Local slots = LuauSlots(state, frame)

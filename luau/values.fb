@@ -225,11 +225,14 @@ Public Struct LuauSlots
     /// A LuauError of MEMORY when there's no room for either.
     Package Method PushError(error: Error, where: String) Throws LuauError
         Local count = Count()
+        // A LuauError goes on as it was, its value too when that's this State's, or copied; it's
+        // kept by its message either way, so it comes back out as the Cause, with its Kind.
         If error Is LuauError
             Local value = (error As LuauError).Value
-            If value != Null
+            If value != Null && value.CanGoTo(Owner)
                 Try
                     Try LuauValue.ToLuau(Self, value)
+                    Owner.Raised[error.Message] = error
                     Return
                 Catch failed As LuauError
                     Truncate(count)

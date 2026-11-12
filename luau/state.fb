@@ -191,9 +191,15 @@ Public Class LuauState
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
-        Try Printing(options.Print)
-        If options.Tasks Then Try TaskLibrary(Self)
-        Try Requiring(options.Modules)
+        // A New that throws never runs Destroy, so what's made is closed first.
+        Try
+            Try Printing(options.Print)
+            If options.Tasks Then Try TaskLibrary(Self)
+            Try Requiring(options.Modules)
+        Catch error As LuauError
+            Close()
+            Throw error
+        End Try
     End New
 
     Method Destroy()
@@ -724,12 +730,12 @@ Public Class LuauState
             message = TextAt(fbl_state_error_message(Handle, AddressOf(length)), length)
             traceback = TextAt(fbl_state_error_traceback(Handle, AddressOf(length)), length)
         End Unsafe
-        // A yield nothing can wait for, refused by the package's function, is still a yield.
+        // A LuauError that went through a function of the program's, raised again in the script,
+        // keeps its Kind: a nested call's MEMORY or TIMEOUT, or a refused yield's YIELD. The most
+        // recent raise with the message is its Cause; a script that changes the message loses it.
         Local cause = Raised.Get(message)
         Local kind = status As LuauErrorKind
-        If cause Is LuauError && (cause As LuauError).Kind == LuauErrorKind.YIELD
-            kind = LuauErrorKind.YIELD
-        End If
+        If status == FBL_RUNTIME && cause Is LuauError Then kind = (cause As LuauError).Kind
         Throw LuauError(kind, message, traceback, cause, ErrorValue())
     End Method
 

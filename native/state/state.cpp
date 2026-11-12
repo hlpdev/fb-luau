@@ -687,6 +687,21 @@ bool fbl_state_close(uint64_t state) try {
     return false;
 }
 
+int64_t fbl_state_count(void) try {
+    const std::scoped_lock lock(slots_mutex);
+    return std::ranges::count_if(slots, [](const slot_t& slot) { return slot.state != nullptr; });
+} catch (...) {
+    fbl::escaped();
+    return -1;
+}
+
+int64_t fbl_state_memory_all(void) try {
+    return fbl::memory_of_all_states();
+} catch (...) {
+    fbl::escaped();
+    return -1;
+}
+
 int64_t fbl_state_memory(uint64_t state) try {
     const fbl::state_t* found = fbl::find_state(state);
     return found == nullptr ? -1 : found->memory_used;

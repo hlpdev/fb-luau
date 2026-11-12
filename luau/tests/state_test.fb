@@ -154,3 +154,21 @@ Function ClosingIsOnceAndFinal() Throws LuauError
     lua.Close()
     Expect(function.Owner == lua)
 End Function
+
+@Test
+Function AStateThatFailsAsItsMadeIsClosed() Throws LuauError
+    Local before = LuauStatesOpen()
+    Local options = LuauOptions()
+    Local failed = 0
+    For kilobytes = 8 To 400 Step 8
+        options.MemoryLimit = kilobytes * 1024
+        Local made = Try? LuauState(options)
+        If made == Null
+            failed++
+        Else
+            made.Close()
+        End If
+        Expect(LuauStatesOpen() == before, "{kilobytes} KiB")
+    End For
+    Expect(failed > 0)
+End Function

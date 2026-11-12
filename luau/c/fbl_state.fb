@@ -33,6 +33,8 @@ End Struct
 Package Extern "C" Lib "luau_native"
     Function fbl_state_new(options: Ptr<fbl_state_options_t>, status: Ptr<Int32>): UInt64
     Function fbl_state_close(state: UInt64): Bool
+    Function fbl_state_count(): Int64
+    Function fbl_state_memory_all(): Int64
     Function fbl_state_memory(state: UInt64): Int64
     Function fbl_state_collect(state: UInt64): Int32
     Function fbl_state_error_kind(state: UInt64): Int32
