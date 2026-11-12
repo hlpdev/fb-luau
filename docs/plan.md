@@ -530,11 +530,12 @@ local util = require("@shared/util")
 ### Bytecode
 
 ```vb
-Const KEY = EmbedText("bytecode.key")              // the program's own secret
+// The build step's, with a key that never ships.
 Local code = Try LuauBytecode.Compile(source, "@rooms/door.luau")
-Local bytes = code.Save(KEY)                        // shipped with the game
+Local bytes = code.Save(privateKey)                 // Ed25519, into the game's paks
 
-Local loaded = Try LuauBytecode.Load(bytes, KEY)    // checks its tag, then trusts it
+// The game's, which has only the public key.
+Local loaded = Try LuauBytecode.Load(bytes, publicKey)   // checks its signature, then trusts it
 Try lua.Run(loaded)
 ```
 
@@ -542,9 +543,17 @@ Try lua.Run(loaded)
   bytecode from anywhere but its own compiler has no guarantees, and should be signed. So
   `Save` writes a container: a magic and its format, the Luau release that compiled it (the
   bytecode's version is its first byte), the compile options, the chunk's name, the bytecode, and
-  an HMAC-SHA256 of all of it by the program's key, of 16 bytes at least, std's `std.crypto`'s.
-  `Load` checks the tag first, in constant time, and gives a `LuauError` of `OTHER` for a wrong
-  one, a container of another Luau, or anything that isn't one, before Luau sees a byte.
+  an Ed25519 signature, std.crypto's, of a fixed context ("fb-luau bytecode, format 2") and all of
+  it, by the build's private key. `Load` checks the signature with the public key first, and
+  gives a `LuauError` of `OTHER` for a wrong one, a container of another Luau, or anything that
+  isn't one, before Luau sees a byte. (It was an HMAC, whose one key both signs and checks, so
+  the game shipped the key that signs; review finding 79.)
+- The public key is no secret: anyone can read it out of the game and still can't sign. The
+  private key is the whole of it, and stays with the build. So a container a mod can replace, in
+  a pak, is as safe as one it can't; and for scripts embedded in the executable, compiling their
+  source at start is as good as a container. The format's number goes up when the package's Luau
+  flags or build options change, and a State's Debug and Coverage options don't apply to bytecode
+  it's given, which has its own.
 - `lua.Run(code)`, `Evaluate<T>(code)`, and `Load(code)` run bytecode as they do source, and a
   `LuauScript`'s `Run` and `Evaluate` run it in the script's globals. A `LuauBytecode` is only
   ever `Compile`'s or `Load`'s, so one the program holds is its own.

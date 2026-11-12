@@ -377,21 +377,29 @@ Expect(Try doors.Evaluate<String>(files["mods/doors/init.luau"] ?? "", "@mods/do
 
 A game's own scripts can be compiled ahead, as its build does, into bytecode a State runs
 without compiling. Luau runs bytecode as it's given, checking nothing, so bytecode crosses a file
-system only in `Save`'s container, signed with the program's own key, which `Load` checks before
-Luau sees a byte. A mod is source, always.
+system only in `Save`'s container, signed by the build with an Ed25519 private key that never
+ships, which `Load` checks in the game with the public key before Luau sees a byte. The public
+key is no secret; the private key is the whole of it. A mod is source, always, and scripts
+embedded in the executable can as well be compiled from source as it starts.
 
 ```vb
+Import std.crypto
 Import std.test
 Import luau
 
-Local key = "the game's own secret, not this".Bytes
-Local shipped = (Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")).Save(key)
-Local loaded = Try LuauBytecode.Load(shipped, key)
+// The build's: Ed25519.NewPrivateKey() made it once, and the build keeps it.
+Local privateKey = Ed25519.NewPrivateKey()
+Local shipped = (Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")).Save(privateKey)
+
+// The game's, which ships with the public key only.
+Local publicKey = Ed25519.PublicKeyOf(privateKey)
+Local loaded = Try LuauBytecode.Load(shipped, publicKey)
 Expect(Try LuauState().Evaluate<Int>(loaded) == 42)
-Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, "another key, as long".Bytes)) != Null)
+Local another = Ed25519.PublicKeyOf(Ed25519.NewPrivateKey())
+Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, another)) != Null)
 ```
 
-examples/bytecode is a build step and its game, in one program.
+examples/bytecode is a build step and its game, as two modes of one program.
 
 ## Native code
 

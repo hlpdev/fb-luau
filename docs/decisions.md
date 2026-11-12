@@ -320,3 +320,15 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   working set jumps by megabytes as Windows trims and grows it.
 - **The soak judges memory by thirds,** and only from 5,000 iterations: a heap that grows once
   steps once, where a leak grows at every stretch; a short run's slopes are within its noise.
+
+## The third review, on dev/review-3 (2026-11-12)
+
+Written while the PC was kept free for the user: none of it built or run until their go.
+
+- **Bytecode is signed by Ed25519, not an HMAC (79), a change to what was approved (plan question
+  4):** the HMAC's key both signs and checks, so the game shipped the key that signs. `Save` takes
+  the build's private key and `Load` the game's public key; the signature covers a fixed context
+  first; the format is 2. examples/bytecode is two modes, the build's and the game's, the game
+  with the public key only.
+- **The container's parser reads nothing before checking it's there (83),** and a name with a NUL
+  is refused at Compile and Load (84).

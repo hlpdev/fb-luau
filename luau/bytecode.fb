@@ -1,5 +1,6 @@
 //! Luau's bytecode, compiled ahead, as a game's build step does, and the container that makes it
-//! the program's own: signed with its key, and checked before Luau sees a byte.
+//! the program's own: signed by the build's private key, and checked with its public key before
+//! Luau sees a byte.
 
 Import std.crypto
 Import std.ffi
@@ -11,29 +12,44 @@ Import "./library"
 Import "./shim"
 Import "./state"
 
-/// What a container starts with: "FBLUAU", then 0, then its format, 1.
-Const Magic: UInt8[] = [70, 66, 76, 85, 65, 85, 0, 1]
-/// The bytes of a container's tag, an HMAC-SHA256.
-Const TagSize = 32
-/// The fewest bytes a key signs with.
-Const LeastKey = 16
+/// What a container starts with: "FBLUAU", then 0, then its format, 2, signed by Ed25519. Its
+/// number goes up when the format does, or the package's Luau flags or build options change.
+Const Magic: UInt8[] = [70, 66, 76, 85, 65, 85, 0, 2]
+/// The bytes of a container's signature, an Ed25519 one.
+Const SignatureSize = 64
+/// The bytes of an Ed25519 key, private or public.
+Const KeySize = 32
+/// What every signature of a container covers before its bytes, then a 0, so a signature the key
+/// made for anything else is never a container's.
+Const Context = "fb-luau bytecode, format 2"
 
 /// Source compiled into Luau's bytecode ahead, which a State runs without compiling it. Luau runs
 /// bytecode as it's given, checking nothing, so bytecode crosses a file system only in [Save]'s
-/// container, signed with the program's own key, which [Load] checks before Luau sees it. A mod
-/// is source, always: loading bytecode a mod gave would trust the mod with the process.
+/// container, signed by the build step with an Ed25519 private key that never ships, which [Load]
+/// checks in the game with its public key before Luau sees a byte. The public key is no secret:
+/// anyone can read it out of the game, and still can't sign; the private key is the whole of it,
+/// and stays with the build. A container a mod can replace, in a pak say, is then as safe as
+/// one that can't be. A mod is source, always: loading bytecode a mod gave would trust the mod
+/// with the process; and for scripts embedded in the executable, compiling their source at start
+/// is as good as a container.
+///
+/// A State's Debug and Coverage options don't apply to bytecode it's given, which has its own.
 ///
 /// # Examples
 ///
 /// ```
+/// # Import std.crypto
 /// # Import luau
-/// Local key = "the game's own secret, not this".Bytes
-/// Local code = Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")
-/// Local shipped = code.Save(key)
+/// // The build step's, kept out of the game: std.crypto's Ed25519.NewPrivateKey() made it once.
+/// Local privateKey = Ed25519.NewPrivateKey()
+/// Local shipped = (Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")).Save(privateKey)
 ///
-/// Local loaded = Try LuauBytecode.Load(shipped, key)
+/// // The game's, which has only the public key.
+/// Local publicKey = Ed25519.PublicKeyOf(privateKey)
+/// Local loaded = Try LuauBytecode.Load(shipped, publicKey)
 /// Expect(Try LuauState().Evaluate<Int>(loaded) == 42)
-/// Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, "another key, as long".Bytes)) != Null)
+/// Local another = Ed25519.PublicKeyOf(Ed25519.NewPrivateKey())
+/// Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, another)) != Null)
 /// ```
 Public Class LuauBytecode
     /// The chunk's name, which its errors and tracebacks show, as "@rooms/door.luau".
@@ -69,10 +85,11 @@ Public Class LuauBytecode
     ///
     /// # Panics
     ///
-    /// When a compile option isn't from 0 to 2.
+    /// When a compile option isn't from 0 to 2, or `name` holds a NUL, which Luau would cut it at.
     @PanicsAtCaller
     Public Static Method Compile(source: String, name: String,
                                  options: LuauCompileOptions): LuauBytecode Throws LuauError
+        If name.Bytes.Contains(0) Then Panic("a chunk's name can't hold a NUL")
         Local bytes = source.Bytes
         Local size: Int64 = 0
         Local status: Int32 = FBL_OK
@@ -95,16 +112,19 @@ Public Class LuauBytecode
         Return LuauBytecode(name, options, code)
     End Method
 
-    /// It in a container signed with `key`, the program's own secret, which [Load] checks: its
-    /// format, the Luau release that compiled it, its options, its name, and its bytecode, then
-    /// an HMAC-SHA256 of all of that by the key.
+    /// It in a container signed with `privateKey`, an Ed25519 private key, the build step's, which
+    /// never ships: its format, the Luau release that compiled it, its options, its name, and its
+    /// bytecode, then the Ed25519 signature of a fixed context and all of that, which [Load] checks
+    /// with the public key.
     ///
     /// # Panics
     ///
-    /// For a key of fewer than 16 bytes.
+    /// For a key that isn't 32 bytes, an Ed25519 private key's size.
     @PanicsAtCaller
-    Public Method Save(key: UInt8[]): UInt8[]
-        If key.Count < LeastKey Then Panic("a key of {key.Count} bytes is too short to sign with; 16 at least")
+    Public Method Save(privateKey: UInt8[]): UInt8[]
+        If privateKey.Count != KeySize
+            Panic("an Ed25519 private key is 32 bytes, not {privateKey.Count}")
+        End If
         Local body: UInt8[] = []
         Appended(ByRef body, Magic)
         Local release = LuauVersion().Bytes
@@ -118,38 +138,42 @@ Public Class LuauBytecode
         Appended(ByRef body, name)
         Counted(ByRef body, Code.Count As Int64)
         Appended(ByRef body, Code)
-        Appended(ByRef body, Hmac.Sha256(key, body))
+        Appended(ByRef body, Ed25519.Sign(privateKey, Signed(body)))
         Return body
     End Method
 
-    /// The bytecode in a container [Save] made with `key`: its tag is checked first, in constant
-    /// time, then that it's a container of this Luau's.
+    /// The bytecode in a container [Save] signed, checked with `publicKey`, the build's Ed25519
+    /// public key, which the game has: its signature first, then that it's a container of this
+    /// Luau's.
     ///
     /// # Errors
     ///
-    /// A LuauError of OTHER, before Luau sees a byte, for a tag that isn't the key's, as a byte
-    /// changed or another key gives, for what isn't a container, and for a container of another
-    /// Luau release.
+    /// A LuauError of OTHER, before Luau sees a byte, for a signature that isn't the key's, as a
+    /// byte changed or another key gives, for what isn't a container, and for a container of
+    /// another Luau release.
     ///
     /// # Panics
     ///
-    /// For a key of fewer than 16 bytes.
+    /// For a key that isn't 32 bytes, an Ed25519 public key's size.
     @PanicsAtCaller
-    Public Static Method Load(bytes: UInt8[], key: UInt8[]): LuauBytecode Throws LuauError
-        If key.Count < LeastKey Then Panic("a key of {key.Count} bytes is too short to sign with; 16 at least")
-        If bytes.Count < Magic.Count + TagSize Then Throw NotOne("it's too short")
-        Local body = Part(bytes, 0, bytes.Count - TagSize)
-        Local tag = Part(bytes, bytes.Count - TagSize, TagSize)
-        If !ConstantTimeEquals(Hmac.Sha256(key, body), tag)
-            Throw LuauError(LuauErrorKind.OTHER,
-                            "the bytecode's tag isn't its key's: it was changed, signed with " +
-                            "another key, or isn't a container")
+    Public Static Method Load(bytes: UInt8[], publicKey: UInt8[]): LuauBytecode Throws LuauError
+        If publicKey.Count != KeySize
+            Panic("an Ed25519 public key is 32 bytes, not {publicKey.Count}")
         End If
-        // Signed by the key, so it's the program's own; what follows checks it's of this Luau.
+        If bytes.Count < Magic.Count + SignatureSize Then Throw NotOne("it's too short")
+        Local body = Part(bytes, 0, bytes.Count - SignatureSize)
+        Local signature = Part(bytes, bytes.Count - SignatureSize, SignatureSize)
+        If !Ed25519.Verify(publicKey, Signed(body), signature)
+            Throw LuauError(LuauErrorKind.OTHER,
+                            "the bytecode's signature isn't its key's: it was changed, signed " +
+                            "with another key, or isn't a container")
+        End If
+        // Signed by the build, so it's the program's own; what follows checks it's of this Luau.
         Local at = 0
         If !Same(Part(body, 0, Magic.Count), Magic) Then Throw NotOne("its format isn't this one")
         at = Magic.Count
-        Local release = Try Taken(body, ByRef at, body[at] As Int, 1)
+        Local length = Try Taken(body, ByRef at, 1, 0)
+        Local release = Try Taken(body, ByRef at, length[0] As Int, 0)
         Local was = String.FromUtf8Lossy(release)
         If was != LuauVersion()
             Throw LuauError(LuauErrorKind.OTHER,
@@ -162,12 +186,20 @@ Public Class LuauBytecode
         End For
         Local options = LuauCompileOptions(levels[0] As Int, levels[1] As Int, levels[2] As Int)
         Local name = String.FromUtf8(Try Taken(body, ByRef at, Try CountAt(body, ByRef at), 0))
-        If name == Null Then Throw NotOne("its name isn't text")
+        If name == Null || name.Bytes.Contains(0) Then Throw NotOne("its name isn't text")
         Local code = Try Taken(body, ByRef at, Try CountAt(body, ByRef at), 0)
         If at != body.Count || code.Count == 0 Then Throw NotOne("its parts don't fill it")
         Return LuauBytecode(name, options, code)
     End Method
 End Class
+
+/// What a container's signature covers: the context and a 0, then its body.
+Function Signed(body: UInt8[]): UInt8[]
+    Local signed = Context.Bytes
+    signed.Add(0)
+    Appended(ByRef signed, body)
+    Return signed
+End Function
 
 /// The error for a container that isn't one, saying why.
 Function NotOne(why: String): LuauError
