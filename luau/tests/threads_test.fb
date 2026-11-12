@@ -440,9 +440,15 @@ Function ATasksArgumentsStayInTheState() Throws LuauError
     Local lua = Try LuauState(options)
     Local waits = lua.Start()
     Local before = LuauProcessMemory()
-    Try lua.Run("local s = string.rep('x', 2^20) local t = table.create(7999, s) " +
-                "for i = 1, 10000 do task.delay(1e9, function() end, table.unpack(t)) end")
-    Expect(LuauProcessMemory() - before < 512 * 1024 * 1024, "the program's memory grew")
+    // The tables count to the State's limit, which they reach partway, and the program's memory
+    // doesn't grow by what they hold.
+    Try
+        Try lua.Run("local s = string.rep('x', 2^20) local t = table.create(7999, s) " +
+                    "for i = 1, 10000 do task.delay(1e9, function() end, table.unpack(t)) end")
+    Catch error As LuauError
+        Expect(error.Kind == LuauErrorKind.MEMORY, error.Message)
+    End Try
+    Expect(LuauProcessMemory() - before < 256 * 1024 * 1024, "the program's memory grew")
     // And they arrive, as they were given.
     Try lua.Run("got = nil task.defer(function(a, b, c) got = a .. b .. tostring(c) end, 'x', 'y', nil)")
     Scheduler.Main.Step()
