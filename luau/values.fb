@@ -285,7 +285,10 @@ Public Struct LuauSlots
             where = Try? String.FromLuau(Self, Count() - 1) ?? ""
             Remove(Count() - 1)
         End If
-        Try Owner.Waited(LuauWaiting(Try Running(), task, where))
+        Local thread = Try Running()
+        Local waiting = LuauWaiting(thread, task, where)
+        waiting.In = thread.WaitsIn()
+        Try Owner.Waited(waiting)
         Truncate(0)
         Return FBL_YIELD
     End Method

@@ -823,6 +823,10 @@ Public Class LuauState
     /// one, or before `lua.Start()`.
     Package Method Waited(waiting: LuauWaiting) Throws LuauError
         Local id = waiting.Thread.Id
+        // A thread that waits itself, while a wait of its own is kept, went around that one, as
+        // a script's coroutine.resume does: the old one's dropped.
+        Local old = Waits.Get(id)
+        If old != Null && old.In != 0 && waiting.In != 0 Then Waits.Remove(id)
         Try CanWait(waiting.Thread)
         Local driver = DriverOf(CurrentDriver) ?? DriverOf(StateDriver)
         If driver == Null

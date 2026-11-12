@@ -165,6 +165,14 @@ Public Class LuauThread Implements LuauType
         Owner.Waits.Remove(Id)
     End Method
 
+    /// The function it's in, running or yielded in, as fbl_thread_waits_in numbers it, or 0.
+    Package Method WaitsIn(): Int64
+        Local slots = Try? Opened()
+        If slots == Null Then Return 0
+        Defer Owner.Closed(slots.Frame)
+        Return fbl_thread_waits_in(Owner.Handle, slots.Frame, 0)
+    End Method
+
     /// A frame with it in slot 0, which the caller closes with Owner.Closed.
     @PanicsAtCaller
     Package Method Opened(): LuauSlots Throws LuauError
@@ -291,6 +299,18 @@ Package Class LuauWaiting
         Task = task
         Origin = where
     End New
+
+    /// The function its thread waits in, for a wait of the thread's own, as fbl_thread_waits_in
+    /// numbers it, or 0 for one another thread made, by task.spawn, defer, or delay.
+    Package Field In: Int64 = 0
+
+    /// Whether its thread is still in this wait: it's suspended, in the function it waited in,
+    /// not resumed by a script meanwhile, nor closed.
+    Package Method IsHeld(): Bool
+        If In == 0 Then Return True
+        If Thread.Luaus() != LuauThreadStatus.SUSPENDED Then Return False
+        Return Thread.WaitsIn() == In
+    End Method
 
     /// Whether it's due in its driver's turn: its Task done, its time come, or a tick's.
     Package Method IsDue(now: Float64): Bool
@@ -450,6 +470,8 @@ Package Class LuauDriver
                 If budget > 0.Seconds && clock.Elapsed >= budget Then Break
                 If !held.Waits.Contains(waiting.Thread.Id) Then Continue
                 held.Waits.Remove(waiting.Thread.Id)
+                // A wait a script went around, resuming or closing the thread itself, is dropped.
+                If !waiting.IsHeld() Then Continue
                 Local resumed = waiting.Given
                 Local task = waiting.Task
                 If task != Null Then resumed = task.Wait()
@@ -625,7 +647,9 @@ Function TaskWait(slots: LuauSlots): Int32
         Try slots.Yieldable("wait")
         Local seconds = Try SecondsAt(slots, 0, "wait")
         Local thread = Try slots.Running()
-        Try slots.Owner.Waited(LuauWaiting(thread, seconds, Given(seconds)))
+        Local waiting = LuauWaiting(thread, seconds, Given(seconds))
+        waiting.In = thread.WaitsIn()
+        Try slots.Owner.Waited(waiting)
         slots.Truncate(0)
         Return FBL_YIELD
     Catch error

@@ -590,3 +590,31 @@ Function ACallsKeptErrorsAreCappedByBytesToo() Throws LuauError
     Expect(LuauProcessMemory() - before < 32 * 1024 * 1024, "the kept errors grew")
     Expect(count == 0)
 End Function
+
+@Test
+Function AWaitAScriptWentAroundIsDropped() Throws LuauError
+    // The script resumes a thread that waits, which yields elsewhere: its wait's entry is dropped,
+    // not resumed into the later yield with the wait's values, and it doesn't count to the limit.
+    Local options = LuauOptions()
+    options.MostWaiting = 2
+    Local lua = Try LuauState(options)
+    Local world = Scheduler()
+    world.Run(lua.Start())
+    Try lua.Run("got = nil " +
+                "t = coroutine.create(function() task.wait(0.1) coroutine.yield('mine') got = 'late' end) " +
+                "coroutine.resume(t) " +
+                "coroutine.resume(t)")
+    For tick = 1 To 5
+        world.Tick(0.1)
+    End For
+    Expect(Try lua.Evaluate<Bool>("return got == nil"))
+    // The limit isn't held by the dropped entry: two more waits fit.
+    Try lua.Run("task.spawn(function() task.wait(1) end) task.spawn(function() task.wait(1) end)")
+    // A thread a script resumed past its wait, that waits again, replaces its old entry.
+    Try lua.Run("u = coroutine.create(function() task.wait(5) task.wait(0.1) done = true end) " +
+                "coroutine.resume(u) coroutine.resume(u)")
+    For tick = 1 To 5
+        world.Tick(0.1)
+    End For
+    lua.Close()
+End Function
