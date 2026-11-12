@@ -110,29 +110,6 @@ int32_t fbl_thread_status(uint64_t state, int32_t frame, int32_t slot) try {
     return -1;
 }
 
-int32_t fbl_thread_is_callers(uint64_t state, int32_t frame, int32_t slot) try {
-    fbl::state_t* found = fbl::find_state(state);
-    const fbl::frame_t* in = found == nullptr ? nullptr : fbl::find_frame(*found, frame);
-    int index = 0;
-    lua_State* co = in == nullptr ? nullptr : thread_at(*in, slot, index);
-    if (co == nullptr) {
-        return -1;
-    }
-    // Under protection, as the check pushes, which can raise for memory.
-    bool callers = true;
-    auto work = [&callers, co](lua_State* stack) {
-        callers = fbl::is_callers_thread(stack, co);
-        return 0;
-    };
-    if (fbl::run_protected(*found, in->thread, 0, 0, work) != FBL_OK) {
-        return -1;
-    }
-    return callers ? 1 : 0;
-} catch (...) {
-    fbl::escaped();
-    return -1;
-}
-
 int64_t fbl_thread_waits_in(uint64_t state, int32_t frame, int32_t slot) try {
     fbl::state_t* found = fbl::find_state(state);
     const fbl::frame_t* in = found == nullptr ? nullptr : fbl::find_frame(*found, frame);

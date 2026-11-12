@@ -628,10 +628,10 @@ End For
   its name, is `any`, as is what a LuauFunction, or a member added by hand, takes and gives. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
   the checker's default.
 - `Check` takes a time limit per module, as Luau's does, so a module that makes the checker work
-  too long gives a diagnostic saying so, not a hang; there's always one. Checking runs a module's
-  code, its `type function`s, in a VM of the solver's own, under that time limit and a heap
-  limit, 64 MB by default, and no other: Luau's heap limit is the process's, so the smallest
-  any checker asks for is every checker's.
+  too long gives a diagnostic saying so, not a hang; there's always one. A `type function` is a
+  module's code, which the solver would run with the host's memory and native stack, so a check
+  that reaches one is refused, a "TypeFunction" diagnostic at each, and none is run; Luau's heap
+  limit for one, 64 MB by default and the process's, stays as a second fence.
 - It's for mod tooling: a game's mod checker, its editor support, or a command. Running mods
   doesn't need it, but it's in the same library, so a game that checks mods as it loads them can.
 
@@ -842,7 +842,7 @@ and `fb doc luau --check`. Its flags are fbengine's: `--build`, `--base`, `--no-
   without a compiler, `fb test luau` against that Release library and the conformance program;
   a Debug build and ctest on each target; and the format job (clang-format, `fb fmt --check`,
   the bindings' and arity code's checks, `fb doc --check`). fb comes from the `install-fb`
-  action at the version `FB_VERSION` pins, 1.3.2, as fbengine's does.
+  action at the version `FB_VERSION` pins, 1.3.3, as fbengine's does.
 - **stability.yml**, nightly and by hand: ASan with UBSan, and TSan, over the stability tests;
   each fuzzer for 10 minutes; and the soak.
 - **targeted.yml**, by hand: a ctest pattern on the targets it names.
@@ -916,11 +916,11 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
 13. **Fixed in fb 1.3.1:** a Scheduler's `Run(task)` moved only the task's own coroutine. The
     waits' driver no longer rests on it either way: it reads its scheduler's time each tick, by
     fb 1.3.2's `Scheduler.Current.Time()` (fbengine-notes/luau/scheduler_run_nested.fb).
-14. **Nothing keys an Interface's implementer by identity:** fb 1.3.1 has `Identity<T>`, which
-    needs `T: Class`, and LuauObject's Static defaults, an Interface's, can't say Self is a Class
-    (gap 11), convert it to an Object, or key by `Identity<Object>`. So two equal objects of a
-    Class with an `==` of its own share one userdata, and one whose Hash changes while Luau has it
-    gets a second (review finding 2, open; fbengine-notes/luau/interface_identity.fb).
+14. **Fixed in fb 1.3.3:** nothing keyed an Interface's implementer by identity, as
+    LuauObject's Static defaults couldn't convert their value to an Object, nor key by
+    `Identity<Object>`. 1.3.3 has both, so each object's userdata is found by which object it is:
+    two equal objects of a Class with an `==` of its own each have their own, and one whose Hash
+    changes keeps its one (review finding 2; fbengine-notes/luau/interface_identity.fb).
 15. **Fixed in fb 1.3.1:** a derived Class got its base's Static defaults, so a Class extending a
     registered one couldn't list LuauObject. It can now, and is a type of its own; an object still
     reads back only as the type it crossed as, by gap 11 (fbengine-notes/luau/derived_static_default.fb).

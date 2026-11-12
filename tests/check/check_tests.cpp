@@ -3,6 +3,7 @@
 
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -250,45 +251,41 @@ TEST_CASE("a module past its time limit says so") {
     CHECK(count_named(found, "TimeLimit") == 1);
 }
 
-TEST_CASE("a type function that hoards ends at its heap limit, its memory back") {
-    const checker_t checker(FBL_CHECK_STRICT, 30);
-    const int64_t before = fbl_core_resident();
-    // Each string its own, as string.rep's would be one string, interned, each time.
-    const std::map<std::string, std::string> files = {
-        {
-            "hog.luau",
-            "type function hog(t)\n"
-            "    local k = {}\n"
-            "    for i = 1, 1e9 do k[i] = string.rep('x', 1048576) .. i end\n"
-            "    return t\n"
-            "end\n"
-            "type T = hog<number>\n",
-        },
+TEST_CASE("a check that reaches a type function is refused, and none is run") {
+    // Each would run past what a limit holds: memory, time, the host's strings and arena, and
+    // the native stack.
+    const std::array<std::string_view, 5> bodies = {
+        "local k = {} for i = 1, 1e9 do k[i] = string.rep('x', 1048576) .. i end",
+        "while true do end",
+        "local s = string.rep('x', 33554432) for i = 1, 1e9 do print(s) end",
+        "for i = 1, 1e9 do types.unionof(types.singleton(tostring(i)), types.number) end",
+        "local function deep(n) if n > 0 then string.gsub('x', 'x', function() deep(n - 1) end) "
+        "end end deep(1000)",
     };
-    const std::vector<diagnostic_t> found = checked(checker, "hog", files);
-    REQUIRE(found.size() == 1);
-    CHECK(found[0].name == "TypeError");
-    CHECK(found[0].message.contains("not enough memory"));
-    const int64_t after = fbl_core_resident();
-    if (before > 0 && after > 0) {
-        CHECK(after - before < int64_t{ 256 } * 1024 * 1024);
+    for (const std::string_view body : bodies) {
+        INFO(body);
+        const checker_t checker(FBL_CHECK_STRICT, 30);
+        const int64_t before = fbl_core_resident();
+        const auto started = std::chrono::steady_clock::now();
+        const std::map<std::string, std::string> files = {
+            { "mod.luau", "local other = require('./other')\nprint(other)\n" },
+            {
+                "other.luau",
+                "type function f(t)\n    " + std::string(body) + "\n    return t\nend\n" +
+                    "type T = f<number>\nlocal x: number = 'not a number'\nreturn 1\n",
+            },
+        };
+        const std::vector<diagnostic_t> found = checked(checker, "mod", files);
+        REQUIRE(found.size() == 1);
+        CHECK(found[0].name == "TypeFunction");
+        CHECK(found[0].module == "other.luau");
+        CHECK(found[0].numbers[0] == 1);
+        CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(2));
+        const int64_t after = fbl_core_resident();
+        if (before > 0 && after > 0) {
+            CHECK(after - before < int64_t{ 64 } * 1024 * 1024);
+        }
     }
-}
-
-TEST_CASE("a type function that loops ends at the time limit") {
-    const checker_t checker(FBL_CHECK_STRICT, 0.5);
-    const std::map<std::string, std::string> files = {
-        {
-            "spin.luau",
-            "type function spin(t)\n"
-            "    while true do end\n"
-            "    return t\n"
-            "end\n"
-            "type T = spin<number>\n",
-        },
-    };
-    const std::vector<diagnostic_t> found = checked(checker, "spin", files);
-    CHECK(count_named(found, "TimeLimit") == 1);
 }
 
 TEST_CASE("a .luaurc that doesn't parse is a ConfigError") {

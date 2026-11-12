@@ -6,12 +6,14 @@
 // it, and anyone can read the public key out of the game and still can't sign. A mod is source,
 // always: only the game's own scripts are shipped as bytecode.
 //
-// `fb run examples/bytecode -- build <private key> <folder>`, then
-// `fb run examples/bytecode -- game <folder>`.
+// Once, `fb run examples/bytecode/keygen -- examples/bytecode/keys/build.key
+// examples/bytecode/game.pub` makes the pair; then `fb run examples/bytecode -- build
+// <private key> <folder>`, and `fb run examples/bytecode -- game <folder>`.
 //
-// keys/build.key is this example's private key, and game.pub its public key, which the game
-// embeds. A real game's private key never leaves the machine that builds it, is never in its
-// repository, and is never written beside what it ships: the build is given it.
+// The pair is made where it's built, and never committed: game.pub, the public key, which the
+// game embeds, and keys/build.key, the private key. A game's private key never leaves the
+// machine that builds it, is never in its repository, and is never written beside what it
+// ships: the build is given it.
 
 Import std.collections
 Import std.core

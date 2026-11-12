@@ -95,12 +95,12 @@ Public Class LuauChecker
     /// `mode`, and each for at most `timeLimit`, 10 seconds for Null, past which it gives a
     /// diagnostic of "TimeLimit" rather than run on.
     ///
-    /// Checking runs a module's code: a `type function`'s body, which Luau's solver runs in a VM
-    /// of its own as it checks. The time limit stops it, and its heap is at most
-    /// `typeFunctionMemory` bytes, 64 MB by default, past which the type function fails, a
-    /// diagnostic; no other limit of a State's applies. Luau's heap limit is the process's, so
-    /// the smallest any checker's asked for is every checker's, from when it's made, which waits
-    /// for any check running on another thread.
+    /// A `type function` is a module's code, which Luau's solver would run as it checks, with
+    /// the program's memory and native stack, which no limit holds; so a check that reaches a
+    /// module with one is refused, a diagnostic named "TypeFunction" at each, and none is run.
+    /// `typeFunctionMemory`, 64 MB by default, is Luau's heap limit for one as a second fence:
+    /// it's the process's, so the smallest any checker's asked for is every checker's, from when
+    /// it's made, which waits for any check running on another thread.
     ///
     /// # Panics
     ///

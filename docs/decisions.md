@@ -476,3 +476,41 @@ Written while the PC was kept free for the user: none of it built or run until t
   fuzzer fails when it moves in an input, and every C++ test's State checks it's 0 as it closes,
   so the shim's first rule is a finding though the export gives a status the API has. The new
   fuzz targets and the exports not yet fuzzed are 0.1.1's.
+
+## The fifth review, on dev/review-5 (2026-11-12)
+
+- **The thread fence of 101 is out whole (123):** coroutine.resume, close, wrap, and finally, and
+  task.spawn, defer, delay, and cancel are Luau's and the package's own again, with no check of
+  whose thread it is. It refused ordinary module code (require gives each module an environment
+  of its own, so a module's generator, a helper resuming what it's given, and a Signal's Wait),
+  it was bypassed wherever the guarded function had no Luau caller, and the wrapped call popped
+  one value too many with no caller. What stays: debug.info's levels and thread argument checked
+  by environment, and runners refused. A thread a script hands to another's code is theirs to
+  resume or close, as a function it hands over is theirs to call; mods that mustn't touch each
+  other get a State each (125). fbl_thread_is_callers is gone.
+- **A check that reaches a `type function` is refused (124),** a "TypeFunction" diagnostic at
+  each, found in the parse before the solver, so none is run: a type function's print, types.*,
+  and nested calls ran in the host's strings, arena, and native stack, which no limit held. The
+  heap limit of 109 stays as a second fence.
+- **An own level of INT_MAX isn't shifted (128),** which would overflow; Luau refuses it.
+- **A State a mod (125):** in one State a mod's memory, waits, threads, and required modules are
+  every mod's, so one that hoards to just under the limit, or holds every wait, fails the
+  others, and a dropped mod's threads run on. The modded game gives each mod a State of its own,
+  made with Sandbox(), closed when the mod's dropped; the guide says a State is what keeps one
+  mod from another, scripts in one State being one author's files. The checker's definitions
+  come from a State given the API the same way, closed after.
+- **LuauState() is LuauState(LuauOptions()) (126):** its tick budget and waits limit are the
+  defaults', 10 seconds and 10,000, where the tick budget was none.
+- **The bytecode example makes its key pair (127):** examples/bytecode/keygen makes an Ed25519
+  pair once, where there's none, keys/build.key and game.pub, both ignored by git; ctest runs it
+  first. The pair committed before is out of the tree, though in the history, which only a
+  force-push would take out; it was only ever the example's. `*.key` and `*.pub` are binary.
+- **The stack guard's own test (128):** tests/state runs 190 nested gsubs on a thread with 512 KB
+  of stack reserved (CreateThread's reservation on Windows, where winpthreads' stack size is
+  only the first commit; pthread's elsewhere) and expects the guard's message, so it can't pass
+  on Luau's own C call limit. is_callers_thread went with 123.
+- **Finding 2, on fb 1.3.3:** an object's userdata is found by `Identity<Object>`, the object
+  converted by `As? Object`, which 1.3.3 allows of an Interface-constrained type parameter's
+  value: two objects a Class calls equal each have their own, and one whose Hash changes keeps
+  its one. fb 1.3.3 in project.toml, every workflow, and the READMEs; the plan's gap 14 is fixed.
+

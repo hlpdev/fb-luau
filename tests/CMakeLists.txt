@@ -197,7 +197,7 @@ if(FBL_FB_TESTS)
   add_test(NAME examples.modded_game
            COMMAND "${FBL_FB}" --color never run "${PROJECT_SOURCE_DIR}/examples/modded_game")
   set_tests_properties(examples.modded_game PROPERTIES
-                       PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*greedy is loaded.*hoarder isn't loaded: MEMORY.*looping isn't loaded: TIMEOUT.*spawner is loaded.*thrower isn't loaded: RUNTIME.*the thrower gives up.*twofold isn't loaded: RUNTIME.*2 files.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*its waits ended: True")
+                       PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*greedy is loaded.*hoarder isn't loaded: MEMORY.*looping isn't loaded: TIMEOUT.*spawner is loaded.*thrower isn't loaded: RUNTIME.*the thrower gives up.*twofold isn't loaded: RUNTIME.*2 files.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*their waits ended: True")
   # No tick of the thrower's, whose hook went with it.
   set_tests_properties(examples.modded_game PROPERTIES FAIL_REGULAR_EXPRESSION "thrower ticks")
 

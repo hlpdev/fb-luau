@@ -4,3 +4,6 @@
 # Bytecode and fuzzing's seeds are bytes.
 *.luauc binary
 *.bin binary
+# Keys are bytes.
+*.key binary
+*.pub binary

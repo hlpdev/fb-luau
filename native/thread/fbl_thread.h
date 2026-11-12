@@ -35,12 +35,6 @@ FBL_API int32_t fbl_thread_status(uint64_t state, int32_t frame, int32_t slot);
 // still in that wait when it's due.
 FBL_API int64_t fbl_thread_waits_in(uint64_t state, int32_t frame, int32_t slot);
 
-// Whether the thread in `slot` is the calling script's: 1 when its main function's environment is
-// the nearest Luau function's calling the program's function the frame is in, or no script's
-// code calls, or its main function is C; 0 for another script's; -1 for a slot that isn't a
-// thread.
-FBL_API int32_t fbl_thread_is_callers(uint64_t state, int32_t frame, int32_t slot);
-
 // The thread in `slot`'s id, a number of its own from 1, the same for each value of the thread, and
 // never another thread's; or 0 for a slot that isn't a thread, or with no memory to number it.
 FBL_API uint64_t fbl_thread_id(uint64_t state, int32_t frame, int32_t slot);

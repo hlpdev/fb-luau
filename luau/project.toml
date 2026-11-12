@@ -7,7 +7,7 @@ description = "Luau scripts in a FutureBlitz program: a typed API, sandboxed, wi
 readme = "README.md"
 repository = "https://github.com/hlpdev/fb-luau"
 keywords = ["luau", "lua", "scripting", "sandbox", "modding"]
-fb = ">=1.3.2"
+fb = ">=1.3.3"
 
 # The package's library, luau_native, with Luau in it, built for each target into native/<target>/.
 [native]
