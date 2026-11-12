@@ -142,7 +142,8 @@ Function AModulesMetatableIsFrozenWithIt() Throws LuauError
     options.Modules = Function(path: String): String? => files.Get(path)
     Local lua = Try LuauState(options)
     Local error = ExpectThrows<LuauError>(lua.Run(
-        r"getmetatable(require('./m')).__index = { greet = function() return 'evil' end }", "@main.luau"))
+        r"getmetatable(require('./m')).__index = { greet = function() return 'evil' end }",
+        "@main.luau"))
     Expect(error != Null)
     Local through = ExpectThrows<LuauError>(lua.Run(
         r"getmetatable(require('./m')).__index.greet = function() return 'evil' end", "@main.luau"))

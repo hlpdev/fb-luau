@@ -167,13 +167,10 @@ int load_string(lua_State* stack) {
     size_t length = 0;
     const char* source = luaL_checklstring(stack, 1, &length);
     // Named by its source when it isn't given a name, as Luau's and Lua's loadstring name it,
-    // which its errors show as [string "..."]. A name a script gives that starts with "@", a
-    // path's, is marked "=" instead, which shows the same, so require never resolves from a
-    // path a script picked.
-    std::string name = luaL_optstring(stack, 2, source);
-    if (name.starts_with('@')) {
-        name[0] = '=';
-    }
+    // which its errors show as [string "..."]. A path's name a script gives, "@...", is shown as
+    // Luau shows one; require from it goes through the same checks as any chunk's, so it
+    // reaches nothing above the root, and no further than a require's path may.
+    const std::string name = luaL_optstring(stack, 2, source);
     // The compiler's memory isn't the State's, so a source bigger than what the limit leaves is
     // refused before it's compiled.
     if (state != nullptr && state->memory_limit > 0 &&
@@ -320,12 +317,12 @@ int guarded_debug(lua_State* stack) {
         // info's function, at a level of the caller's own, has to be of the caller's environment,
         // as getfenv's does: a level up from a shared module's function reaches whatever script
         // called it.
-        if (!traceback && lua_type(stack, index) == LUA_TNUMBER && lua_tointeger(stack, index) > 0) {
+        if (!traceback && lua_type(stack, index) == LUA_TNUMBER &&
+            lua_tointeger(stack, index) > 0) {
             const char* options = lua_tostring(stack, index + 1);
             lua_Debug info{};
             if (options != nullptr && std::strchr(options, 'f') != nullptr &&
-                lua_getinfo(stack, static_cast<int>(lua_tointeger(stack, index)), "f", &info) !=
-                    0) {
+                lua_getinfo(stack, lua_tointeger(stack, index), "f", &info) != 0) {
                 if (lua_type(stack, -1) == LUA_TFUNCTION && lua_iscfunction(stack, -1) == 0) {
                     lua_getfenv(stack, -1);
                     if (!push_caller_environment(stack) || lua_rawequal(stack, -1, -2) == 0) {
@@ -731,8 +728,8 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
             return 0;
         }
         if (options->native_memory < 0) {
-            fbl::fail(std::format("a native code cap of {} bytes is below 0",
-                                  options->native_memory));
+            fbl::fail(
+                std::format("a native code cap of {} bytes is below 0", options->native_memory));
             return 0;
         }
         for (const int32_t level : { options->optimization, options->debug, options->coverage }) {
@@ -777,9 +774,8 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
         // memory is counted as it's taken. It runs only where Luau could get executable memory,
         // which a hardened runtime or SELinux can refuse.
         if (state->native_code != FBL_NATIVE_OFF && Luau::CodeGen::isSupported()) {
-            const auto cap = static_cast<size_t>(options->native_memory > 0
-                                                     ? options->native_memory
-                                                     : int64_t{ 256 } * 1024 * 1024);
+            const auto cap = static_cast<size_t>(
+                options->native_memory > 0 ? options->native_memory : int64_t{ 256 } * 1024 * 1024);
             const size_t block = std::min<size_t>(cap, size_t{ 256 } * 1024);
             Luau::CodeGen::create(state->main, block, cap, count_native_memory, state.get());
             state->code_generator = Luau::CodeGen::isNativeExecutionEnabled(state->main);

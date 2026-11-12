@@ -79,12 +79,14 @@ Function Unwound(native: LuauNativeCode, prefix: String) Throws LuauError
     options.MemoryLimit = 8 * 1024 * 1024
     Local lua = Try LuauState(options)
     // A loop ended by the time budget.
-    Local spun = ExpectThrows<LuauError>(lua.Run(prefix + "local function spin() while true do end end spin()"))
+    Local spun = ExpectThrows<LuauError>(
+        lua.Run(prefix + "local function spin() while true do end end spin()"))
     Expect(spun != Null && spun.Kind == LuauErrorKind.TIMEOUT, prefix)
     // An error, caught by pcall in native code, then let go to the program.
     Expect(Try lua.Evaluate<Bool>(prefix + "local function f() error('x') end " +
                                   "local ok = pcall(f) return not ok"))
-    Local raised = ExpectThrows<LuauError>(lua.Run(prefix + "local function f() error('out') end f()"))
+    Local raised = ExpectThrows<LuauError>(lua.Run(prefix +
+                                                   "local function f() error('out') end f()"))
     Expect(raised != Null && raised.Kind == LuauErrorKind.RUNTIME, prefix)
     // The memory limit, met in native code.
     Local full = ExpectThrows<LuauError>(lua.Run(prefix + "local function fill() " +
@@ -94,10 +96,12 @@ Function Unwound(native: LuauNativeCode, prefix: String) Throws LuauError
     Expect(Try lua.Evaluate<Int>(prefix + "local function g(a) local b = coroutine.yield(a) " +
                                  "return a + b end local co = coroutine.wrap(g) co(1) return co(2)") == 3)
     // A traceback and debug.info's line from a native function.
-    Local line = Try lua.Evaluate<Int>(prefix + "local function where() return debug.info(1, 'l') end " +
+    Local line = Try lua.Evaluate<Int>(prefix +
+                                       "local function where() return debug.info(1, 'l') end " +
                                        "return where()")
     Expect(line == (prefix == "" ? 1 : 2), "line {line}")
-    Local traced = Try lua.Evaluate<String>(prefix + "local function trace() return debug.traceback() end " +
+    Local traced = Try lua.Evaluate<String>(prefix +
+                                            "local function trace() return debug.traceback() end " +
                                             "return trace()")
     Expect(traced.Contains("trace"), traced)
 End Function

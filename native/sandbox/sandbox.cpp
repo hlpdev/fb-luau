@@ -47,7 +47,7 @@ void freeze_tables(lua_State* stack, int index) {
     lua_rawseti(stack, queue, 1);
     int queued = 1;
     // Freezes the table on top, unless it's been seen, and queues it to go through.
-    const auto follow = [&]() {
+    const auto follow = [&] {
         if (lua_type(stack, -1) != LUA_TTABLE) {
             return;
         }

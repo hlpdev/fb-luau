@@ -98,7 +98,8 @@ Function ADerivedClassIsATypeOfItsOwn() Throws LuauError
     Try lua.Register<Dog>()
     Local dog = Dog()
     Try lua.Set("dog", dog)
-    Expect(Try lua.Evaluate<String>("return typeof(dog) .. ' ' .. dog:Sound() .. ' ' .. dog:Fetch()") ==
+    Expect(Try lua.Evaluate<String>(
+        "return typeof(dog) .. ' ' .. dog:Sound() .. ' ' .. dog:Fetch()") ==
            "Dog woof stick")
     Expect(RefEquals(Try lua.Get<Dog>("dog"), dog))
 End Function

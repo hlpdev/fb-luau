@@ -124,7 +124,8 @@ int64_t fbl_thread_waits_in(uint64_t state, int32_t frame, int32_t slot) try {
     }
     const void* function = lua_topointer(co, -1);
     lua_pop(co, 1);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the function's address, as a number.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the function's address, as a
+    // number.
     return static_cast<int64_t>(reinterpret_cast<uintptr_t>(function));
 } catch (...) {
     fbl::escaped();

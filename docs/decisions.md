@@ -342,10 +342,14 @@ Written while the PC was kept free for the user: none of it built or run until t
   error caught and let go, the memory limit, a yield, and a traceback.
 - **A task's arguments stay in the State (85):** one table a wait, kept by reference, pushed at the
   resume, counted to the State's limit; nothing of a script's arguments is copied to the program.
-- **A chunk loadstring makes never names where require looks (86):** a name a script gives that
-  starts with "@" is marked "=", which shows the same; a chunk of any name but a path's requires
-  from the root, as a module "=" there; a path's name goes through the parts and length checks;
-  the .luaurc search keeps to the budget.
+- **A chunk's name, loadstring's too, reaches nothing above the root (86):** a chunk of any name
+  but a path's requires from the root, as a module "=" there; a path's name goes through the
+  parts and length checks, as require's argument does; the .luaurc search keeps to the budget.
+  The decision had loadstring mark a script's "@" name "=", so its chunk never named where
+  require looks; that changes how Luau shortens a long name in errors, which Luau's conformance
+  checks (errors.luau), and the checks are what keep a script within the root, so the name stays
+  as given. A script that names a chunk for a module's path requires from there, which reaches
+  only what the program gives every script.
 - **The waits' driver reads its scheduler's time (87),** fb 1.3.2's `Scheduler.Current.Time()`: no
   timer coroutine, no quantum, no 1 s cap. A wait made in the driver's turn counts from the time
   then; one made outside it, in a call of the program's or a thread's first resume, from the

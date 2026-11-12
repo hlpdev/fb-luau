@@ -450,7 +450,8 @@ Function ATasksArgumentsStayInTheState() Throws LuauError
     End Try
     Expect(LuauProcessMemory() - before < 256 * 1024 * 1024, "the program's memory grew")
     // And they arrive, as they were given.
-    Try lua.Run("got = nil task.defer(function(a, b, c) got = a .. b .. tostring(c) end, 'x', 'y', nil)")
+    Try lua.Run(
+        "got = nil task.defer(function(a, b, c) got = a .. b .. tostring(c) end, 'x', 'y', nil)")
     Scheduler.Main.Step()
     Scheduler.Main.Step()
     Expect(Try lua.Get<String>("got") == "xynil")
@@ -486,7 +487,8 @@ Function AWaitMadeMidTickIsNeverEarlyNorMoreThanATickLate() Throws LuauError
     Try lua.SetFunction("now", Function(): Float64 => world.Time().TotalSeconds)
     Local waits = lua.Start()
     world.Run(waits)
-    Try lua.Run("function main() task.wait(0.25) local a = now() task.wait(0.3) waited = now() - a end")
+    Try lua.Run(
+        "function main() task.wait(0.25) local a = now() task.wait(0.3) waited = now() - a end")
     Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
     world.Run(done)
     For tick = 1 To 20

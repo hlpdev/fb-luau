@@ -23,7 +23,7 @@ Const Scripts = EmbedFolder("scripts")
 
 // The build step: each script compiled, named by its path, and saved in a signed container.
 Function Build(folder: Path) Throws Error
-    Dir.Create(folder)
+    Try Dir.Create(folder)
     Local keyFile = folder / Path("build.key")
     If !File.Exists(keyFile) Then Try File.WriteBytes(keyFile, Ed25519.NewPrivateKey())
     Local privateKey = Try File.ReadBytes(keyFile)

@@ -198,8 +198,9 @@ Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws Lu
     For level In [2, 3]
         For how In ["fenv", "info"]
             Try spy.Run("how = '" + how + "' level = {level}")
-            Local error = ExpectThrows<LuauError>(victim.Run(r"local bus = require('./bus') bus.fire()",
-                                                             "@victim.luau"))
+            Local error =
+                ExpectThrows<LuauError>(victim.Run(r"local bus = require('./bus') bus.fire()",
+                                                   "@victim.luau"))
             Expect(error != Null && error.Message.Contains("another environment"),
                    "{how} {level}: " + (error?.Message ?? "no error"))
         End For
