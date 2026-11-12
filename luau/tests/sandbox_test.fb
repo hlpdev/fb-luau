@@ -181,8 +181,8 @@ End Function
 
 @Test
 Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws LuauError
-    // A shared bus calls each script's handler; one handler looks up the levels for the script
-    // that fired, which is another's.
+    // A shared bus calls each script's handler; the spy's handler looks up its stack, at level 2
+    // the bus's function and at level 3 the victim's chunk that fired it, each another's.
     Local files: Map<String, String> = {
         "bus.luau": r"local handlers = {} return { on = function(f) table.insert(handlers, f) end, fire = function() for _, f in handlers do f() end end }"
     }
@@ -193,10 +193,18 @@ Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws Lu
     Local spy = Try lua.NewScript("@spy.luau")
     Local victim = Try lua.NewScript("@victim.luau")
     Try spy.Run(r"local bus = require('./bus') bus.on(function() " +
-                r"for level = 2, 4 do local ok = pcall(getfenv, level) if ok then reached = (reached or 0) + 1 end " +
-                r"local okInfo = pcall(debug.info, level, 'f') if okInfo then infos = (infos or 0) + 1 end end end)",
-                "@spy.luau")
-    Try victim.Run(r"secret = 'mine' local bus = require('./bus') bus.fire()", "@victim.luau")
-    // Neither the bus's function nor the victim's is reached from the spy's handler.
-    Expect(Try spy.Evaluate<Bool>("return reached == nil and infos == nil"))
+                r"if how == 'fenv' then return getfenv(level) end " +
+                r"return debug.info(level, 'f') end)", "@spy.luau")
+    For level In [2, 3]
+        For how In ["fenv", "info"]
+            Try spy.Run("how = '" + how + "' level = {level}")
+            Local error = ExpectThrows<LuauError>(victim.Run(r"local bus = require('./bus') bus.fire()",
+                                                             "@victim.luau"))
+            Expect(error != Null && error.Message.Contains("another environment"),
+                   "{how} {level}: " + (error?.Message ?? "no error"))
+        End For
+    End For
+    // Its own level is its own.
+    Try spy.Run("how = 'fenv' level = 1")
+    Try victim.Run(r"local bus = require('./bus') bus.fire()", "@victim.luau")
 End Function
