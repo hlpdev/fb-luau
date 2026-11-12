@@ -476,9 +476,9 @@ Expect(found.Count == 2 && found[0].Name == "TypeError" && found[0].Line == 2)
 Each `LuauDiagnostic` has its module, line and column, its severity, Luau's code and name for
 it, and its message, as luau-analyze gives them.
 
-Checking a mod runs some of its code: Luau's solver runs a `type function`'s body as it checks,
-in a VM of its own. The checker's time limit, 10 seconds a module by default, and its heap
-limit for type functions, 64 MB by default, are the only limits on it; a State's don't apply.
+Luau's solver would run a mod's code as it checks it: a `type function`'s body, with the
+program's memory and native stack, which no limit holds. So a check that reaches a module with
+a `type function` is refused, with a diagnostic named "TypeFunction" at each, and none is run.
 
 ## A game's modding
 

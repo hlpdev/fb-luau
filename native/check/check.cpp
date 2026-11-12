@@ -25,6 +25,7 @@
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -467,6 +468,47 @@ void collect(checker_t& checker, const std::vector<Luau::ModuleName>& checked) {
     }
 }
 
+// Finds a parsed module's `type function`s.
+struct type_functions_t : Luau::AstVisitor {
+    std::vector<Luau::Location> found;
+
+    bool visit(Luau::AstStatTypeFunction* node) override {
+        found.push_back(node->location);
+        return false;
+    }
+};
+
+// Refuses a check whose modules have a `type function`, with a diagnostic at each, so that none
+// is run: Luau's solver runs one as it checks, the mod's own code, with the host's strings,
+// arena, and native stack, which no limit of the checker's holds. Whether it refused.
+bool refused_type_functions(checker_t& checker) {
+    std::vector<std::pair<std::string, Luau::Location>> found;
+    for (const auto& [name, source] : checker.frontend.sourceModules) {
+        if (source == nullptr || source->root == nullptr) {
+            continue;
+        }
+        type_functions_t visitor;
+        source->root->visit(&visitor);
+        for (const Luau::Location& location : visitor.found) {
+            found.emplace_back(name, location);
+        }
+    }
+    std::ranges::sort(found, [](const auto& a, const auto& b) {
+        return std::tie(a.first, a.second.begin.line, a.second.begin.column) <
+               std::tie(b.first, b.second.begin.line, b.second.begin.column);
+    });
+    for (const auto& [name, location] : found) {
+        diagnostic_t diagnostic;
+        diagnostic.module = name;
+        diagnostic.name = "TypeFunction";
+        diagnostic.message = "type functions aren't checked: checking would run one, so a check "
+                             "that reaches one is refused";
+        diagnostic.numbers = numbers_of(location, FBL_CHECK_ERROR, 0);
+        checker.diagnostics.push_back(std::move(diagnostic));
+    }
+    return !found.empty();
+}
+
 // Checks `file`, giving how many files it wanted, or 0 with its diagnostics kept.
 int32_t check(checker_t& checker, const std::string& file) {
     checker.frontend.clear();
@@ -476,6 +518,9 @@ int32_t check(checker_t& checker, const std::string& file) {
     checker.frontend.parse(file);
     if (!checker.files.wanted().empty()) {
         return static_cast<int32_t>(checker.files.wanted().size());
+    }
+    if (refused_type_functions(checker)) {
+        return 0;
     }
     checker.frontend.queueModuleCheck(file);
     std::vector<Luau::ModuleName> checked;
