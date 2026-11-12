@@ -1,0 +1,96 @@
+Import std.core
+Import std.crypto
+Import std.test
+Import std.text
+Import luau
+
+/// The tests' key, as a game's own secret would be.
+Const Key = "the tests' key, as a game's own secret would be"
+
+@Test
+Function AContainerRoundTrips() Throws LuauError
+    Local options = LuauCompileOptions()
+    options.Optimization = 2
+    options.Debug = 2
+    Local code = Try LuauBytecode.Compile("local a, b = ... return (a or 20) + (b or 22)",
+                                          "@rooms/sum.luau", options)
+    Local loaded = Try LuauBytecode.Load(code.Save(Key.Bytes), Key.Bytes)
+    Expect(loaded.Name == "@rooms/sum.luau")
+    Expect(loaded.Options.Optimization == 2 && loaded.Options.Debug == 2)
+    Local lua = LuauState()
+    Expect(Try lua.Evaluate<Int>(loaded) == 42)
+    Try lua.Run(loaded)
+    Local function = Try lua.Load(loaded)
+    Expect(Try function.Call<Int, Int, Int>(1, 2) == 3)
+    // In a script, its globals its own.
+    Local script = Try lua.NewScript()
+    Local setter = Try LuauBytecode.Load((Try LuauBytecode.Compile("mine = 1")).Save(Key.Bytes),
+                                         Key.Bytes)
+    Try script.Run(setter)
+    Expect(Try script.Get<Int>("mine") == 1)
+    Expect(Try lua.Evaluate<Bool>("return mine == nil"))
+End Function
+
+@Test
+Function AChangedByteIsRejected() Throws LuauError
+    Local saved = (Try LuauBytecode.Compile("return 1", "@one.luau")).Save(Key.Bytes)
+    // Every byte, the magic, the release, the options, the name, the code, and the tag.
+    For index = 0 Until saved.Count
+        Local changed = saved.Clone()
+        changed[index] = changed[index] ^ 1
+        Local error = ExpectThrows<LuauError>(LuauBytecode.Load(changed, Key.Bytes))
+        Expect(error != Null && error.Kind == LuauErrorKind.OTHER, "byte {index}")
+    End For
+End Function
+
+@Test
+Function AnotherKeyIsRejected() Throws LuauError
+    Local saved = (Try LuauBytecode.Compile("return 1")).Save(Key.Bytes)
+    Local error = ExpectThrows<LuauError>(LuauBytecode.Load(saved,
+                                                            "another key, just as long".Bytes))
+    Expect(error != Null && error.Message.Contains("tag isn't its key's"), error?.Message ?? "")
+End Function
+
+@Test
+Function AnotherLuausContainerIsRejected() Throws LuauError
+    Local saved = (Try LuauBytecode.Compile("return 1")).Save(Key.Bytes)
+    // The same container, as an older Luau would have written it, signed with the key.
+    Local release = LuauVersion().Bytes
+    Local older: UInt8[] = []
+    For index = 0 Until 8
+        older.Add(saved[index])
+    End For
+    older.Add(5)
+    For byte In "0.600".Bytes
+        older.Add(byte)
+    End For
+    For index = 9 + release.Count Until saved.Count - 32
+        older.Add(saved[index])
+    End For
+    For byte In Hmac.Sha256(Key.Bytes, older)
+        older.Add(byte)
+    End For
+    Local error = ExpectThrows<LuauError>(LuauBytecode.Load(older, Key.Bytes))
+    Expect(error != Null && error.Message.Contains("compiled by Luau 0.600"), error?.Message ?? "")
+End Function
+
+@Test
+Function ArbitraryBytesAreRejected() Throws LuauError
+    For count In [0, 1, 39, 40, 41, 1000]
+        Local bytes = SecureRandom.Bytes(count)
+        Local error = ExpectThrows<LuauError>(LuauBytecode.Load(bytes, Key.Bytes))
+        Expect(error != Null && error.Kind == LuauErrorKind.OTHER, "{count} bytes")
+    End For
+    // Source isn't bytecode, signed or not.
+    Expect(ExpectThrows<LuauError>(LuauBytecode.Load("return 1".Bytes, Key.Bytes)) != Null)
+End Function
+
+@Test
+Function SourceThatDoesntCompileIsASyntaxError() Throws LuauError
+    Local error = ExpectThrows<LuauError>(LuauBytecode.Compile("return +", "@bad.luau"))
+    Expect(error != Null && error.Kind == LuauErrorKind.SYNTAX)
+    Expect(error != Null && error.Message.StartsWith("bad.luau:1:"), error?.Message ?? "")
+    // As a State says one.
+    Local said = ExpectThrows<LuauError>(LuauState().Run("return +", "@bad.luau"))
+    Expect(said != Null && error != Null && said.Message == error.Message, said?.Message ?? "")
+End Function

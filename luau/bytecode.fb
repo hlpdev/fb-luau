@@ -1,0 +1,227 @@
+//! Luau's bytecode, compiled ahead, as a game's build step does, and the container that makes it
+//! the program's own: signed with its key, and checked before Luau sees a byte.
+
+Import std.crypto
+Import std.ffi
+Import std.text
+Import "./c/fbl_bytecode"
+Import "./c/fbl_core"
+Import "./errors"
+Import "./library"
+Import "./shim"
+Import "./state"
+
+/// What a container starts with: "FBLUAU", then 0, then its format, 1.
+Const Magic: UInt8[] = [70, 66, 76, 85, 65, 85, 0, 1]
+/// The bytes of a container's tag, an HMAC-SHA256.
+Const TagSize = 32
+/// The fewest bytes a key signs with.
+Const LeastKey = 16
+
+/// Source compiled into Luau's bytecode ahead, which a State runs without compiling it. Luau runs
+/// bytecode as it's given, checking nothing, so bytecode crosses a file system only in [Save]'s
+/// container, signed with the program's own key, which [Load] checks before Luau sees it. A mod
+/// is source, always: loading bytecode a mod gave would trust the mod with the process.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Local key = "the game's own secret, not this".Bytes
+/// Local code = Try LuauBytecode.Compile("return 6 * 7", "@rooms/answer.luau")
+/// Local shipped = code.Save(key)
+///
+/// Local loaded = Try LuauBytecode.Load(shipped, key)
+/// Expect(Try LuauState().Evaluate<Int>(loaded) == 42)
+/// Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, "another key, as long".Bytes)) != Null)
+/// ```
+Public Class LuauBytecode
+    /// The chunk's name, which its errors and tracebacks show, as "@rooms/door.luau".
+    Public ReadOnly Field Name: String
+    /// How it was compiled.
+    Public ReadOnly Field Options: LuauCompileOptions
+    /// The bytecode itself.
+    Package ReadOnly Field Code: UInt8[]
+
+    Package New(name: String, options: LuauCompileOptions, code: UInt8[])
+        Self.Name = name
+        Self.Options = options
+        Code = code
+    End New
+
+    /// Compiles `source` into bytecode, as the chunk `name`, with the default options, as a State
+    /// would.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, which says its line, or of MEMORY.
+    @PanicsAtCaller
+    Public Static Method Compile(source: String,
+                                 name: String = "=chunk"): LuauBytecode Throws LuauError
+        Return Try Compile(source, name, LuauCompileOptions())
+    End Method
+
+    /// Compiles `source` into bytecode, as the chunk `name`, with `options`, as a State would.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of SYNTAX for source that doesn't compile, which says its line, or of MEMORY.
+    ///
+    /// # Panics
+    ///
+    /// When a compile option isn't from 0 to 2.
+    @PanicsAtCaller
+    Public Static Method Compile(source: String, name: String,
+                                 options: LuauCompileOptions): LuauBytecode Throws LuauError
+        Local bytes = source.Bytes
+        Local size: Int64 = 0
+        Local status: Int32 = FBL_OK
+        Local code: UInt8[] = []
+        Unsafe
+            Local made = fbl_bytecode_compile(PointerOf(ByRef bytes), bytes.Count,
+                                              options.Optimization, options.Debug,
+                                              options.Coverage, AddressOf(size), AddressOf(status))
+            If made != Null
+                code = Buffer<UInt8>.View(made, size).ToArray()
+                fbl_bytecode_free(made)
+            End If
+        End Unsafe
+        // As Luau says a chunk's syntax error: its name without the "@" or "=" in front.
+        Local shown = name.StartsWith("@") || name.StartsWith("=") ? name.Slice(1,
+                                                                                name.Length) : name
+        If status == FBL_SYNTAX Then Throw LuauError(LuauErrorKind.SYNTAX, shown + LastError())
+        If status == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, LastError())
+        If status != FBL_OK Then Panic(LastError())
+        Return LuauBytecode(name, options, code)
+    End Method
+
+    /// It in a container signed with `key`, the program's own secret, which [Load] checks: its
+    /// format, the Luau release that compiled it, its options, its name, and its bytecode, then
+    /// an HMAC-SHA256 of all of that by the key.
+    ///
+    /// # Panics
+    ///
+    /// For a key of fewer than 16 bytes.
+    @PanicsAtCaller
+    Public Method Save(key: UInt8[]): UInt8[]
+        If key.Count < LeastKey Then Panic("a key of {key.Count} bytes is too short to sign with; 16 at least")
+        Local body: UInt8[] = []
+        Appended(ByRef body, Magic)
+        Local release = LuauVersion().Bytes
+        body.Add(release.Count As UInt8)
+        Appended(ByRef body, release)
+        body.Add(Options.Optimization As UInt8)
+        body.Add(Options.Debug As UInt8)
+        body.Add(Options.Coverage As UInt8)
+        Local name = Name.Bytes
+        Counted(ByRef body, name.Count As Int64)
+        Appended(ByRef body, name)
+        Counted(ByRef body, Code.Count As Int64)
+        Appended(ByRef body, Code)
+        Appended(ByRef body, Hmac.Sha256(key, body))
+        Return body
+    End Method
+
+    /// The bytecode in a container [Save] made with `key`: its tag is checked first, in constant
+    /// time, then that it's a container of this Luau's.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of OTHER, before Luau sees a byte, for a tag that isn't the key's, as a byte
+    /// changed or another key gives, for what isn't a container, and for a container of another
+    /// Luau release.
+    ///
+    /// # Panics
+    ///
+    /// For a key of fewer than 16 bytes.
+    @PanicsAtCaller
+    Public Static Method Load(bytes: UInt8[], key: UInt8[]): LuauBytecode Throws LuauError
+        If key.Count < LeastKey Then Panic("a key of {key.Count} bytes is too short to sign with; 16 at least")
+        If bytes.Count < Magic.Count + TagSize Then Throw NotOne("it's too short")
+        Local body = Part(bytes, 0, bytes.Count - TagSize)
+        Local tag = Part(bytes, bytes.Count - TagSize, TagSize)
+        If !ConstantTimeEquals(Hmac.Sha256(key, body), tag)
+            Throw LuauError(LuauErrorKind.OTHER,
+                            "the bytecode's tag isn't its key's: it was changed, signed with " +
+                            "another key, or isn't a container")
+        End If
+        // Signed by the key, so it's the program's own; what follows checks it's of this Luau.
+        Local at = 0
+        If !Same(Part(body, 0, Magic.Count), Magic) Then Throw NotOne("its format isn't this one")
+        at = Magic.Count
+        Local release = Try Taken(body, ByRef at, body[at] As Int, 1)
+        Local was = String.FromUtf8Lossy(release)
+        If was != LuauVersion()
+            Throw LuauError(LuauErrorKind.OTHER,
+                            "the bytecode was compiled by Luau {was}, not {LuauVersion()}, " +
+                            "which this program has")
+        End If
+        Local levels = Try Taken(body, ByRef at, 3, 0)
+        For level In levels
+            If level > 2 Then Throw NotOne("a compile option of {level} isn't from 0 to 2")
+        End For
+        Local options = LuauCompileOptions(levels[0] As Int, levels[1] As Int, levels[2] As Int)
+        Local name = String.FromUtf8(Try Taken(body, ByRef at, Try CountAt(body, ByRef at), 0))
+        If name == Null Then Throw NotOne("its name isn't text")
+        Local code = Try Taken(body, ByRef at, Try CountAt(body, ByRef at), 0)
+        If at != body.Count || code.Count == 0 Then Throw NotOne("its parts don't fill it")
+        Return LuauBytecode(name, options, code)
+    End Method
+End Class
+
+/// The error for a container that isn't one, saying why.
+Function NotOne(why: String): LuauError
+    Return LuauError(LuauErrorKind.OTHER, "the bytes aren't a bytecode container: {why}")
+End Function
+
+/// Adds `from`'s bytes to `into`.
+Function Appended(ByRef into: UInt8[], from: UInt8[])
+    For byte In from
+        into.Add(byte)
+    End For
+End Function
+
+/// Adds `count` to `into` as 4 bytes, little-endian.
+Function Counted(ByRef into: UInt8[], count: Int64)
+    For shift = 0 Until 4
+        into.Add(((count >> (shift * 8)) & 255) As UInt8)
+    End For
+End Function
+
+/// `count` of `bytes`' bytes from `from`, in a new array.
+Function Part(bytes: UInt8[], from: Int, count: Int): UInt8[]
+    Local part: UInt8[] = []
+    For index = from Until from + count
+        part.Add(bytes[index])
+    End For
+    Return part
+End Function
+
+/// Whether two arrays of bytes are the same.
+Function Same(a: UInt8[], b: UInt8[]): Bool
+    If a.Count != b.Count Then Return False
+    For index = 0 Until a.Count
+        If a[index] != b[index] Then Return False
+    End For
+    Return True
+End Function
+
+/// `count` bytes of `body` from `at`, after `skip` bytes there, moving `at` past them.
+Function Taken(body: UInt8[], ByRef at: Int, count: Int, skip: Int): UInt8[] Throws LuauError
+    If count < 0 || at + skip + count > body.Count Then Throw NotOne("it ends too soon")
+    at += skip
+    Local part = Part(body, at, count)
+    at += count
+    Return part
+End Function
+
+/// The 4-byte count at `at`, little-endian, moving `at` past it.
+Function CountAt(body: UInt8[], ByRef at: Int): Int Throws LuauError
+    Local bytes = Try Taken(body, ByRef at, 4, 0)
+    Local count: Int64 = 0
+    For index = 0 Until 4
+        count = count | ((bytes[index] As Int64) << (index * 8))
+    End For
+    If count > 2147483647 Then Throw NotOne("a count is past what it can hold")
+    Return count As Int
+End Function

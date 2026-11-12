@@ -7,7 +7,9 @@ Import std.time
 
 Import "./arity"
 Import "./buffers"
+Import "./bytecode"
 Import "./c/fbl_buffer"
+Import "./c/fbl_bytecode"
 Import "./c/fbl_call"
 Import "./c/fbl_callback"
 Import "./c/fbl_core"
@@ -312,6 +314,46 @@ Public Class LuauState
         Try Check(Loaded(frame, source, name))
         Try Check(fbl_call_function(Handle, frame, 0, 1))
         Return Try T.FromLuau(LuauSlots(Self, frame), 0)
+    End Method
+
+    /// Runs bytecode compiled ahead, as Run runs source.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of RUNTIME, MEMORY, or YIELD for what it meets as it runs.
+    @PanicsAtCaller
+    Public Method Run(code: LuauBytecode) Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(LoadedCode(frame, code, -1))
+        Try Check(fbl_call_function(Handle, frame, 0, 0))
+    End Method
+
+    /// Runs bytecode compiled ahead, and gives its first result as a T, as Evaluate does source.
+    ///
+    /// # Errors
+    ///
+    /// What Run throws, and a LuauError of CONVERSION when its result isn't a T.
+    @PanicsAtCaller
+    Public Method Evaluate<T: LuauType>(code: LuauBytecode): T Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(LoadedCode(frame, code, -1))
+        Try Check(fbl_call_function(Handle, frame, 0, 1))
+        Return Try T.FromLuau(LuauSlots(Self, frame), 0)
+    End Method
+
+    /// Loads bytecode compiled ahead into a function to call later, without running it.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method Load(code: LuauBytecode): LuauFunction Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        Try Check(LoadedCode(frame, code, -1))
+        Return Try LuauFunction.Kept(Self, frame, 0)
     End Method
 
     /// Compiles `source`, as Run does, into a function to call later, without running it.
@@ -787,6 +829,16 @@ Public Class LuauState
         Local value = Try? LuauValue.FromLuau(LuauSlots(Self, frame), 0)
         If value == Null || value.IsNil Then Return Null
         Return value
+    End Method
+
+    /// Loads `code` into the frame's next slot, as a function, its environment the table in slot
+    /// `environment`, or the globals for -1: a status.
+    Package Method LoadedCode(frame: Int32, code: LuauBytecode, environment: Int32): Int32
+        Local bytes = code.Code
+        Unsafe
+            Return fbl_bytecode_load(Handle, frame, PointerOf(ByRef bytes), bytes.Count, code.Name,
+                                     environment)
+        End Unsafe
     End Method
 
     /// Compiles `source` as `name` into the frame's next slot, as a function: a status.

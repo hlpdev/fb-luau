@@ -525,11 +525,14 @@ Try lua.Run(loaded)
 
 - Luau runs bytecode as it's given: its loader checks nothing, and its security policy says
   bytecode from anywhere but its own compiler has no guarantees, and should be signed. So
-  `Save` writes a container: a magic, the Luau release and bytecode version it was compiled by,
-  the compile options, the bytecode, and an HMAC-SHA256 of all of it by the program's key, std's
-  `std.crypto`'s. `Load` checks the tag first, in constant time, and gives a `LuauError` of
-  `OTHER` for a wrong one, a container of another Luau, or anything that isn't one, before Luau
-  sees a byte.
+  `Save` writes a container: a magic and its format, the Luau release that compiled it (the
+  bytecode's version is its first byte), the compile options, the chunk's name, the bytecode, and
+  an HMAC-SHA256 of all of it by the program's key, of 16 bytes at least, std's `std.crypto`'s.
+  `Load` checks the tag first, in constant time, and gives a `LuauError` of `OTHER` for a wrong
+  one, a container of another Luau, or anything that isn't one, before Luau sees a byte.
+- `lua.Run(code)`, `Evaluate<T>(code)`, and `Load(code)` run bytecode as they do source, and a
+  `LuauScript`'s `Run` and `Evaluate` run it in the script's globals. A `LuauBytecode` is only
+  ever `Compile`'s or `Load`'s, so one the program holds is its own.
 - A mod is source, always. A program that loads a mod's bytecode would be trusting the mod with
   its process, which the package doesn't offer.
 - The compile is ahead: a game's build step (FutureBlitz's `[build]`) can compile its own
@@ -972,7 +975,7 @@ doesn't give.
 ### L9: bytecode
 
 - `LuauBytecode`: Compile, Save with its tag, Load with its checks; `Run(bytecode)`; an example
-  of a build step that compiles a game's scripts.
+  of a build step that compiles a game's scripts (examples/bytecode, which ctest runs).
 
 Done means: a container round-trips; a changed byte, another key, another Luau, and arbitrary
 bytes are each rejected before Luau sees them.

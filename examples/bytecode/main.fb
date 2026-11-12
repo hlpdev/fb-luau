@@ -1,0 +1,42 @@
+// A game's build step and its game, in one program: the build compiles the game's own scripts,
+// which the program embeds, into containers signed with its key, as it would write them into its
+// paks; the game loads each, which checks its tag before Luau sees a byte, and runs it. A mod is
+// source, always: only the game's own scripts are shipped as bytecode.
+
+Import std.collections
+Import std.core
+Import std.text
+Import luau
+
+// The program's own secret, which signs its bytecode. A real game keeps its key out of its
+// repository, and gives it to its build.
+Const Key = EmbedText("bytecode.key")
+
+// The build step: each script compiled, named by its path, and saved in a signed container.
+Function Built(scripts: Map<String, UInt8[]>): Map<String, UInt8[]> Throws LuauError
+    Local built: Map<String, UInt8[]> = {}
+    For entry In scripts
+        Local source = String.FromUtf8(entry.1) ?? ""
+        Local code = Try LuauBytecode.Compile(source, "@scripts/" + entry.0)
+        built[entry.0] = code.Save(Key.Bytes)
+    End For
+    Return built
+End Function
+
+// The game: each container checked and loaded, then run.
+Function Played(built: Map<String, UInt8[]>) Throws LuauError
+    Local lua = LuauState()
+    Local door = Try LuauBytecode.Load(built["door.luau"] ?? [], Key.Bytes)
+    Local greet = Try LuauBytecode.Load(built["greet.luau"] ?? [], Key.Bytes)
+    Try lua.Set("door", Try lua.Evaluate<LuauTable>(door))
+    Try lua.Set("greet", Try lua.Evaluate<LuauFunction>(greet))
+    Print(Try lua.Evaluate<String>("return greet('player')"))
+    Print(Try lua.Evaluate<String>("return door.toggle()"))
+    // A container someone changed isn't loaded.
+    Local changed = (built["door.luau"] ?? []).Clone()
+    changed[changed.Count / 2] = changed[changed.Count / 2] ^ 255
+    Local refused = Try? LuauBytecode.Load(changed, Key.Bytes)
+    Print(refused == Null ? "a changed container is refused" : "a changed container loaded")
+End Function
+
+Try Played(Try Built(EmbedFolder("scripts")))

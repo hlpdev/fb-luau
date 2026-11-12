@@ -1,6 +1,7 @@
 //! A State's sandbox: what it opens, and scripts, each with globals of its own over the State's
 //! frozen ones, so one mod can't change what another sees.
 
+Import "./bytecode"
 Import "./c/fbl_call"
 Import "./c/fbl_load"
 Import "./c/fbl_ref"
@@ -144,6 +145,35 @@ Public Class LuauScript
         Return Try T.FromLuau(LuauSlots(state, frame), 1)
     End Method
 
+    /// Runs bytecode compiled ahead in it, as Run runs source.
+    ///
+    /// # Errors
+    ///
+    /// What LuauState.Run throws.
+    @PanicsAtCaller
+    Public Method Run(code: LuauBytecode) Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try LoadedCode(state, frame, code)
+        Try state.Check(fbl_call_function(state.Handle, frame, 1, 0))
+    End Method
+
+    /// Runs bytecode compiled ahead in it, and gives its first result as a T.
+    ///
+    /// # Errors
+    ///
+    /// What Run throws, and a LuauError of CONVERSION when its result isn't a T.
+    @PanicsAtCaller
+    Public Method Evaluate<T: LuauType>(code: LuauBytecode): T Throws LuauError
+        Local state = Owner
+        Local frame = state.Opened()
+        Defer state.Closed(frame)
+        Try LoadedCode(state, frame, code)
+        Try state.Check(fbl_call_function(state.Handle, frame, 1, 1))
+        Return Try T.FromLuau(LuauSlots(state, frame), 1)
+    End Method
+
     /// Compiles `source` in it into a function to call later, without running it.
     ///
     /// # Errors
@@ -181,6 +211,12 @@ Public Class LuauScript
     /// Compiles `source` as `name` into slot 1 of the frame, its environment its globals, which go
     /// in slot 0.
     @PanicsAtCaller
+    Method LoadedCode(state: LuauState, frame: Int32, code: LuauBytecode) Throws LuauError
+        Local slots = LuauSlots(state, frame)
+        Try slots.PushRef(Ref)
+        Try state.Check(state.LoadedCode(frame, code, 0))
+    End Method
+
     Method Loaded(state: LuauState, frame: Int32, source: String, name: String) Throws LuauError
         Local slots = LuauSlots(state, frame)
         Try slots.PushRef(Ref)

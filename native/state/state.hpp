@@ -235,6 +235,16 @@ void set_generation(uint64_t handle, uint32_t generation) noexcept;
 // makes something in steps, between them.
 void failure_point(lua_State* stack, const state_t& state);
 
+// The stack index of the environment table in `environment_slot` of the frame, 0 for -1, the
+// thread's own globals, or -1, saying why, for a slot that isn't a table.
+int environment_index(const frame_t& frame, int32_t environment_slot) noexcept;
+
+// Loads compiled `code`, the chunk `name`, onto `thread` as a function, its environment the table
+// at stack index `environment`, or the thread's globals for 0: a status, FBL_SYNTAX for an error
+// when `syntax`, as source that didn't compile is a 0 and its error.
+int32_t load_chunk(state_t& state, lua_State* thread, int environment, std::string_view code,
+                   const char* name, bool syntax) noexcept;
+
 // Freezes the State's globals, unless they are: a status.
 int32_t frozen(state_t& state) noexcept;
 

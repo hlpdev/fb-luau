@@ -180,3 +180,14 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   isn't commit 12a6ba75 any more.
 - **Added (26):** `lua.Step(kilobytes)`, `lua.Has(name)`, `NewScript(name)`, whose name is its
   code's chunk name by default; and `LuauStatesOpen()`, the process's States and their bytes.
+
+## L9 (2026-11-11)
+
+- **The container names its Luau release, not only its bytecode version:** a release can change
+  what its bytecode means within one version, so `Load` takes only its own release's.
+- **A key is 16 bytes at least,** and a shorter one panics where it's used: a key is a secret, and
+  a short one is a mistake, not data.
+- **The chunk's name goes in the container,** as the bytecode doesn't carry it, so a traceback
+  says the script's path.
+- **Compile has no State:** the shim compiles with options it's given, so a build step compiles
+  without a VM; a syntax error says the chunk's name as a State's does.

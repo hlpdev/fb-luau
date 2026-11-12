@@ -1,0 +1,6 @@
+[project]
+name = "bytecode_example"
+version = "0.1.0"
+
+[dependencies]
+luau = { path = "../../luau" }

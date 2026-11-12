@@ -48,6 +48,7 @@ fbl_add_tests(buffer buffer/buffer_tests.cpp)
 fbl_add_tests(sandbox sandbox/sandbox_tests.cpp)
 fbl_add_tests(thread thread/thread_tests.cpp)
 fbl_add_tests(require require/require_tests.cpp)
+fbl_add_tests(bytecode bytecode/bytecode_tests.cpp)
 
 find_program(FBL_SH sh DOC "A POSIX shell, for the tools' scripts")
 find_program(FBL_PYTHON NAMES python3 python DOC "Python 3, for the tools' checks")
@@ -127,10 +128,17 @@ if(FBL_FB_TESTS)
       "closed-builder=the Luau State is closed"
       "builder-other-state=a LuauFunction of another Luau State"
       "negative-limit=a memory limit of -1 bytes is below 0"
+      "short-key=a key of 5 bytes is too short to sign with"
       "negative-budget=a time budget of -1 microseconds is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "started-twice=the Luau thread runs on the scheduler already"
       "resumed-by-hand=the Luau thread runs on the scheduler")
+  # The examples, which run as programs do.
+  add_test(NAME examples.bytecode
+           COMMAND "${FBL_FB}" --color never run "${PROJECT_SOURCE_DIR}/examples/bytecode")
+  set_tests_properties(examples.bytecode PROPERTIES
+                       PASS_REGULAR_EXPRESSION "hello, player.*door opened.*a changed container is refused")
+
   # A marked Method of a shape that doesn't compile when it's registered: @LuauExpose on one that
   # gives nothing, which the exposing loop's Where line on its result names.
   add_test(NAME luau.compile.expose-nothing
