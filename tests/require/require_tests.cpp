@@ -297,7 +297,7 @@ TEST_CASE("a memory error at any point after a placeholder's made clears it, fro
     // modules load whole, and the placeholder b holds is never left writable.
     files_of() = {
         { "a.luau", "local b = require('./b')\nexport local x = 1\nexport local t = { 1, 2 }" },
-        { "b.luau", "local a = require('./a')\nheld = a\nexport local y = 2" },
+        { "b.luau", "local a = require('./a')\nexport local held = a\nexport local y = 2" },
     };
     const require_state_t lua;
     fbl::state_t* state = fbl::find_state(lua.handle);
@@ -308,10 +308,10 @@ TEST_CASE("a memory error at any point after a placeholder's made clears it, fro
         state->failing_allocation = -1;
         CHECK((status == FBL_OK || status == FBL_MEMORY || status == FBL_RUNTIME));
         // What b kept of a, when it kept it, isn't anyone's to change.
-        CHECK(lua.run("if held then local ok = pcall(function() held.x = 9 end) assert(not ok) end",
+        CHECK(lua.run("local ok, b = pcall(require, './b') "
+                      "if ok and b.held then assert(not pcall(function() b.held.x = 9 end)) end",
                       "@main.luau") == FBL_OK);
         REQUIRE(fbl_require_forget(lua.handle) == FBL_OK);
-        CHECK(lua.run("held = nil", "@main.luau") == FBL_OK);
     }
     CHECK(lua.run("assert(require('./a').x == 1)", "@main.luau") == FBL_OK);
 }
