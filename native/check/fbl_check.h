@@ -23,12 +23,18 @@ extern "C" {
 #define FBL_CHECK_ERROR   0
 #define FBL_CHECK_WARNING 1
 
-// A new checker, whose modules without a "--!" line are of `mode`, and which checks each module
-// for at most `seconds`, above 0; or 0, with fbl_core_error saying why. A check that reaches a
-// module with a `type function` is refused, a diagnostic of "TypeFunction" at each, and none is
-// run, as checking would run a mod's code outside any limit. Luau's heap limit for type
-// functions, `heap` bytes, above 0, at most 2 GB, stays as a second fence: it's the process's,
-// so the smallest any checker's asked for is every checker's, from when it's made.
+// A new checker, whose modules without a "--!" line are of `mode`, and whose checks each have
+// `seconds`, above 0, for all their modules, across the runs it takes to give a check its files:
+// one past it is a diagnostic of "TimeLimit" and none of its modules' others. It's the solver
+// that's stopped at the deadline, and no module's begun after it; what runs before a module's
+// solver, its constraint generation, and its lint can't be stopped, so a check can run past it
+// by those of the modules under way, which Luau begins together when none needs another.
+// Parsing and reading files aren't counted. Or 0, with fbl_core_error saying why.
+//
+// A check that reaches a module with a `type function` is refused, a diagnostic of "TypeFunction"
+// at each, and none is run, as checking would run a mod's code outside any limit. Luau's heap
+// limit for type functions, `heap` bytes, above 0, at most 2 GB, stays as a second fence: it's
+// the process's, so the smallest any checker's asked for is every checker's, from when it's made.
 FBL_API uint64_t fbl_check_new(int32_t mode, double seconds, int64_t heap);
 
 // Lets go of a checker. A handle that isn't a checker's does nothing.

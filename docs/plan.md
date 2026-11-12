@@ -615,9 +615,9 @@ End For
   until `Forget()`. Modules are found by the VM's rules, the same code (native/require/paths), and
   a folder's `.luaurc` gives a module's mode and lint as luau-analyze reads it; a `.config.luau`,
   which would run code, isn't asked for.
-- A checker's own diagnostics: `TimeLimit` for a module that took past the limit, `ConfigError`
+- A checker's own diagnostics: `TimeLimit` for a check that took past the limit, `ConfigError`
   for a `.luaurc` that doesn't parse, and `InternalCompilerError` for one Luau gives up on. Its
-  default mode is luau-analyze's, `NONSTRICT`, and its default limit 10 seconds a module.
+  default mode is luau-analyze's, `NONSTRICT`, and its default limit 10 seconds a check.
 - `AddDefinitions(text)` adds a definitions file, Luau's `declare` syntax, which
   `lua.Definitions()` writes for what a State gives scripts, so a mod is checked against the
   game's real API: each registered type as a `declare extern type`, its getters and setters as
@@ -627,8 +627,11 @@ End For
   A type Luau has none for, like a record, whose fields reflection gives only by the type, not
   its name, is `any`, as is what a LuauFunction, or a member added by hand, takes and gives. A mode, `STRICT`, `NONSTRICT`, or `NOCHECK`, is each module's `--!` line, or
   the checker's default.
-- `Check` takes a time limit per module, as Luau's does, so a module that makes the checker work
-  too long gives a diagnostic saying so, not a hang; there's always one. A `type function` is a
+- `Check` has one time limit for all its modules, not Luau's one a module, which N modules
+  make N times it, so a mod that makes the checker work too long gives a diagnostic saying so,
+  not a hang; there's always one. The solver is stopped at the deadline and no module's begun
+  after it; a module's constraint generation and lint, which Luau can't stop, aren't, so a check
+  can run past it by those of the modules under way. Reading and parsing aren't counted. A `type function` is a
   module's code, which the solver would run with the host's memory and native stack, so a check
   that reaches one is refused, a "TypeFunction" diagnostic at each, and none is run; Luau's heap
   limit for one, 64 MB by default and the process's, stays as a second fence.
@@ -853,9 +856,8 @@ and `fb doc luau --check`. Its flags are fbengine's: `--build`, `--base`, `--no-
   a check that all five are there, a dry run, then `fb publish`, by FB_REGISTRY_TOKEN when that
   secret's set, which a first version needs, and by trusted publishing (the workflow's OIDC token,
   in an environment `publish` whose settings can ask for a reviewer) when it isn't; a check that
-  a new project on each target can `fb add` that version and run a script; and, published to
-  futureblitz.dev, the GitHub release's first paragraph posted to Discord when
-  DISCORD_RELEASES_WEBHOOK is set. ctest's tools.publish_dry_run builds and checks the archives
+  a new project on each target can `fb add` that version and run a script. Nothing is posted:
+  luau isn't an official library. ctest's tools.publish_dry_run builds and checks the archives
   against a registry in a build folder, with the target's own library.
 
 The coordinating session watches CI; the lane doesn't.

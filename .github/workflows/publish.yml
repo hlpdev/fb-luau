@@ -7,8 +7,7 @@ name: Publish
 # there, a dry run, then `fb publish`: by FB_REGISTRY_TOKEN when the secret's set, which a package's
 # first version needs, as the registry has no package yet to trust this workflow; by trusted
 # publishing when it isn't. Then on each target a new project adds that version of luau from the
-# registry and runs a script. Published to futureblitz.dev, the GitHub release's first paragraph is
-# posted in the Discord server's releases channel, when DISCORD_RELEASES_WEBHOOK is set.
+# registry and runs a script.
 
 on:
   workflow_dispatch:
@@ -163,40 +162,3 @@ jobs:
           PROGRAM
           fb run 2>&1 | tee run.log
           grep -q ": 5" run.log
-
-  # Published to futureblitz.dev, the release is posted in the Discord server's releases channel:
-  # the GitHub release's first paragraph, made before the run with the notes the user approved,
-  # pinging DISCORD_RELEASES_ROLE. Without the webhook's secret it posts nothing and fails nothing.
-  discord:
-    name: discord
-    needs: [version, installed]
-    if: inputs.registry == 'futureblitz'
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Post it
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          WEBHOOK: ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
-          ROLE: ${{ vars.DISCORD_RELEASES_ROLE }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          if [ -z "$WEBHOOK" ] || [ -z "$ROLE" ]; then
-            echo "::notice::DISCORD_RELEASES_WEBHOOK or DISCORD_RELEASES_ROLE isn't set: nothing posted"
-            exit 0
-          fi
-          link="https://pkg.futureblitz.dev/packages/luau"
-          summary=""
-          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            link="https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
-            summary="$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json body -q .body \
-              | awk 'NF { print; next } { exit }' | head -c 1200)"
-          fi
-          content="$(printf '<@&%s> **luau %s** is out.' "$ROLE" "$VERSION")"
-          if [ -n "$summary" ]; then
-            content="$(printf '%s\n\n%s' "$content" "$summary")"
-          fi
-          content="$(printf '%s\n\nRelease notes: <%s>' "$content" "$link")"
-          jq -n --arg content "$content" --arg role "$ROLE" \
-            '{ content: $content, allowed_mentions: { parse: [], roles: [$role] } }' \
-            | curl -fsS -H 'Content-Type: application/json' -d @- "$WEBHOOK"

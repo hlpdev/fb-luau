@@ -42,7 +42,7 @@ Public Class LuauDiagnostic Implements Printable
     /// Whether it's an error or a warning.
     Public ReadOnly Field Severity: LuauSeverity
     /// Luau's code for it: a type error's from 1000, a lint's its number, or 0 for the checker's
-    /// own, as a module that took past the time limit.
+    /// own, as a check that took past the time limit.
     Public ReadOnly Field Code: Int
     /// Luau's name for its kind: "TypeError", "SyntaxError", a lint's, like "LocalUnused", or the
     /// checker's own, "TimeLimit", "ConfigError", or "InternalCompilerError".
@@ -92,8 +92,11 @@ Public Class LuauChecker
     /// A checker whose `reader` gives a file's text by its path from the files' root, with "/"
     /// between its parts, like "mods/doors/init.luau" or "mods/.luaurc", or Null when there's no
     /// such file; an error it throws is the check's. A module without a `--!` line is checked as
-    /// `mode`, and each for at most `timeLimit`, 10 seconds for Null, past which it gives a
-    /// diagnostic of "TimeLimit" rather than run on.
+    /// `mode`. A check has `timeLimit`, 10 seconds for Null, for all its modules, past which it
+    /// gives a diagnostic of "TimeLimit", and no other, rather than run on. It's Luau's solver
+    /// that's stopped at it, and no module's begun after it; a module's constraint generation,
+    /// which runs before its solver, and its lint can't be stopped, so a check can run past it
+    /// by those of the modules under way. Reading files and parsing aren't counted.
     ///
     /// A `type function` is a module's code, which Luau's solver would run as it checks, with
     /// the program's memory and native stack, which no limit holds; so a check that reaches a

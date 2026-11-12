@@ -549,3 +549,17 @@ Written while the PC was kept free for the user: none of it built or run until t
   futureblitz.dev's registry `futureblitz`; the installed check adds from staging by a
   [registries] entry, as fbengine's does.
 
+
+## 0.1.1, the findings left from the reviews (2026-11-12)
+
+- **One deadline for a check (115):** Luau gives each module its own time limit, so a check of N
+  modules took N times it. A check now has the checker's limit for all its modules, across the
+  runs it takes the program to give its files: a thread of the shim's cancels Luau's token at the
+  deadline, which the solver asks between constraints, and no module's begun after it. Luau's
+  constraint generation, which runs before a module's solver, and its lint can't be stopped, and
+  Luau begins together the modules that need none of the others, so a check can run past the
+  limit by those of the modules under way; the header, the docs, and the plan say so. A check
+  past it gives one TimeLimit diagnostic, at the module checked, and none of its modules' others,
+  as Luau gives no results for a cancelled check.
+- **No Discord post:** by the user's word, luau isn't an official library, so publish.yml's
+  `discord` job (136) is taken out, and nothing presents the package as official.

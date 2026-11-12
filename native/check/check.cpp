@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <limits>
 #include <Luau/Ast.h>
 #include <Luau/BuiltinDefinitions.h>
+#include <Luau/Cancellation.h>
 #include <Luau/Common.h>
 #include <Luau/Config.h>
 #include <Luau/ConfigResolver.h>
@@ -25,6 +28,7 @@
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -310,6 +314,8 @@ Luau::FrontendOptions frontend_options(double seconds) {
     return options;
 }
 
+using steady_t = std::chrono::steady_clock;
+
 struct checker_t {
     checker_t(Luau::Mode mode, double limit)
         : resolver(files), configs(files, mode),
@@ -326,6 +332,48 @@ struct checker_t {
     Luau::Frontend frontend;
     double seconds;
     std::vector<diagnostic_t> diagnostics;
+    // The check that wanted files, which the next run of it goes on with, and the time its
+    // solver's taken so far: one check's modules share its time limit, however many runs it
+    // takes the program to give its files.
+    std::string pending;
+    steady_t::duration spent{};
+};
+
+// Cancels a check at its deadline, from a thread of its own, unless the check's over first: the
+// solver asks its token between constraints, so a check's modules end at the one deadline, not
+// each at its own.
+class deadline_t {
+public:
+    deadline_t(std::shared_ptr<Luau::FrontendCancellationToken> token, steady_t::time_point at)
+        : m_token(std::move(token)), m_at(at), m_thread([this] { watch(); }) {}
+    ~deadline_t() {
+        {
+            const std::scoped_lock lock(m_mutex);
+            m_over = true;
+        }
+        m_woken.notify_one();
+        m_thread.join();
+    }
+    deadline_t(const deadline_t&) = delete;
+    deadline_t& operator=(const deadline_t&) = delete;
+    deadline_t(deadline_t&&) = delete;
+    deadline_t& operator=(deadline_t&&) = delete;
+
+private:
+    void watch() {
+        std::unique_lock lock(m_mutex);
+        if (!m_woken.wait_until(lock, m_at, [this] { return m_over; })) {
+            m_token->cancel();
+        }
+    }
+
+    std::shared_ptr<Luau::FrontendCancellationToken> m_token;
+    steady_t::time_point m_at;
+    std::mutex m_mutex;
+    std::condition_variable m_woken;
+    bool m_over = false;
+    // Last, as it starts watching as it's made.
+    std::thread m_thread;
 };
 
 // The heap's limit of every type function's VM, Luau's and the process's. A check's type functions
@@ -406,6 +454,17 @@ std::array<int32_t, 6> numbers_of(const Luau::Location& location, int32_t severi
     };
 }
 
+// A check past its time limit, at `module`.
+diagnostic_t over_time(const checker_t& checker, const std::string& module) {
+    diagnostic_t diagnostic;
+    diagnostic.module = module;
+    diagnostic.name = "TimeLimit";
+    diagnostic.message = fbl::formatted(
+        "checking took more than {} seconds, so it wasn't checked whole", checker.seconds);
+    diagnostic.numbers = { 1, 1, 1, 1, FBL_CHECK_ERROR, 0 };
+    return diagnostic;
+}
+
 // The diagnostics of what a check checked, as luau-analyze gives them: each module's type errors,
 // then its lint's errors and warnings, then a module it gave up on, then a .luaurc that didn't
 // parse. The modules of a cycle can come in another order than luau-analyze's, which names them
@@ -448,14 +507,7 @@ void collect(checker_t& checker, const std::vector<Luau::ModuleName>& checked) {
             lint(warning, FBL_CHECK_WARNING);
         }
         if (!result->timeoutHits.empty()) {
-            diagnostic_t diagnostic;
-            diagnostic.module = name;
-            diagnostic.name = "TimeLimit";
-            diagnostic.message =
-                fbl::formatted("checking it took more than {} seconds, so it wasn't checked whole",
-                               checker.seconds);
-            diagnostic.numbers = { 1, 1, 1, 1, FBL_CHECK_ERROR, 0 };
-            out.push_back(std::move(diagnostic));
+            out.push_back(over_time(checker, name));
         }
     }
     for (const auto& [file, error] : checker.configs.errors()) {
@@ -509,6 +561,31 @@ bool refused_type_functions(checker_t& checker) {
     return !found.empty();
 }
 
+// Runs the solver over what's queued, cancelled at what's left of the check's time limit, which
+// it takes from. Whether it finished in time, and the modules it checked.
+std::pair<bool, std::vector<Luau::ModuleName>> solved(checker_t& checker) {
+    const auto limit = std::chrono::duration_cast<steady_t::duration>(
+        std::chrono::duration<double>(checker.seconds));
+    const steady_t::time_point started = steady_t::now();
+    if (checker.spent >= limit) {
+        return { false, {} };
+    }
+    auto token = std::make_shared<Luau::FrontendCancellationToken>();
+    checker.frontend.options.cancellationToken = token;
+    std::vector<Luau::ModuleName> checked;
+    {
+        const deadline_t deadline(token, started + limit - checker.spent);
+        // A module whose solver finished after the deadline isn't cancelled, so none's begun
+        // after it.
+        checked = checker.frontend.checkQueuedModules(
+            std::nullopt, {},
+            [&token](size_t /*done*/, size_t /*all*/) { return !token->requested(); });
+    }
+    checker.frontend.options.cancellationToken = nullptr;
+    checker.spent += steady_t::now() - started;
+    return { !token->requested(), std::move(checked) };
+}
+
 // Checks `file`, giving how many files it wanted, or 0 with its diagnostics kept.
 int32_t check(checker_t& checker, const std::string& file) {
     checker.frontend.clear();
@@ -523,9 +600,9 @@ int32_t check(checker_t& checker, const std::string& file) {
         return 0;
     }
     checker.frontend.queueModuleCheck(file);
-    std::vector<Luau::ModuleName> checked;
+    std::pair<bool, std::vector<Luau::ModuleName>> result;
     try {
-        checked = checker.frontend.checkQueuedModules();
+        result = solved(checker);
     } catch (const Luau::InternalCompilerError& error) {
         diagnostic_t diagnostic;
         diagnostic.module = error.moduleName.value_or(file);
@@ -534,6 +611,12 @@ int32_t check(checker_t& checker, const std::string& file) {
         diagnostic.numbers =
             numbers_of(error.location.value_or(Luau::Location{}), FBL_CHECK_ERROR, 0);
         checker.diagnostics.push_back(std::move(diagnostic));
+        return 0;
+    }
+    const auto& [in_time, checked] = result;
+    if (!in_time) {
+        // A cancelled check gives no module's results.
+        checker.diagnostics.push_back(over_time(checker, file));
         return 0;
     }
     if (!checker.files.wanted().empty()) {
@@ -681,6 +764,8 @@ int32_t fbl_check_forget(uint64_t checker) try {
     found->files.forget();
     found->frontend.clear();
     found->diagnostics.clear();
+    found->pending.clear();
+    found->spent = {};
     return FBL_OK;
 } catch (...) {
     return fbl::escaped();
@@ -705,6 +790,11 @@ int32_t fbl_check_run(uint64_t checker, const char* module) try {
     const std::shared_lock running(type_function_heap);
     found->files.clear_wanted();
     found->diagnostics.clear();
+    // A run of another module, or of one whose check finished, starts its own time limit.
+    if (found->pending != *path) {
+        found->pending.clear();
+        found->spent = {};
+    }
     const std::string base = fbl::joined(*parts);
     std::string file;
     int count = 0;
@@ -718,7 +808,12 @@ int32_t fbl_check_run(uint64_t checker, const char* module) try {
         }
     }
     if (!found->files.wanted().empty()) {
+        found->pending = *path;
         return static_cast<int32_t>(found->files.wanted().size());
+    }
+    if (count != 1) {
+        found->pending.clear();
+        found->spent = {};
     }
     if (count == 0) {
         fbl::fail(fbl::formatted("there's no module '{}'", base));
@@ -728,7 +823,14 @@ int32_t fbl_check_run(uint64_t checker, const char* module) try {
         fbl::fail(fbl::formatted("module '{}' has {} files, where it can have one", base, count));
         return -1;
     }
-    return check(*found, file);
+    const int32_t wanted = check(*found, file);
+    if (wanted > 0) {
+        found->pending = *path;
+    } else {
+        found->pending.clear();
+        found->spent = {};
+    }
+    return wanted;
 } catch (const std::bad_alloc&) {
     fbl::fail("not enough memory to check");
     return -1;

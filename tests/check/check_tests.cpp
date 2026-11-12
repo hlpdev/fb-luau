@@ -251,6 +251,43 @@ TEST_CASE("a module past its time limit says so") {
     CHECK(count_named(found, "TimeLimit") == 1);
 }
 
+TEST_CASE("a check's modules share its time limit") {
+    // A module whose time is the solver's, its operators' type functions, timed whole on this
+    // machine, then eight of them under half that: given the limit each, as Luau gives it, the
+    // check would take four times its time; with one deadline, about half.
+    std::string slow = "--!strict\nlocal function g(a, b)\n    local x0 = a\n";
+    for (int line = 1; line < 200; line++) {
+        slow += "    local x" + std::to_string(line) + " = x" + std::to_string(line - 1) +
+                " + b * x" + std::to_string(line - 1) + "\n";
+    }
+    slow += "    return x199\nend\nreturn g\n";
+    const checker_t timing(FBL_CHECK_STRICT, 600);
+    const auto started = std::chrono::steady_clock::now();
+    CHECK(count_named(checked(timing, "slow", { { "slow.luau", slow } }), "TimeLimit") == 0);
+    const std::chrono::duration<double> whole = std::chrono::steady_clock::now() - started;
+
+    const double limit = whole.count() / 2;
+    const checker_t checker(FBL_CHECK_STRICT, limit);
+    std::map<std::string, std::string> files;
+    std::string main = "--!strict\n";
+    for (int module = 0; module < 8; module++) {
+        const std::string name = "m" + std::to_string(module);
+        files[name + ".luau"] = slow;
+        main += "local " + name;
+        main += " = require('./" + name;
+        main += "')\nprint(" + name;
+        main += ")\n";
+    }
+    files["main.luau"] = main;
+    const auto checking = std::chrono::steady_clock::now();
+    const std::vector<diagnostic_t> found = checked(checker, "main", files);
+    const std::chrono::duration<double> took = std::chrono::steady_clock::now() - checking;
+    REQUIRE(found.size() == 1);
+    CHECK(found[0].name == "TimeLimit");
+    CHECK(found[0].module == "main.luau");
+    CHECK(took.count() < limit * 4);
+}
+
 TEST_CASE("a check that reaches a type function is refused, and none is run") {
     // Each would run past what a limit holds: memory, time, the host's strings and arena, and
     // the native stack.
