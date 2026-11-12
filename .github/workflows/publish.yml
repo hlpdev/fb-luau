@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  FB_VERSION: 1.3.2
+  FB_VERSION: 1.3.3
   REGISTRY: ${{ inputs.registry || 'futureblitz.dev' }}
 
 jobs:
