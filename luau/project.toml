@@ -1,6 +1,6 @@
 [project]
 name = "luau"
-version = "0.1.0"
+version = "0.1.1"
 type = "library"
 license = "Apache-2.0 AND MIT"
 description = "Luau scripts in a FutureBlitz program: a typed API, sandboxed, with functions and types both ways."
