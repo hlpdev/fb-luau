@@ -20,6 +20,7 @@ inline fbl_state_options_t default_options() {
         .coverage = 0,
         .libraries = 0xFFF,
         .collect_garbage = FBL_COLLECT_COUNT,
+        .native_code = FBL_NATIVE_OFF,
         .load_string = false,
         .environments = false,
         .unused = {},

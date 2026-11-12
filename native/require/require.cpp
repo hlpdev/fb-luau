@@ -277,6 +277,7 @@ int load(lua_State* stack, void* context, const char* /*path*/, const char* chun
         lua_xmove(module, stack, 1);
         lua_error(stack);
     }
+    fbl::native_compile(state, module, -1);
     // As Luau's CLI does, so a module that exports can be required in a cycle.
     if (FFlag::LuauCyclicRequireShortCircuit && lua_usesexport(module, -1) != 0) {
         luarequire_createplaceholder(stack);

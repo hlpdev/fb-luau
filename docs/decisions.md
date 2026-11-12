@@ -191,3 +191,15 @@ The coordinator's decisions, as given in to-luau.md, with what the code made of 
   says the script's path.
 - **Compile has no State:** the shim compiles with options it's given, so a build step compiles
   without a VM; a syntax error says the chunk's name as a State's does.
+
+## L10 (2026-11-11)
+
+- **Native code is MARKED by default,** as Luau's own default is, so a game opts its scripts in
+  with `--!native`, and `ALL` is an option; `ALL` compiles cold functions too.
+- **No userdata types for the compiler yet:** objects share one userdata tag, and the code
+  generator's typed lowering keys by tag, so naming the types without a tag each would mislead it.
+  A tag per type is a change to the udata area, for later if it's worth it.
+- **Native code isn't counted in the memory limit:** the code generator's executable memory is
+  its own, outside the VM's allocator; it's about the size of the bytecode it compiles.
+- **`lua.NativeFunctions`** is the count of functions compiled, which tests and a game's own
+  diagnostics read; there's nothing else to tell native code from interpreted.

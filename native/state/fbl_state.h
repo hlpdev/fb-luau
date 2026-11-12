@@ -31,6 +31,12 @@ extern "C" {
 #define FBL_COLLECT_COUNT 1
 #define FBL_COLLECT_FULL  2
 
+// What a State compiles to native code, with Luau's code generator, where Luau supports it: none,
+// the chunks that start with --!native and functions marked @native, or everything.
+#define FBL_NATIVE_OFF    0
+#define FBL_NATIVE_MARKED 1
+#define FBL_NATIVE_ALL    2
+
 // What a State is made with. C has no `using`, so it's a typedef.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct fbl_state_options_t {
@@ -49,6 +55,9 @@ typedef struct fbl_state_options_t {
     int32_t libraries;
     // Its collectgarbage, an FBL_COLLECT_.
     int32_t collect_garbage;
+    // What it compiles to native code, an FBL_NATIVE_; where Luau's code generator isn't
+    // supported, everything runs in Luau's interpreter, the same.
+    int32_t native_code;
     // Whether scripts have loadstring, which compiles source, never bytecode, and getfenv and
     // setfenv, which reach other functions' environments.
     bool load_string;
@@ -78,6 +87,13 @@ FBL_API int64_t fbl_state_count(void);
 // The bytes every State of the process holds, on every thread, which a program's tests and soaks
 // watch come back to what it was.
 FBL_API int64_t fbl_state_memory_all(void);
+
+// Whether Luau's code generator is supported here, the processor and the system: 1 or 0.
+FBL_API int32_t fbl_state_native_supported(void);
+
+// How many of the State's functions it's compiled to native code, or -1 for a handle that isn't
+// a State's.
+FBL_API int64_t fbl_state_native_functions(uint64_t state);
 
 // The bytes the State's VM holds, or -1 for a handle that isn't a State's.
 FBL_API int64_t fbl_state_memory(uint64_t state);

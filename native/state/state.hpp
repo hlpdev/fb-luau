@@ -46,6 +46,8 @@ struct state_t {
     std::thread::id owner;
     int64_t memory_limit = 0;
     int64_t memory_used = 0;
+    // How many functions its code generator has compiled.
+    int64_t native_functions = 0;
     // For the tests: which allocation from now fails, counting from 0, once, or -1 for none; and
     // which of the shim's failure points from now raises, as an allocation's failing would, since
     // Luau's own pages hold small objects without asking the allocator.
@@ -61,11 +63,15 @@ struct state_t {
     bool load_string = false;
     bool environments = false;
     bool frozen = false;
+    // Whether it has Luau's code generator.
+    bool code_generator = false;
     lua_CompileOptions compile_options{};
     // The registry's reference to the C function protect() runs work in, made with the State, and
     // the work it runs next, which only protect() sets, and which that function takes and clears
     // before it runs it, so a script that reaches the function finds nothing to run.
     int protect_ref = LUA_NOREF;
+    // What it compiles to native code, an FBL_NATIVE_.
+    int32_t native_code = 0;
     mutable work_t pending_work;
     std::vector<frame_t> frames;
     // A thread for each depth of calls, which the registry keeps.
@@ -244,6 +250,11 @@ int environment_index(const frame_t& frame, int32_t environment_slot) noexcept;
 // when `syntax`, as source that didn't compile is a 0 and its error.
 int32_t load_chunk(state_t& state, lua_State* thread, int environment, std::string_view code,
                    const char* name, bool syntax) noexcept;
+
+// Compiles the function at `index` on `stack`, and those in it, to native code, as the State's
+// options say, if it has the code generator: what can't be stays in the interpreter. It never
+// raises or throws.
+void native_compile(state_t& state, lua_State* stack, int index) noexcept;
 
 // Freezes the State's globals, unless they are: a status.
 int32_t frozen(state_t& state) noexcept;

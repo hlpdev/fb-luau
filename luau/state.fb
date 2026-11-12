@@ -77,6 +77,8 @@ Public Struct LuauOptions
     Public Field Libraries: LuauLibraries = LuauLibraries.ALL
     /// What collectgarbage its scripts have.
     Public Field CollectGarbage: LuauCollectGarbage = LuauCollectGarbage.COUNT
+    /// What it compiles to native code, as its code loads: MARKED by default.
+    Public Field NativeCode: LuauNativeCode = LuauNativeCode.MARKED
     /// Whether its scripts have loadstring, which compiles source, never bytecode: False by
     /// default.
     Public Field LoadString: Bool = False
@@ -599,6 +601,17 @@ Public Class LuauState
         Try Check(fbl_require_open(Handle, frame, 0))
     End Method
 
+    /// How many of its functions it's compiled to native code: 0 where Luau's code generator isn't
+    /// supported, or NativeCode is OFF.
+    @PanicsAtCaller
+    Public Property NativeFunctions: Int64
+        Get
+            Local count = fbl_state_native_functions(Live())
+            If count < 0 Then Panic(LastError())
+            Return count
+        End Get
+    End Property
+
     /// Its handle, panicking at the caller once it's closed.
     @PanicsAtCaller
     Package Method Live(): UInt64
@@ -860,6 +873,7 @@ Function Made(options: LuauOptions): (UInt64, Int32, String)
                                       coverage: options.Compile.Coverage,
                                       libraries: options.Libraries As Int32,
                                       collect_garbage: options.CollectGarbage As Int32,
+                                      native_code: options.NativeCode As Int32,
                                       load_string: options.LoadString,
                                       environments: options.Environments, unused: [False, False])
     Local status: Int32 = FBL_OK

@@ -16,6 +16,9 @@ Package Const FBL_LIBRARY_INTEGER: Int32 = 2048
 Package Const FBL_COLLECT_NONE: Int32 = 0
 Package Const FBL_COLLECT_COUNT: Int32 = 1
 Package Const FBL_COLLECT_FULL: Int32 = 2
+Package Const FBL_NATIVE_OFF: Int32 = 0
+Package Const FBL_NATIVE_MARKED: Int32 = 1
+Package Const FBL_NATIVE_ALL: Int32 = 2
 
 @CLayout Package Struct fbl_state_options_t
     Public Field memory_limit: Int64
@@ -25,6 +28,7 @@ Package Const FBL_COLLECT_FULL: Int32 = 2
     Public Field coverage: Int32
     Public Field libraries: Int32
     Public Field collect_garbage: Int32
+    Public Field native_code: Int32
     Public Field load_string: Bool
     Public Field environments: Bool
     Public Field unused: Bool[2]
@@ -36,6 +40,8 @@ Package Extern "C" Lib "luau_native"
     Function fbl_state_step(state: UInt64, kilobytes: Int32): Int32
     Function fbl_state_count(): Int64
     Function fbl_state_memory_all(): Int64
+    Function fbl_state_native_supported(): Int32
+    Function fbl_state_native_functions(state: UInt64): Int64
     Function fbl_state_memory(state: UInt64): Int64
     Function fbl_state_collect(state: UInt64): Int32
     Function fbl_state_error_kind(state: UInt64): Int32

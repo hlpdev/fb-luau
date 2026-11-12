@@ -542,11 +542,14 @@ Try lua.Run(loaded)
 
 - `LuauOptions.NativeCode`: `OFF`, `MARKED` (the default: modules that start with `--!native`,
   and functions with `@native`), or `ALL`. It's Luau's CodeGen, on x64 with AVX and on arm64;
-  where it isn't supported, code runs in the interpreter, the same, and `LuauState.NativeCode
-  Supported` says so.
+  where it isn't supported, code runs in the interpreter, the same, and
+  `LuauNativeCodeSupported()` says so. `lua.NativeFunctions` counts the functions a State has
+  compiled.
 - It's made per State when the State is, before any code loads, as Luau needs, and compiles each
-  chunk as it loads. A registered type's name is given to the compiler as a userdata type, so
-  typed code over it compiles natively.
+  chunk as it loads: source, bytecode, a module, and `loadstring`'s. What it can't compile runs in
+  the interpreter. Registered types aren't given to the compiler as userdata types yet: every
+  object shares one userdata tag, and Luau's typed lowering tells types apart by tag, so it would
+  take a tag for each registered type, which the stability pass can take up if it's worth it.
 
 ### Type checking and diagnostics
 
@@ -984,8 +987,9 @@ bytes are each rejected before Luau sees them.
 
 - `LuauOptions.NativeCode`, CodeGen per State, userdata types for the compiler.
 
-Done means: the conformance scripts pass with `ALL` on each target that supports it; a test
-shows code ran natively where it's supported, and the same results where it isn't.
+Done means: the conformance scripts pass with `ALL` on each target that supports it (run at L13,
+where they're brought in); a test shows code ran natively where it's supported, and the same
+results where it isn't.
 
 ### L11: the type checker and diagnostics
 

@@ -1,0 +1,37 @@
+Import std.core
+Import std.test
+Import luau
+
+/// A State with `native` code.
+Function NativeState(native: LuauNativeCode): LuauState Throws LuauError
+    Local options = LuauOptions()
+    options.NativeCode = native
+    Return Try LuauState(options)
+End Function
+
+@Test
+Function CodeRunsNativelyWhereItsSupportedWithTheSameResults() Throws LuauError
+    Local source =
+        "local function sum(n) local s = 0 for i = 1, n do s += i * 2 end return s end " +
+        "return sum(1000)"
+    Local native = Try NativeState(LuauNativeCode.ALL)
+    Local interpreted = Try NativeState(LuauNativeCode.OFF)
+    Expect(Try native.Evaluate<Int>(source) == 1001000)
+    Expect(Try interpreted.Evaluate<Int>(source) == 1001000)
+    Expect(interpreted.NativeFunctions == 0)
+    If LuauNativeCodeSupported()
+        Expect(native.NativeFunctions > 0)
+    Else
+        Expect(native.NativeFunctions == 0)
+    End If
+End Function
+
+@Test
+Function ByDefaultOnlyWhatsMarkedIsNative() Throws LuauError
+    Local lua = LuauState()
+    Expect(Try lua.Evaluate<Int>("local function f(n) return n * 2 end return f(21)") == 42)
+    Expect(lua.NativeFunctions == 0)
+    Expect(Try lua.Evaluate<Int>("--!native" + "\n" + "local function f(n) return n * 2 end " +
+                                 "return f(21)") == 42)
+    Expect((lua.NativeFunctions > 0) == LuauNativeCodeSupported())
+End Function

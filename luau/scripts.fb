@@ -55,6 +55,17 @@ Public Enum LuauCollectGarbage
     FULL
 End Enum
 
+/// What a State compiles to native code with Luau's code generator, where Luau supports it, x64
+/// with AVX and arm64: elsewhere, everything runs in Luau's interpreter, the same.
+Public Enum LuauNativeCode
+    /// Nothing.
+    OFF
+    /// Chunks that start with `--!native`, and functions marked `@native`: the default.
+    MARKED
+    /// Everything.
+    ALL
+End Enum
+
 /// A script of a State's, with globals of its own: what it sets is its own, and what it reads
 /// that it hasn't set is the State's, which are frozen once the State has a script, so no script
 /// changes what another sees. Its code runs in it, and calls into the State's functions as any

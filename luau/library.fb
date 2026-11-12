@@ -47,3 +47,14 @@ End Function
 /// Expect(LuauStatesOpen() == before)
 /// ```
 Public Function LuauStatesOpen(): (Int64, Int64) => (fbl_state_count(), fbl_state_memory_all())
+
+/// Whether Luau's code generator is supported where the program runs, its processor and system:
+/// where it isn't, a State's code runs in Luau's interpreter, whatever its NativeCode says.
+///
+/// # Examples
+///
+/// ```
+/// # Import luau
+/// Print(LuauNativeCodeSupported() ? "native code" : "the interpreter")
+/// ```
+Public Function LuauNativeCodeSupported(): Bool => fbl_state_native_supported() == 1

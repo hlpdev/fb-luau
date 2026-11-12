@@ -79,11 +79,13 @@ int32_t load_chunk(state_t& state, lua_State* thread, int environment, std::stri
         }
         lua_pushvalue(thread, environment);
     }
-    auto work = [code, name, in_environment](lua_State* stack) {
+    state_t* const loading = &state;
+    auto work = [code, name, in_environment, loading](lua_State* stack) {
         if (!in_environment) {
             if (luau_load(stack, name, code.data(), code.size(), 0) != 0) {
                 lua_error(stack);
             }
+            native_compile(*loading, stack, -1);
             return 1;
         }
         // Luau resolves a chunk's globals as it loads it from the loading thread's globals, not
@@ -98,6 +100,7 @@ int32_t load_chunk(state_t& state, lua_State* thread, int environment, std::stri
         if (failed != 0) {
             lua_error(stack);
         }
+        native_compile(*loading, stack, -1);
         return 1;
     };
     const int arguments = in_environment ? 1 : 0;

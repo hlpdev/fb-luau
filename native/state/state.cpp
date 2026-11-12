@@ -14,6 +14,7 @@
 #include <format>
 #include <luacode.h>
 #include <lualib.h>
+#include <Luau/CodeGen.h>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -179,6 +180,9 @@ int load_string(lua_State* stack) {
     const int failed = luau_load(loader, name, bytecode.get(), size, 0);
     lua_xmove(loader, stack, 1);
     if (failed == 0) {
+        if (state != nullptr) {
+            fbl::native_compile(*const_cast<fbl::state_t*>(state), stack, -1);
+        }
         return 1;
     }
     lua_pushnil(stack);
@@ -373,6 +377,24 @@ void set_generation(uint64_t handle, uint32_t generation) noexcept {
     }
     slots[slot].generation = generation;
     slots[slot].state->handle = handle_of(slot, generation);
+}
+
+void native_compile(state_t& state, lua_State* stack, int index) noexcept {
+    if (!state.code_generator) {
+        return;
+    }
+    try {
+        Luau::CodeGen::CompilationOptions options;
+        options.flags = state.native_code == FBL_NATIVE_MARKED
+                            ? static_cast<unsigned int>(Luau::CodeGen::CodeGen_OnlyNativeModules)
+                            : static_cast<unsigned int>(Luau::CodeGen::CodeGen_ColdFunctions);
+        Luau::CodeGen::CompilationStats stats;
+        Luau::CodeGen::compile(stack, index, options, &stats);
+        state.native_functions += stats.functionsCompiled;
+    } catch (...) {
+        // What the generator couldn't compile runs in the interpreter; nothing's counted.
+        return;
+    }
 }
 
 void failure_point(lua_State* stack, const state_t& state) {
@@ -571,6 +593,11 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
                                      options->time_budget));
             return 0;
         }
+        if (options->native_code < FBL_NATIVE_OFF || options->native_code > FBL_NATIVE_ALL) {
+            fbl::fail(
+                fbl::formatted("{} isn't what native code a State has", options->native_code));
+            return 0;
+        }
         if (options->collect_garbage < FBL_COLLECT_NONE ||
             options->collect_garbage > FBL_COLLECT_FULL) {
             fbl::fail(fbl::formatted("{} isn't a collectgarbage", options->collect_garbage));
@@ -603,6 +630,7 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
         state->time_budget = std::chrono::microseconds(options->time_budget);
         state->libraries = static_cast<uint32_t>(options->libraries);
         state->collect_garbage = options->collect_garbage;
+        state->native_code = options->native_code;
         state->load_string = options->load_string;
         state->environments = options->environments;
         state->compile_options.optimizationLevel = options->optimization;
@@ -620,6 +648,11 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
             return 0;
         }
         state->current = state->main;
+        // The code generator is made before any code loads, as Luau needs.
+        if (state->native_code != FBL_NATIVE_OFF && Luau::CodeGen::isSupported()) {
+            Luau::CodeGen::create(state->main);
+            state->code_generator = true;
+        }
         // Luau collects toward a heap of twice what's live, and never because an allocation
         // failed, so with a limit, garbage alone would reach it once what's live passed half of
         // it: the collector aims at a quarter more than what's live, and works twice as hard.
@@ -701,6 +734,21 @@ int32_t fbl_state_step(uint64_t state, int32_t kilobytes) try {
         return -1;
     }
     return lua_gc(found->main, LUA_GCSTEP, kilobytes) != 0 ? 1 : 0;
+} catch (...) {
+    fbl::escaped();
+    return -1;
+}
+
+int32_t fbl_state_native_supported(void) try {
+    return Luau::CodeGen::isSupported() ? 1 : 0;
+} catch (...) {
+    fbl::escaped();
+    return 0;
+}
+
+int64_t fbl_state_native_functions(uint64_t state) try {
+    const fbl::state_t* found = fbl::find_state(state);
+    return found == nullptr ? -1 : found->native_functions;
 } catch (...) {
     fbl::escaped();
     return -1;
