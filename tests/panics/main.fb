@@ -123,6 +123,11 @@ Function Run(name: String) Throws LuauError
             Local options = LuauOptions()
             options.TimeBudget = Duration.FromNanoseconds(-5)
             Local _lua = Try LuauState(options)
+        // A native code cap below 0.
+        Case "negative-native-memory"
+            Local options = LuauOptions()
+            options.NativeMemory = -1
+            Local _lua = Try LuauState(options)
         // A compile option out of its range.
         Case "optimization"
             Local options = LuauOptions()

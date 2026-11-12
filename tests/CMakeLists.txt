@@ -137,6 +137,7 @@ if(FBL_FB_TESTS)
       "short-public-key=an Ed25519 public key is 32 bytes, not 5"
       "nul-name=a chunk's name can't hold a NUL"
       "negative-budget=a time budget of -1 microseconds is below 0"
+      "negative-native-memory=a native code cap of -1 bytes is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "state-started-twice=the Luau State's driver runs already"
       "checker-time-limit=a checker's time limit of"
