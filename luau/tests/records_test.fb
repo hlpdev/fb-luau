@@ -94,3 +94,71 @@ Function ATableThatHoldsItselfIsAnErrorNotAHang() Throws LuauError
     Expect(error.Kind == LuauErrorKind.CONVERSION)
     Expect(error.Message.Contains("256"), error.Message)
 End Function
+
+Struct Amount Implements LuauRecord
+    Field Whole: Int
+    Field Part: Float64
+End Struct
+
+Struct Groups Implements LuauRecord
+    Field Named: Map<String, Map<String, Int>>
+End Struct
+
+Struct Pile Implements LuauRecord
+    Field Drops: Drop[]
+End Struct
+
+@Test
+Function NumbersPastAnIntegersRangeNeverPanic() Throws LuauError
+    Local lua = LuauState()
+    For number In ["math.huge", "-math.huge", "1e300", "2^63", "0/0"]
+        Local amount = Try lua.Evaluate<Amount>("return {{ Whole = 1, Part = {number} }}")
+        Expect(amount.Whole == 1)
+        Local error = ExpectThrows<LuauError>(lua.Evaluate<Amount>(
+            "return {{ Whole = {number}, Part = 1 }}"))
+        Expect(error != Null && error.Kind == LuauErrorKind.CONVERSION, number)
+    End For
+End Function
+
+@Test
+Function AnyKeyALuauTableHoldsCanBeAnEmptyMapsPath() Throws LuauError
+    Local lua = LuauState()
+    For key In [".", "a.b", "[", "]", "a[1]", "\"", "\\", "", "12", "x\ny"]
+        Try lua.Set("key", key)
+        Local groups = Try lua.Evaluate<Groups>(r"return { Named = { [key] = {} } }")
+        Expect(groups.Named.Count == 1 && groups.Named[key]?.Count == 0, key)
+    End For
+End Function
+
+@Test
+Function EmptyTablesInAnArrayAreSwappedTogether() Throws LuauError
+    Local lua = LuauState()
+    Local before = RecordLoads()
+    Local pile = Try lua.Evaluate<Pile>(
+        r"local drops = {} for i = 1, 10000 do drops[i] = {} end return { Drops = drops }")
+    Expect(pile.Drops.Count == 10000)
+    Expect(RecordLoads() - before == 2, "{RecordLoads() - before}")
+End Function
+
+@Test
+Function AWrongTableSaysWhatItFound() Throws LuauError
+    Local lua = LuauState()
+    Local empty = ExpectThrows<LuauError>(lua.Evaluate<Amount>(r"return { Whole = {} }"))
+    Expect(empty != Null && empty.Message.EndsWith("found an empty table"), empty?.Message ?? "")
+    // The error that isn't an empty table's is the one given.
+    Local wrong = ExpectThrows<LuauError>(lua.Evaluate<Pile>(r"return { Drops = { {}, 5 } }"))
+    Expect(wrong != Null && wrong.Message.Contains("Drops[1]") && wrong.Message.EndsWith("5"),
+           wrong?.Message ?? "")
+End Function
+
+@Test
+Function ATableOfItemsAndKeysIsntData() Throws LuauError
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Evaluate<Spawn>(
+        r"return { Name = 'rat', Kind = 'RAT', Tags = { 'a', nil, 'c', x = 'y' } }"))
+    Expect(error != Null && error.Kind == LuauErrorKind.CONVERSION)
+    Expect(error != Null && error.Message.Contains("both keys and items"), error?.Message ?? "")
+    Local holes = ExpectThrows<LuauError>(lua.Evaluate<Spawn>(
+        r"return { Name = 'rat', Kind = 'RAT', Tags = { 'a', nil, 'c' } }"))
+    Expect(holes != Null && holes.Kind == LuauErrorKind.CONVERSION)
+End Function

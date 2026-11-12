@@ -283,9 +283,15 @@ Public Struct LuauSlots
     End Method
 End Struct
 
+/// Whether `value` is a number an Int64 holds with every digit, from -2^53 to 2^53, so its `As
+/// Int64` can't panic, and gives it back as it was when it's whole: not NaN, nor an infinity.
+Package Function Exact(value: Float64): Bool
+    Return value == value && value <= 9007199254740992.0 && value >= -9007199254740992.0
+End Function
+
 /// Rounds `value` down to a whole number, without std.math, whose Floor is for Floats too.
 Function Floor(value: Float64): Float64
-    If value != value || value >= 9.0e15 || value <= -9.0e15 Then Return value
+    If !Exact(value) Then Return value
     Local whole = (value As Int64) As Float64
     Return whole > value ? whole - 1 : whole
 End Function
