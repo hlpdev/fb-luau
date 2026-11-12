@@ -2,7 +2,8 @@ name: CI
 
 # Each target's library (native.yml, with the C++ tests on its Release build), then fb's release on
 # a plain runner of each target, which runs the package's tests on that library with no compiler;
-# a Debug build with every test where fb's programs can link it; and the format and docs checks.
+# a Debug build with every test where fb's programs can link it; the format checks; and the docs
+# check, on linux-x64's test job, as it needs the library.
 
 on:
   push:
@@ -63,6 +64,11 @@ jobs:
           tar -xf native-${{ matrix.target }}.tar
           fb --version
           fb test luau
+
+      # The docs check reads the package, which needs its library.
+      - name: Docs
+        if: matrix.target == 'linux-x64'
+        run: fb doc --check luau
 
   # A Debug build, where the tests' asserts and Luau's run, with fb's tests too on Windows and
   # macOS. Linux's is built in the manylinux container, as fb's programs link for its glibc, so
@@ -141,10 +147,9 @@ jobs:
 
       # The .clang-format's keys need clang-format 19, which the runner's apt doesn't have; this is
       # the version Visual Studio's is.
-      - name: clang-format, fb fmt, the bindings, and the docs
+      - name: clang-format, fb fmt, and the bindings
         run: |
           pipx install clang-format==19.1.5
           git ls-files '*.h' '*.hpp' '*.c' '*.cpp' | xargs clang-format --dry-run -Werror
           fb fmt --check luau
           sh tools/bindgen.sh --check
-          fb doc --check luau

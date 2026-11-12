@@ -10,13 +10,17 @@ FetchContent_MakeAvailable(Catch2)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 
+# The tests' threads, std::thread's, which glibc before 2.34 has in libpthread.
+find_package(Threads REQUIRED)
+
 # The shim's tests, one executable for each area, over fbl_internal, so they reach what the
 # library doesn't export, and with the library itself for what's only true of it: that it loads,
 # and what it exports.
 function(fbl_add_tests area)
   add_executable(fbl_${area}_tests ${ARGN})
   fbl_set_warnings(fbl_${area}_tests)
-  target_link_libraries(fbl_${area}_tests PRIVATE fbl_internal Catch2::Catch2WithMain)
+  target_link_libraries(fbl_${area}_tests PRIVATE fbl_internal Catch2::Catch2WithMain
+                        Threads::Threads)
   target_compile_definitions(fbl_${area}_tests PRIVATE
                              FBL_LIBRARY="$<TARGET_FILE:luau_native>"
                              FBL_VERSION="${FBL_VERSION}"
@@ -45,7 +49,10 @@ if(FBL_SH)
                    "$<TARGET_FILE:luau_native>")
   set_tests_properties(tools.check_exports PROPERTIES
                        PASS_REGULAR_EXPRESSION "loads only the system's libraries")
-  fbl_add_shared(fbl_overexported fbl_ "" tools/overexported.cpp)
+  # Built as the library is, but with no prefix to keep to, so its stray name is exported: with
+  # fbl_ the macOS export list and the Linux version script would hide it, as they do the
+  # library's.
+  fbl_add_shared(fbl_overexported "" "" tools/overexported.cpp)
   target_include_directories(fbl_overexported PRIVATE "${PROJECT_SOURCE_DIR}/native")
   target_compile_definitions(fbl_overexported PRIVATE FBL_BUILDING)
   add_test(NAME tools.check_exports_refuses
