@@ -129,3 +129,54 @@ with its date; the rest are the lane's, which the user can change.
 - **`.config.luau` isn't supported:** it runs code to configure, which the sandbox doesn't need.
 - **An error the shim raises for a yield nothing can wait for is YIELD** out of a call, by its
   message's start, which every such error of the shim's and the package's has.
+
+## The review of L1 to L6, on dev/review-1 (2026-11-11)
+
+The coordinator's decisions, as given in to-luau.md, with what the code made of them:
+
+- **The shim's own function trusts no caller (28):** protect() leaves its work in the State, which
+  run_work takes and clears, and raises with none pending. Every other C function of the shim's
+  checks its arguments as a script's; a test walks every C function on the stack, and on a thread
+  a script kept, during each kind of call, and calls each with nothing, a number, a table, a proxy,
+  and an object.
+- **getfenv and setfenv are the shim's own (29),** refusing level 0 and C functions; a runner's
+  globals are the main thread's at the start of every call. **loadstring loads into its caller's
+  environment (30)**, on a thread whose globals are it, marking it unsafe.
+- **A collected number always has room (1, 31):** room for every number queued and every live one,
+  made at each creation; a destructor finding none asserts in a Debug build. Collect and Step drain
+  when no call is open. **A box is committed as its making's last step (32)**, and an uncommitted
+  one's destructor does nothing. Luau's own pages hold small objects without asking the allocator,
+  so the tests fail a making at points between its steps, besides failing allocations.
+- **Every outermost entry from the program has the time budget (12, 33)**, set in protect() and in
+  a resume by one guard, which puts depth and the deadline back on every way out (42), saturates
+  the deadline (18, 37), and makes a timeout inside protect TIMEOUT. A budget under a microsecond
+  is one.
+- **Nothing in `frames` is read across protect (40):** the thread's taken by value, by one helper.
+- **Records (11, 13, 14, 15, 20):** numbers past an Int64's exact range are Float64s, never a
+  panic; Load's error paths are read by a reader of the package's own; a swap covers every element
+  of the arrays on the path, so a 10,000-element array of empty records is two Loads; a wanted
+  scalar finding an empty table says so; a record's bytes are a Luau buffer; a table is an Array
+  only when its keys are 1 to its count.
+- **Errors (16, 17, 19, 24, 25):** a LuauError raised in a script by the program's function keeps
+  its Kind out of the call, found by its message, the most recent raise winning; another State's
+  error value isn't pushed, only its message; a State that fails as it's made is closed; a copied
+  value reads through a State of its own once its State is gone.
+- **Registration (3 to 8):** a type is kept by an id of its own, as `TypeName` has no module (gap
+  17); two marked members of one Luau name, and a marked Method of a shape none exposes, panic at
+  Register naming them (gap 16); Close empties each registration; an Add checks its function's
+  State and replaces what the type had by that name. **Objects by identity (2) waits on the fb
+  lane** (gap 14). A derived type crosses as its base (gap 15).
+- **The shim's core (34, 36, 38, 41, 43 to 49):** the error slot holds false and a flag, never nil;
+  object numbers past 2^53 are refused; a type's metatable is frozen again whatever happens; with a
+  memory limit, the collector's goal is 125 and its step 400, and an outermost MEMORY collects
+  everything; the owner's read under the lock; a slot whose 24-bit generations are spent is
+  retired; room's reserved before a slot's taken; Close drops frames the program left open; the
+  frame functions' catch-alls give -1.
+- **Freeze reaches every table the globals' tables hold (35),** not through metatables or
+  functions; a table scripts share and write is given by a function or an object.
+- **loadstring refuses a source bigger than the memory left (39),** and looks at the budget when a
+  compile returns; a compile itself can't be interrupted.
+- **Luau stays pinned by its tag (50),** as CLAUDE.md says, and the configure stops when the tag
+  isn't commit 12a6ba75 any more.
+- **Added (26):** `lua.Step(kilobytes)`, `lua.Has(name)`, `NewScript(name)`, whose name is its
+  code's chunk name by default; and `LuauStatesOpen()`, the process's States and their bytes.

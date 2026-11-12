@@ -110,21 +110,20 @@ namespace {
 // A script, run inside the shim's protected work by a table's __index, that finds the shim's own
 // C function on the stack, and calls it with nothing, a number, a table, and a proxy: each call an
 // error, as it trusts no caller. It counts the calls that failed in `refused`.
-constexpr std::string_view probe =
-    "refused = 0\n"
-    "probe = setmetatable({}, { __index = function()\n"
-    "  for level = 1, 50 do\n"
-    "    local f, n = debug.info(level, 'fn')\n"
-    "    if f == nil then break end\n"
-    "    if n == 'fbl' then\n"
-    "      for _, arg in { false, 1, {}, newproxy() } do\n"
-    "        if arg == false then arg = nil end\n"
-    "        if not pcall(f, arg) then refused += 1 end\n"
-    "      end\n"
-    "    end\n"
-    "  end\n"
-    "  return 7\n"
-    "end })";
+constexpr std::string_view probe = "refused = 0\n"
+                                   "probe = setmetatable({}, { __index = function()\n"
+                                   "  for level = 1, 50 do\n"
+                                   "    local f, n = debug.info(level, 'fn')\n"
+                                   "    if f == nil then break end\n"
+                                   "    if n == 'fbl' then\n"
+                                   "      for _, arg in { false, 1, {}, newproxy() } do\n"
+                                   "        if arg == false then arg = nil end\n"
+                                   "        if not pcall(f, arg) then refused += 1 end\n"
+                                   "      end\n"
+                                   "    end\n"
+                                   "  end\n"
+                                   "  return 7\n"
+                                   "end })";
 
 } // namespace
 
@@ -221,7 +220,8 @@ TEST_CASE("a call's depth and deadline are put back however it ends") {
         CHECK(state->depth == 1);
         CHECK(state->deadline != std::chrono::steady_clock::time_point{});
         throw std::runtime_error("as Luau's resume can, as it starts");
-    } catch (const std::runtime_error&) {
+    } catch (const std::runtime_error& thrown) {
+        CHECK(std::string_view(thrown.what()).contains("as it starts"));
     }
     CHECK(state->depth == 0);
     CHECK(state->deadline == std::chrono::steady_clock::time_point{});
@@ -240,8 +240,7 @@ TEST_CASE("loadstring refuses a source past the memory left, and keeps to the bu
     options.memory_limit = int64_t{ 2 } * 1024 * 1024;
     options.time_budget = 20000;
     const test_state_t lua(options);
-    CHECK(lua.run("loadstring(string.rep('x', 1200000))") ==
-          FBL_RUNTIME);
+    CHECK(lua.run("loadstring(string.rep('x', 1200000))") == FBL_RUNTIME);
     CHECK(lua.run("loadstring(string.rep('local a = 1 ', 2))") == FBL_OK);
     CHECK(lua.run("while true do loadstring('return 1') end") == FBL_TIMEOUT);
 }

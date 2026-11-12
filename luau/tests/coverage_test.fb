@@ -111,17 +111,24 @@ Function OperatorsAddedByHandWorkEitherWay() Throws LuauError
         If value.Kind == LuauValueKind.NUMBER Then Return (value.AsNumber() ?? 0) As Int
         Return (Try value.Read<Coins>()).Cents
     End Function
-    Try coins.AddOperator(LuauOperator.ADD, Try lua.Wrap(Function(a: LuauValue, b: LuauValue): Coins Throws Error
+    Try coins.AddOperator(LuauOperator.ADD,
+                          Try lua.Wrap(Function(a: LuauValue, b: LuauValue): Coins Throws Error
         Return Coins(Try CentsOf(a) + Try CentsOf(b))
     End Function))
-    Try coins.AddOperator(LuauOperator.EQ, Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents == b.Cents))
-    Try coins.AddOperator(LuauOperator.LT, Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents < b.Cents))
-    Try coins.AddOperator(LuauOperator.LE, Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents <= b.Cents))
-    Try coins.AddOperator(LuauOperator.CALL, Try lua.Wrap(Function(c: Coins, times: Int) => c.Cents * times))
-    Try coins.AddOperator(LuauOperator.CONCAT, Try lua.Wrap(Function(a: LuauValue, b: LuauValue): String Throws Error
+    Try coins.AddOperator(LuauOperator.EQ,
+                          Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents == b.Cents))
+    Try coins.AddOperator(LuauOperator.LT,
+                          Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents < b.Cents))
+    Try coins.AddOperator(LuauOperator.LE,
+                          Try lua.Wrap(Function(a: Coins, b: Coins) => a.Cents <= b.Cents))
+    Try coins.AddOperator(LuauOperator.CALL,
+                          Try lua.Wrap(Function(c: Coins, times: Int) => c.Cents * times))
+    Try coins.AddOperator(LuauOperator.CONCAT,
+                          Try lua.Wrap(Function(a: LuauValue, b: LuauValue): String Throws Error
         Return a.ToString() + "|" + (Try CentsOf(b)).ToString()
     End Function))
-    Try coins.AddOperator(LuauOperator.TOSTRING, Try lua.Wrap(Function(c: Coins) => "{c.Cents} cents"))
+    Try coins.AddOperator(LuauOperator.TOSTRING,
+                          Try lua.Wrap(Function(c: Coins) => "{c.Cents} cents"))
     Try lua.Set("a", Coins(150))
     Try lua.Set("b", Coins(150))
     Try lua.Set("c", Coins(200))
@@ -218,14 +225,17 @@ Function ARecordsRenamedAndSkippedFields() Throws LuauError
     Local read = Try lua.Evaluate<Renamed>(r"return { hp = 5, Cache = 1 }")
     Expect(read.Health == 5 && read.Cache == 9)
     Try lua.Set("given", Renamed(7, 1))
-    Expect(Try lua.Evaluate<Bool>("return given.hp == 7 and given.Health == nil and given.Cache == nil"))
+    Expect(Try lua.Evaluate<Bool>(
+        "return given.hp == 7 and given.Health == nil and given.Cache == nil"))
 End Function
 
 @Test
 Function ANumberIsntABool() Throws LuauError
     Local lua = LuauState()
-    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return 1"))?.Kind == LuauErrorKind.CONVERSION)
-    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return nil"))?.Kind == LuauErrorKind.CONVERSION)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return 1"))?.Kind ==
+           LuauErrorKind.CONVERSION)
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<Bool>("return nil"))?.Kind ==
+           LuauErrorKind.CONVERSION)
 End Function
 
 @Test

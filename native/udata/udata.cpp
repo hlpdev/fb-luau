@@ -54,7 +54,7 @@ struct found_t {
 // Whether an object's number is one the weak table, keyed by Luau's numbers, tells apart from every
 // other: from -2^53 to 2^53.
 bool keyable(int64_t object) noexcept {
-    constexpr int64_t most = int64_t{ 1 } << 53;
+    constexpr int64_t most = 9007199254740992;
     return object >= -most && object <= most;
 }
 

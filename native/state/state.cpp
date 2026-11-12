@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cassert>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -133,7 +133,7 @@ void check_deadline(lua_State* stack);
 void push_caller_environment(lua_State* stack, int level) {
     lua_Debug info{};
     if (lua_getinfo(stack, level, "f", &info) != 0) {
-        if (lua_isfunction(stack, -1) && !lua_iscfunction(stack, -1)) {
+        if (lua_type(stack, -1) == LUA_TFUNCTION && lua_iscfunction(stack, -1) == 0) {
             lua_getfenv(stack, -1);
             lua_remove(stack, -2);
             return;
@@ -190,22 +190,22 @@ int load_string(lua_State* stack) {
 // one at a level from 1; a thread's globals, level 0, are refused, as their table is the shared
 // one, or a runner's, which every call reuses.
 void environment_function(lua_State* stack, bool optional) {
-    if (lua_isfunction(stack, 1)) {
+    if (lua_type(stack, 1) == LUA_TFUNCTION) {
         lua_pushvalue(stack, 1);
     } else {
-        const int level =
-            optional ? luaL_optinteger(stack, 1, 1) : luaL_checkinteger(stack, 1);
-        luaL_argcheck(stack, level > 0, 1, "a thread's globals can't be reached; give a level from 1");
+        const int level = optional ? luaL_optinteger(stack, 1, 1) : luaL_checkinteger(stack, 1);
+        luaL_argcheck(stack, level > 0, 1,
+                      "a thread's globals can't be reached; give a level from 1");
         lua_Debug info{};
         if (lua_getinfo(stack, level, "f", &info) == 0) {
             luaL_argerror(stack, 1, "invalid level");
         }
-        if (lua_isnil(stack, -1)) {
+        if (lua_type(stack, -1) == LUA_TNIL) {
             luaL_error(stack, "no function environment for tail call at level %d", level);
         }
     }
     // A C function's environment is its creator's globals, which aren't a script's to reach.
-    if (lua_iscfunction(stack, -1)) {
+    if (lua_iscfunction(stack, -1) != 0) {
         luaL_error(stack, "a C function's environment can't be reached");
     }
 }
@@ -342,8 +342,7 @@ void close_state(fbl::state_t* state) {
 
 namespace fbl {
 
-entered_t::entered_t(state_t& state) noexcept
-    : m_state(state), m_outermost(state.depth == 0) {
+entered_t::entered_t(state_t& state) noexcept : m_state(state), m_outermost(state.depth == 0) {
     if (m_outermost) {
         m_state.timed_out = false;
         if (m_state.time_budget.count() > 0) {
@@ -377,7 +376,12 @@ void set_generation(uint64_t handle, uint32_t generation) noexcept {
 }
 
 void failure_point(lua_State* stack, const state_t& state) {
-    if (state.failing_point >= 0 && state.failing_point-- == 0) {
+    if (state.failing_point < 0) {
+        return;
+    }
+    const bool fails = state.failing_point == 0;
+    state.failing_point--;
+    if (fails) {
         luaL_error(stack, "not enough memory");
     }
 }
@@ -386,6 +390,7 @@ void make_room(std::vector<int64_t>& queue, int64_t live) {
     queue.reserve(queue.size() + static_cast<size_t>(live) + 1);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): push_back within the capacity doesn't allocate.
 void keep_released(std::vector<int64_t>& queue, int64_t number) noexcept {
     assert(queue.size() < queue.capacity() && "no room kept for a collected number");
     if (queue.size() < queue.capacity()) {
@@ -517,14 +522,13 @@ int32_t settle(state_t& state, lua_State* thread, int status) noexcept {
         return record_error(state, FBL_MEMORY, "not enough memory");
     }
     // An error the interrupt raised, or any the timeout led to, is the timeout.
-    const int32_t kind =
-        state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
+    const int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
     take_error(state, thread, kind);
     collect_after(state, kind);
     return kind;
 }
 
-void collect_after(state_t& state, int32_t kind) noexcept {
+void collect_after(const state_t& state, int32_t kind) noexcept {
     // Past the limit, the collector stops, and every allocation fails until it runs: an outermost
     // call that met the limit collects all of it before it returns.
     if (kind == FBL_MEMORY && state.depth == 0 && state.memory_limit > 0) {
@@ -710,9 +714,7 @@ int64_t fbl_state_count(void) try {
     return -1;
 }
 
-int64_t fbl_state_memory_all(void) try {
-    return fbl::memory_of_all_states();
-} catch (...) {
+int64_t fbl_state_memory_all(void) try { return fbl::memory_of_all_states(); } catch (...) {
     fbl::escaped();
     return -1;
 }

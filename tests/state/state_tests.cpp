@@ -6,9 +6,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <string>
-#include <vector>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 TEST_CASE("a State is made, used, and closed, and every byte it held comes back") {
     const int64_t before = fbl::memory_of_all_states();

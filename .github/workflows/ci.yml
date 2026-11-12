@@ -145,7 +145,7 @@ jobs:
         run: |
           pipx install clang-format==19.1.5
           git ls-files '*.h' '*.hpp' '*.c' '*.cpp' | xargs clang-format --dry-run -Werror
-          fb fmt --check luau tests/panics
+          fb fmt --check luau tests/panics tests/compile
           sh tools/bindgen.sh --check
           python3 tools/gen_arity.py --check
           fb doc --check luau

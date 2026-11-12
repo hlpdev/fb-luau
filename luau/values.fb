@@ -291,7 +291,8 @@ Public Struct LuauSlots
         End If
         If type == FBL_TYPE_NUMBER
             Local number = Try Float64.FromLuau(Self, index)
-            If number != number Then Throw LuauError(LuauErrorKind.CONVERSION, "a table's key can't be NaN")
+            If number != number Then Throw LuauError(LuauErrorKind.CONVERSION,
+                                                     "a table's key can't be NaN")
         End If
     End Method
 

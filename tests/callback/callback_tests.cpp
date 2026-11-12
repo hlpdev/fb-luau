@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -86,8 +87,8 @@ int32_t test_callback(uint64_t state, int32_t frame, int64_t function) {
         for (int32_t& each : opened) {
             each = fbl_frame_open(state);
         }
-        for (auto each = opened.rbegin(); each != opened.rend(); ++each) {
-            fbl_frame_close(state, *each);
+        for (const int32_t each : std::views::reverse(opened)) {
+            fbl_frame_close(state, each);
         }
         fbl_frame_truncate(state, frame, 0);
         fbl_frame_push_string(state, frame, bytes_of("deep failed"), 11);
@@ -273,8 +274,7 @@ TEST_CASE("a function whose making fails at any allocation is nothing to the pro
     CHECK(state->live_functions == before);
     CHECK(state->released.size() == static_cast<size_t>(made));
     std::array<int64_t, 128> taken{};
-    while (fbl_callback_released(lua.handle, taken.data(), 128) > 0) {
-    }
+    while (fbl_callback_released(lua.handle, taken.data(), 128) > 0) {}
     CHECK(state->released.empty());
     set_function(lua, "late", add);
     CHECK(lua.run("assert(late(1, 2) == 3)") == FBL_OK);
@@ -284,7 +284,8 @@ TEST_CASE("a function that fails without an error raises none of its arguments")
     const test_state_t lua;
     REQUIRE(fbl_callback_set(test_callback));
     set_function(lua, "other", other);
-    CHECK(lua.run("local ok, e = pcall(other, 'secret', 'arguments') "
-                  "assert(not ok and e == \"the program's function failed, and gave no error\", e)") ==
+    CHECK(lua.run(
+              "local ok, e = pcall(other, 'secret', 'arguments') "
+              "assert(not ok and e == \"the program's function failed, and gave no error\", e)") ==
           FBL_OK);
 }

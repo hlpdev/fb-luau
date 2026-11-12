@@ -56,9 +56,10 @@ End Struct
 /// Expect(lua.MemoryUsed < options.MemoryLimit)
 /// ```
 Public Struct LuauOptions
-    /// The most bytes the State's VM may hold at once, or 0, the default, for no limit. Past it, a
-    /// script gets Luau's "not enough memory", which a call gives as a LuauError of MEMORY, and
-    /// the State goes on, with what was freed free.
+    /// The most bytes the State's VM may hold at once, or 0, the default, for no limit, garbage not
+    /// yet collected counting too: with a limit, the collector runs more often, aiming at a quarter
+    /// more than what's live. Past it, a script gets Luau's "not enough memory", which a call gives
+    /// as a LuauError of MEMORY, and the State goes on, having collected all it could.
     Public Field MemoryLimit: Int64 = 0
     /// How long each call of the program's into the State may run, or 0, the default, for no
     /// limit: every one that can run a script's code, a call, a thread's resume, and a table's or

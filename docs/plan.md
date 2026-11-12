@@ -837,6 +837,21 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
     that started them. `Start` awaits each wait itself, so `s.Run(thread.Start())` moves its
     `task.wait`s; but a function from `SetAsync` that the thread called before the Run, from
     the main scheduler, stays there until it's done (fbengine-notes/luau/scheduler_run_nested.fb).
+14. **Nothing keys by identity:** a Map uses a Class's own `==` and `Hash`, `Weak<T>` isn't
+    Hashable, and there's no hash to go with `RefEquals`, so two equal objects of a Class with an
+    `==` of its own share one userdata, and one whose Hash changes while Luau has it gets a second
+    (review finding 2, open; fbengine-notes/luau/identity_key.fb).
+15. **A derived Class gets its base's Static defaults:** an Interface's Static default is the
+    base's for a Class that extends it, and one that gives Self clashes when the derived Class
+    lists the Interface, so a type extending a registered one crosses only as its base, and can't
+    be registered itself (fbengine-notes/luau/derived_static_default.fb).
+16. **A For Method loop goes over one shape,** with a Where line, so a marked Method of a shape
+    none of Register's loops expose is found by a loop for each shape up to 8 arguments, and named
+    in a panic at Register; one of more arguments, or that throws two kinds of error, isn't, and
+    `@LuauExpose` on one that gives nothing doesn't compile, by gap 12's bug, its message naming
+    the Method.
+17. **`TypeName<T>()` has no module,** so a State keeps a type's registration by an id each type
+    gets the first time it's registered, a generic Class's Static Atomic, not by its name.
 
 ## Milestones
 

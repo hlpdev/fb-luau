@@ -107,7 +107,8 @@ Function ATypesHandlerCalledWithWhatItIsntIsAnError() Throws LuauError
     Expect(Try lua.Evaluate<Int>("origin = coroutine.running() return probe:Run()") > 0)
     Expect(Try lua.Evaluate<Int>(r"local n = 0 for _, f in kept do " +
                                  r"for _, self in { {}, other, 5 } do " +
-                                 r"if not pcall(f, self, 'Run') then n += 1 end end end return n") > 0)
+                                 r"if not pcall(f, self, 'Run') then n += 1 end end end return n") >
+           0)
     Expect(Try lua.Evaluate<Int>("return probe:Run()") >= 0)
     Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
 End Function

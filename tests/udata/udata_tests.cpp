@@ -154,7 +154,7 @@ TEST_CASE("a type is registered once, and its own fields stay its own") {
 TEST_CASE("every object made and collected inside one call is given back") {
     const test_state_t lua;
     register_thing(lua);
-    int32_t frame = fbl_frame_open(lua.handle);
+    const int32_t frame = fbl_frame_open(lua.handle);
     REQUIRE(fbl_callback_function(lua.handle, frame, 4, "make") == FBL_OK);
     REQUIRE(fbl_frame_set_global(lua.handle, frame, bytes_of("make"), 4, 0) == FBL_OK);
     REQUIRE(fbl_frame_close(lua.handle, frame));
@@ -164,7 +164,6 @@ TEST_CASE("every object made and collected inside one call is given back") {
     REQUIRE(fbl_state_collect(lua.handle) == FBL_OK);
     CHECK(state->live_objects == 0);
     CHECK(released_objects(lua).size() == 100000);
-    static_cast<void>(frame);
 }
 
 TEST_CASE("an object whose making fails at any allocation is nothing to the program") {
@@ -207,7 +206,7 @@ TEST_CASE("an object's number past what Luau's numbers tell apart is refused") {
     const test_state_t lua;
     register_thing(lua);
     const int32_t frame = fbl_frame_open(lua.handle);
-    constexpr int64_t most = int64_t{ 1 } << 53;
+    constexpr int64_t most = 9007199254740992;
     CHECK(fbl_udata_new(lua.handle, frame, most + 1, 1) == FBL_MISUSE);
     CHECK(fbl_udata_push(lua.handle, frame, -most - 1) == FBL_MISUSE);
     CHECK(fbl_udata_new(lua.handle, frame, most, 1) == FBL_OK);

@@ -318,7 +318,8 @@ def check_tidy(build, base):
 
 def check_fb_format():
     step("fb fmt")
-    folders = [folder for folder in ("luau", "examples", "tests/panics", "tests/conformance")
+    folders = [folder for folder in ("luau", "examples", "tests/panics", "tests/compile",
+                                     "tests/conformance")
                if (ROOT / folder).is_dir()]
     if run(["fb", "fmt", "--check", *folders]) != 0:
         fail("fb fmt would change files")
