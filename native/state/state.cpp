@@ -127,8 +127,6 @@ int collect_garbage(lua_State* stack) {
     return 1;
 }
 
-void check_deadline(lua_State* stack);
-
 // Pushes the environment of the function at `level` above the C function running, or the
 // globals' for a C function's, as a C function's own is its creator's globals.
 void push_caller_environment(lua_State* stack, int level) {
@@ -172,7 +170,7 @@ int load_string(lua_State* stack) {
         luaL_error(stack, "not enough memory to compile");
     }
     // A compile can't be interrupted, so the budget's looked at once it's done.
-    check_deadline(stack);
+    fbl::check_deadline(stack);
     lua_State* loader = lua_newthread(stack);
     lua_pushvalue(stack, 3);
     lua_xmove(stack, loader, 1);
@@ -236,7 +234,10 @@ int set_environment(lua_State* stack) {
     return 1;
 }
 
-// Raises the timeout when the running call is past its deadline.
+} // namespace
+
+namespace fbl {
+
 void check_deadline(lua_State* stack) {
     auto* state = static_cast<fbl::state_t*>(lua_callbacks(stack)->userdata);
     if (state == nullptr || state->deadline == std::chrono::steady_clock::time_point{} ||
@@ -248,13 +249,17 @@ void check_deadline(lua_State* stack) {
                static_cast<long long>(state->time_budget.count()));
 }
 
+} // namespace fbl
+
+namespace {
+
 // The interrupt, at Luau's safe points: past the running call's deadline, it raises the timeout,
 // and again at each one after, so a pcall can't keep the script going, until the call returns.
 void interrupt(lua_State* stack, int gc) {
     if (gc >= 0) {
         return;
     }
-    check_deadline(stack);
+    fbl::check_deadline(stack);
 }
 
 // Opens one of Luau's libraries, `name` by `function`, when the State's options have its bit.

@@ -13,40 +13,7 @@ namespace {
 // upvalues aren't followed.
 int freeze(lua_State* stack) {
     luaL_sandbox(stack);
-    // The tables seen, as keys, and those still to go through, by number from 1.
-    lua_newtable(stack);
-    const int seen = lua_gettop(stack);
-    lua_newtable(stack);
-    const int queue = lua_gettop(stack);
-    lua_pushvalue(stack, LUA_GLOBALSINDEX);
-    lua_pushboolean(stack, 1);
-    lua_rawset(stack, seen);
-    lua_pushvalue(stack, LUA_GLOBALSINDEX);
-    lua_rawseti(stack, queue, 1);
-    int queued = 1;
-    for (int next = 1; next <= queued; next++) {
-        lua_rawgeti(stack, queue, next);
-        const int table = lua_gettop(stack);
-        lua_pushnil(stack);
-        while (lua_next(stack, table) != 0) {
-            if (lua_istable(stack, -1)) {
-                lua_pushvalue(stack, -1);
-                lua_rawget(stack, seen);
-                const bool known = !lua_isnil(stack, -1);
-                lua_pop(stack, 1);
-                if (!known) {
-                    lua_setreadonly(stack, -1, 1);
-                    lua_pushvalue(stack, -1);
-                    lua_pushboolean(stack, 1);
-                    lua_rawset(stack, seen);
-                    lua_pushvalue(stack, -1);
-                    lua_rawseti(stack, queue, ++queued);
-                }
-            }
-            lua_pop(stack, 1);
-        }
-        lua_pop(stack, 1);
-    }
+    fbl::freeze_tables(stack, LUA_GLOBALSINDEX);
     return 0;
 }
 
@@ -63,6 +30,46 @@ int32_t frozen(state_t& state) noexcept {
     }
     state.frozen = true;
     return FBL_OK;
+}
+
+void freeze_tables(lua_State* stack, int index) {
+    index = lua_absindex(stack, index);
+    // The tables seen, as keys, and those still to go through, by number from 1.
+    lua_newtable(stack);
+    const int seen = lua_gettop(stack);
+    lua_newtable(stack);
+    const int queue = lua_gettop(stack);
+    lua_setreadonly(stack, index, 1);
+    lua_pushvalue(stack, index);
+    lua_pushboolean(stack, 1);
+    lua_rawset(stack, seen);
+    lua_pushvalue(stack, index);
+    lua_rawseti(stack, queue, 1);
+    int queued = 1;
+    for (int next = 1; next <= queued; next++) {
+        lua_rawgeti(stack, queue, next);
+        const int table = lua_gettop(stack);
+        lua_pushnil(stack);
+        while (lua_next(stack, table) != 0) {
+            if (lua_type(stack, -1) == LUA_TTABLE) {
+                lua_pushvalue(stack, -1);
+                lua_rawget(stack, seen);
+                const bool known = lua_type(stack, -1) != LUA_TNIL;
+                lua_pop(stack, 1);
+                if (!known) {
+                    lua_setreadonly(stack, -1, 1);
+                    lua_pushvalue(stack, -1);
+                    lua_pushboolean(stack, 1);
+                    lua_rawset(stack, seen);
+                    lua_pushvalue(stack, -1);
+                    lua_rawseti(stack, queue, ++queued);
+                }
+            }
+            lua_pop(stack, 1);
+        }
+        lua_pop(stack, 1);
+    }
+    lua_pop(stack, 2);
 }
 
 void push_environment(lua_State* stack, lua_State* main) {

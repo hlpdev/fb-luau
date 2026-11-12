@@ -35,6 +35,14 @@ struct work_t {
     void* data = nullptr;
 };
 
+// A require's walk to its module: the module path's parts it's at, that module's first file, and
+// the files it's found, by their paths, while it walks.
+struct require_walk_t {
+    std::vector<std::string> parts;
+    std::string file;
+    std::unordered_map<std::string, std::string> found;
+};
+
 // A State: a Luau VM of its own, with its allocator's count and limit, the options its code
 // compiles with, and what the program has open on it.
 struct state_t {
@@ -94,13 +102,11 @@ struct state_t {
     std::vector<int> type_refs;
     int objects_ref = LUA_NOREF;
     // require's: whether the State has it, the registry's reference to the program's reader of its
-    // files, or none; and, as a require walks its path, the module path's parts it's at, that
-    // module's first file, and the files it's read, by their paths, nullopt for none.
+    // files, or none; how many modules are loading; and the walk of the require running.
     bool require_open = false;
     int require_reader = LUA_NOREF;
-    std::vector<std::string> module_path;
-    std::string module_file;
-    std::unordered_map<std::string, std::optional<std::string>> module_files;
+    int requires_running = 0;
+    require_walk_t require_walk;
     // The last error a call met, its value kept by the registry at error_ref.
     int error_ref = LUA_NOREF;
     bool error_has_value = false;
@@ -255,6 +261,13 @@ int32_t load_chunk(state_t& state, lua_State* thread, int environment, std::stri
 // options say, if it has the code generator: what can't be stays in the interpreter. It never
 // raises or throws.
 void native_compile(state_t& state, lua_State* stack, int index) noexcept;
+
+// Raises the timeout when the running call is past its deadline.
+void check_deadline(lua_State* stack);
+
+// Freezes the table at `index` on `stack`, and every table reachable from it through tables'
+// fields, each once, not through metatables or functions. It raises when there's no memory.
+void freeze_tables(lua_State* stack, int index);
 
 // Freezes the State's globals, unless they are: a status.
 int32_t frozen(state_t& state) noexcept;
