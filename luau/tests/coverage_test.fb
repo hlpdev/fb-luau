@@ -10,11 +10,10 @@ Class Animal Implements LuauObject
     @LuauExpose Method Sound(): String => "..."
 End Class
 
-/// A dog, an animal that sounds its own way. It can't list LuauObject itself while FutureBlitz
-/// gives a derived Class its base's Static defaults (fbengine-notes/luau/derived_static_default.fb),
-/// so it crosses as an Animal.
-Class Dog Extends Animal
+/// A dog, an animal that sounds its own way, and a type of its own too.
+Class Dog Extends Animal Implements LuauObject
     Override Method Sound(): String => "woof"
+    @LuauExpose Method Fetch(): String => "stick"
 End Class
 
 /// A type whose Methods throw, and one of seven arguments, and a Private one.
@@ -90,6 +89,18 @@ Function ADerivedObjectCrossesAsItsBaseAndRunsItsOwnMethods() Throws LuauError
     Local error = ExpectThrows<LuauError>(lua.Run("speak(plain)"))
     Expect(error != Null && error.Message.Contains("invalid argument #1 to 'speak'"),
            error?.Message ?? "")
+End Function
+
+@Test
+Function ADerivedClassIsATypeOfItsOwn() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Animal>()
+    Try lua.Register<Dog>()
+    Local dog = Dog()
+    Try lua.Set("dog", dog)
+    Expect(Try lua.Evaluate<String>("return typeof(dog) .. ' ' .. dog:Sound() .. ' ' .. dog:Fetch()") ==
+           "Dog woof stick")
+    Expect(RefEquals(Try lua.Get<Dog>("dog"), dog))
 End Function
 
 @Test

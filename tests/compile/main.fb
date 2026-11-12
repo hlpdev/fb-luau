@@ -1,5 +1,6 @@
-// A program that mustn't compile: a Method that gives nothing, marked @LuauExpose, which is
-// @LuauAction's, is refused where its type is registered, naming the Method.
+// A program that compiles, and panics at Register: a Method that gives nothing, marked
+// @LuauExpose, which is @LuauAction's, is named in the panic, as fb 1.3.1's For Method loops skip
+// it rather than refuse to compile it.
 
 Import luau
 

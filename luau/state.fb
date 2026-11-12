@@ -171,7 +171,8 @@ Public Class LuauState
     Package Field DeclaredGlobals: Map<String, LuauDeclared>
     /// Whether it has the `task` library, which Definitions declares.
     Package Field HasTasks: Bool = False
-    Package Field Drivers: Weak<LuauDriver>[]
+    Package Field Drivers: Map<Int, Weak<LuauDriver>>
+    Field nextDriver: Int = 0
     Package Field CurrentDriver: Int = 0
     Package Field StateDriver: Int = 0
     Package Field Turning: Bool = False
@@ -197,7 +198,7 @@ Public Class LuauState
         Waits = {}
         DeclaredTypes = {}
         DeclaredGlobals = {}
-        Drivers = []
+        Drivers = {}
         Failures = []
         ThreadError = Function(error: LuauError)
             Reported(error)
@@ -239,7 +240,7 @@ Public Class LuauState
         Waits = {}
         DeclaredTypes = {}
         DeclaredGlobals = {}
-        Drivers = []
+        Drivers = {}
         Failures = []
         ThreadError = Function(error: LuauError)
             Reported(error)
@@ -780,38 +781,26 @@ Public Class LuauState
         End While
     End Method
 
-    /// A new driver, numbered from 1 and kept weakly, for a thread's Start, or the State's for
-    /// Null: its number is its place among the drivers, a gone one's again. They're in an array, not
-    /// a Map, as fb 1.3.0's Map of Weak keeps what Get gives (fbengine-notes/luau/weak_map_get_leak.fb).
+    /// A new driver, numbered and kept weakly, for a thread's Start, or the State's for Null.
     Package Method NewDriver(own: LuauThread?): LuauDriver
-        Local place = Drivers.Count
-        For index = 0 Until Drivers.Count
-            Local held: LuauDriver? = Drivers[index]
-            If held == Null
-                place = index
-                Break
-            End If
-        End For
-        Local driver = LuauDriver(Self, place + 1, own)
-        If place == Drivers.Count
-            Drivers.Add(driver)
-        Else
-            Drivers[place] = driver
-        End If
+        nextDriver++
+        Local driver = LuauDriver(Self, nextDriver, own)
+        Drivers[nextDriver] = driver
         Return driver
     End Method
 
     /// The driver numbered `number`, while its coroutine has it, or Null.
     Package Method DriverOf(number: Int): LuauDriver?
-        If number <= 0 || number > Drivers.Count Then Return Null
-        Local driver: LuauDriver? = Drivers[number - 1]
+        If number == 0 Then Return Null
+        Local kept = Drivers.Get(number)
+        If kept == Null Then Return Null
+        Local driver: LuauDriver? = kept
         Return driver
     End Method
 
     /// Lets go of driver `number`'s place, as it goes.
     Package Method Dropped(number: Int)
-        If number <= 0 || number > Drivers.Count Then Return
-        Drivers[number - 1] = Null
+        Drivers.Remove(number)
     End Method
 
     /// Keeps what a thread waits for, for the driver in its turn, or the State's own.

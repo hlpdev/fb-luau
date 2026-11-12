@@ -887,10 +887,9 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
 8. **An Error can't say its own Class's name as the program runs,** which the runtime knows, as
    an uncaught error's message shows it, so an error crossing into Luau is its Message alone, not
    `IOError: ...`.
-9. **A bug: beside an overload that takes a `Func()`, a lambda that throws an `IOError` fits no
-   overload,** though `Func() Throws Error` alone takes it, and a named Function that throws
-   does. A lambda given to `SetFunction` says `Throws Error` meanwhile
-   (fbengine-notes/luau/throws_overload.fb shows it).
+9. **Fixed in fb 1.3.1:** beside an overload that takes a `Func()`, a lambda that throws an
+   `IOError` fit no overload; a lambda given to `SetFunction` said `Throws Error`, and doesn't
+   now (fbengine-notes/luau/throws_overload.fb).
 10. **A Field or Property loop can't pick by an attribute,** only a Method loop can, so a loop's
     Where lines on F hold for every Field, and `Register<T>` can't expose only the Fields marked
     `@LuauExpose`; field-like members are `@LuauGet` and `@LuauSet` Methods meanwhile
@@ -898,28 +897,23 @@ when its milestone reaches it; the package's way around it is plain, and goes wh
 11. **An Interface can't say what implements it is a Class** (no `Where Self: Class` in a default),
     so `LuauObject`'s defaults can't keep an object as an `Object`; it's boxed by its type, and
     reads back only as that type.
-12. **A bug: a `For Method` loop of `Func(): R` binds a Method that gives nothing, with R as
-    nothing,** so a Where line on R fails for it, and a loop over the Methods that give a value
-    can't be written beside those that don't; `@LuauAction` marks the second kind meanwhile
+12. **Fixed in fb 1.3.1:** a `For Method` loop of `Func(): R` bound a Method that gives nothing.
+    `@LuauAction` still marks a Method that gives nothing, as it says what it is; `@LuauExpose` on
+    one is now named in Register's panic rather than refused by the compiler
     (fbengine-notes/luau/void_result.fb).
-13. **A bug: a Scheduler's `Run(task)` moves only the task's own coroutine,** not the Async
-    coroutines it awaits, which spec 10 says it moves with it, so those stay on the scheduler
-    that started them. `Start` awaits each wait itself, so `s.Run(thread.Start())` moves its
-    `task.wait`s; but a function from `SetAsync` that the thread called before the Run, from
-    the main scheduler, stays there until it's done (fbengine-notes/luau/scheduler_run_nested.fb).
-14. **Nothing keys by identity:** a Map uses a Class's own `==` and `Hash`, `Weak<T>` isn't
-    Hashable, and there's no hash to go with `RefEquals`, so two equal objects of a Class with an
-    `==` of its own share one userdata, and one whose Hash changes while Luau has it gets a second
-    (review finding 2, open; fbengine-notes/luau/identity_key.fb).
-15. **A derived Class gets its base's Static defaults:** an Interface's Static default is the
-    base's for a Class that extends it, and one that gives Self clashes when the derived Class
-    lists the Interface, so a type extending a registered one crosses only as its base, and can't
-    be registered itself (fbengine-notes/luau/derived_static_default.fb).
+13. **Fixed in fb 1.3.1:** a Scheduler's `Run(task)` moved only the task's own coroutine. The
+    waits' driver no longer rests on it either way: it reads its scheduler's time each tick, by
+    fb 1.3.2's `Scheduler.Current.Time()` (fbengine-notes/luau/scheduler_run_nested.fb).
+14. **Fixed in fb 1.3.1:** nothing keyed by identity. An object's userdata is found by
+    std.collections' `Identity<T>`, RefHash and RefEquals, never its Class's own `==` or Hash, so
+    `LuauObject` is a Class's, and no longer Hashable (review finding 2;
+    fbengine-notes/luau/identity_key.fb).
+15. **Fixed in fb 1.3.1:** a derived Class got its base's Static defaults, so a Class extending a
+    registered one couldn't list LuauObject. It can now, and is a type of its own; an object still
+    reads back only as the type it crossed as, by gap 11 (fbengine-notes/luau/derived_static_default.fb).
 16. **A For Method loop goes over one shape,** with a Where line, so a marked Method of a shape
     none of Register's loops expose is found by a loop for each shape up to 8 arguments, and named
-    in a panic at Register; one of more arguments, or that throws two kinds of error, isn't, and
-    `@LuauExpose` on one that gives nothing doesn't compile, by gap 12's bug, its message naming
-    the Method.
+    in a panic at Register; one of more arguments, or that throws two kinds of error, isn't.
 17. **`TypeName<T>()` has no module,** so a State keeps a type's registration by an id each type
     gets the first time it's registered, a generic Class's Static Atomic, not by its name.
 

@@ -188,12 +188,12 @@ if(FBL_FB_TESTS)
   set_tests_properties(examples.modded_game PROPERTIES
                        PASS_REGULAR_EXPRESSION "broken isn't loaded: 2 errors.*doors is loaded.*spawner spawned rat 1.*the front door is open.*FRONT IS OPEN!.*greedy is stopped at tick 5: TIMEOUT.*spawner spawned rat 3.*its waits ended: True")
 
-  # A marked Method of a shape that doesn't compile when it's registered: @LuauExpose on one that
-  # gives nothing, which the exposing loop's Where line on its result names.
+  # @LuauExpose on a Method that gives nothing, @LuauAction's: since fb 1.3.1 it compiles, and
+  # Register names it in a panic.
   add_test(NAME luau.compile.expose-nothing
-           COMMAND "${FBL_FB}" --color never check "${CMAKE_CURRENT_SOURCE_DIR}/compile")
+           COMMAND "${FBL_FB}" --color never run "${CMAKE_CURRENT_SOURCE_DIR}/compile")
   set_tests_properties(luau.compile.expose-nothing PROPERTIES
-                       PASS_REGULAR_EXPRESSION "its Method 'Nothing' has nothing for R")
+                       PASS_REGULAR_EXPRESSION "Silent.Nothing is marked @LuauExpose, but isn't")
   foreach(case IN LISTS fbl_panics)
     string(FIND "${case}" "=" split)
     string(SUBSTRING "${case}" 0 ${split} name)
