@@ -287,7 +287,7 @@ Public Struct LuauSlots
         End If
         Local thread = Try Running()
         Local waiting = LuauWaiting(thread, task, where)
-        waiting.In = thread.WaitsIn()
+        waiting.Within = thread.WaitsIn()
         Try Owner.Waited(waiting)
         Truncate(0)
         Return FBL_YIELD

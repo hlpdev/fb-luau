@@ -302,14 +302,14 @@ Package Class LuauWaiting
 
     /// The function its thread waits in, for a wait of the thread's own, as fbl_thread_waits_in
     /// numbers it, or 0 for one another thread made, by task.spawn, defer, or delay.
-    Package Field In: Int64 = 0
+    Package Field Within: Int64 = 0
 
     /// Whether its thread is still in this wait: it's suspended, in the function it waited in,
     /// not resumed by a script meanwhile, nor closed.
     Package Method IsHeld(): Bool
-        If In == 0 Then Return True
+        If Within == 0 Then Return True
         If Thread.Luaus() != LuauThreadStatus.SUSPENDED Then Return False
-        Return Thread.WaitsIn() == In
+        Return Thread.WaitsIn() == Within
     End Method
 
     /// Whether it's due in its driver's turn: its Task done, its time come, or a tick's.
@@ -337,6 +337,15 @@ Package Class LuauDriver
     Package Field Now: Float64 = 0.0
     /// Whether it's in its turn, when the scheduler running the code is its own.
     Package Field InTurn: Bool = False
+    /// How long its turn has run, in real time, while it's in one.
+    Field turnClock: Stopwatch? = Null
+
+    /// The real seconds its turn has taken so far, or 0 outside one.
+    Package Method TurnTime(): Float64
+        Local clock = turnClock
+        If clock == Null Then Return 0.0
+        Return clock.Elapsed.TotalSeconds
+    End Method
 
     Package New(owner: LuauState, number: Int, own: LuauThread?)
         Self.owner = owner
@@ -460,6 +469,7 @@ Package Class LuauDriver
         Local failed: LuauError? = Null
         If due.Count > 0
             Local clock = Stopwatch.StartNew()
+            turnClock = clock
             Local budget = held.TickBudget
             held.Turning = True
             InTurn = True
@@ -482,6 +492,7 @@ Package Class LuauDriver
                 End Try
             End For
             InTurn = False
+            turnClock = Null
             held.Turning = False
         End If
         If held.IsOpen Then held.Report()
@@ -648,7 +659,7 @@ Function TaskWait(slots: LuauSlots): Int32
         Local seconds = Try SecondsAt(slots, 0, "wait")
         Local thread = Try slots.Running()
         Local waiting = LuauWaiting(thread, seconds, Given(seconds))
-        waiting.In = thread.WaitsIn()
+        waiting.Within = thread.WaitsIn()
         Try slots.Owner.Waited(waiting)
         slots.Truncate(0)
         Return FBL_YIELD

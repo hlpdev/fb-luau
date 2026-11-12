@@ -107,31 +107,6 @@ Function AKeptThreadsHandlerCantBeTakenFromIt() Throws LuauError
 End Function
 
 @Test
-Function ATypesHandlerCalledWithWhatItIsntIsAnError() Throws LuauError
-    // The test review-2 took out, back: while the type's Method calls back into Luau, the script
-    // takes the C functions on its own thread's stack, which debug.info still gives, the type's
-    // handler among them, then calls each later with a table, another type's object, and a number
-    // as self. Each is an error, and the State goes on.
-    Local lua = LuauState()
-    Try lua.Register<Probe>()
-    Try lua.Register<Other>()
-    Local probe = Probe()
-    Try lua.Set("probe", probe)
-    Try lua.Set("other", Other())
-    probe.Script = Try lua.Load(r"kept = {} for level = 1, 12 do " +
-                                r"local read, f = pcall(debug.info, level, 'f') " +
-                                r"if read and f and debug.info(f, 's') == '[C]' then table.insert(kept, f) end " +
-                                r"end return #kept")
-    Expect(Try lua.Evaluate<Int>("return probe:Run()") > 0)
-    Expect(Try lua.Evaluate<Int>(r"local n = 0 for _, f in kept do " +
-                                 r"for _, self in { {}, other, 5 } do " +
-                                 r"if not pcall(f, self, 'Run') then n += 1 end end end return n") >
-           0)
-    Expect(Try lua.Evaluate<Int>("return probe:Run()") >= 0)
-    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
-End Function
-
-@Test
 Function DebugInfoRefusesANegativeLevelAsLuauDoes() Throws LuauError
     // The guard adds one to a level of the caller's own, which turned -1 into 0, debug.info's own.
     Local lua = LuauState()

@@ -12,7 +12,7 @@ End Class
 
 /// A dog, an animal that sounds its own way, and a type of its own too.
 Class Dog Extends Animal Implements LuauObject
-    Override Method Sound(): String => "woof"
+    @LuauExpose Override Method Sound(): String => "woof"
     @LuauExpose Method Fetch(): String => "stick"
 End Class
 

@@ -178,7 +178,7 @@ Public Class LuauState
     Package Field Turning: Bool = False
     Package Field MostWaiting: Int = 10000
     /// How long a driver's tick may resume threads for: the State's time budget, or none for 0.
-    Package Field TickBudget: Duration = Duration.FromNanoseconds(0)
+    Package Field TickBudget: Duration
     /// The errors that ended threads nothing waits for, which go to ThreadError once no call runs.
     Package Field Failures: LuauError[]
     /// What gets an error that ends a thread nothing waits for.
@@ -207,6 +207,7 @@ Public Class LuauState
         If made.0 == 0 Then Panic(made.2)
         Handle = made.0
         Registered(Self)
+        TickBudget = Duration.FromNanoseconds(0)
         Try? Printing(Null)
         Try
             Try TaskLibrary(Self)
@@ -815,7 +816,7 @@ Public Class LuauState
         // A thread that waits itself, while a wait of its own is kept, went around that one, as
         // a script's coroutine.resume does: the old one's dropped.
         Local old = Waits.Get(id)
-        If old != Null && old.In != 0 && waiting.In != 0 Then Waits.Remove(id)
+        If old != Null && old.Within != 0 && waiting.Within != 0 Then Waits.Remove(id)
         Try CanWait(waiting.Thread)
         Local driver = DriverOf(CurrentDriver) ?? DriverOf(StateDriver)
         If driver == Null
@@ -824,11 +825,13 @@ Public Class LuauState
                             "State's waits; lua.Start() runs them, or a thread's Start")
         End If
         waiting.Driver = driver.Number
-        // A wait made in the driver's turn counts from its scheduler's time now; one made outside
-        // it, as in a call of the program's or a thread's first resume, from the driver's next
-        // turn, on its own scheduler.
+        // A wait made in the driver's turn counts from its scheduler's time at the turn, and what
+        // real time the turn's taken since, so it's never early on the main scheduler, whose time
+        // is the real clock's; one made outside it, as in a call of the program's or a thread's
+        // first resume, from the driver's next turn, on its own scheduler. Only the driver reads
+        // the scheduler's time, as a State on a worker thread can't.
         If driver.InTurn
-            waiting.Due = Scheduler.Current.Time().TotalSeconds + waiting.Seconds
+            waiting.Due = driver.Now + driver.TurnTime() + waiting.Seconds
         Else
             waiting.Due = waiting.Seconds
             waiting.Pending = True
