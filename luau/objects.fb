@@ -80,12 +80,23 @@ Public Enum LuauOperator
     TOSTRING
 End Enum
 
+/// The key an object's userdata is found by: the object itself, by which object it is.
+///
+/// # Panics
+///
+/// For a value that isn't an object of a Class.
+@PanicsAtCaller
+Package Function LuauObjectKey<T: LuauObject>(value: T): Identity<Object>
+    Local object = value As? Object
+    If object == Null Then Panic("a LuauObject is a Class's object, and {TypeName<T>()} isn't a Class")
+    Return Identity(object)
+End Function
+
 /// A Class whose objects cross as themselves, as userdata that hold them: what a script holds is
 /// the object, not a copy, and the object lives while either the program or Luau has it. Its
 /// type is registered first, with `LuauState.Register`, which says what a script reaches of it.
-/// An object reads back as the type it crossed as. Until FutureBlitz 1.3.3, the State finds an
-/// object's userdata by the Class's `==` and Hash: of a Class with its own `==`, two objects it
-/// calls equal cross as one userdata, the first of them.
+/// An object reads back as the type it crossed as. Each object has a userdata of its own, by
+/// which object it is, whatever its Class's `==` says.
 ///
 /// # Examples
 ///
@@ -177,8 +188,9 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Package Field Functions: Map<String, LuauFunction>
     Package Field AddedGetters: Map<String, LuauFunction>
     Package Field AddedSetters: Map<String, LuauFunction>
-    /// The number of each object Luau has, which its userdata holds.
-    Package Field Ids: Map<T, Int64>
+    /// The number of each object Luau has, which its userdata holds, by which object it is, never
+    /// by its Class's own `==`.
+    Package Field Ids: Map<Identity<Object>, Int64>
     /// The metamethods reflection gives it before its metatable is made, which then has them.
     Package Field Pending: (LuauOperator, LuauFunction)[] = []
     /// The member each Luau name is, of the Methods reflection exposes, by kind, so two of one name
@@ -385,7 +397,9 @@ Public Class LuauTypeBuilder<T: LuauObject>
         Local kept = state.Objects.Get(id)
         If kept == Null Then Return
         Local box = kept As? LuauBox<T>
-        If box != Null && Ids.Get(box.Value) == id Then Ids.Remove(box.Value)
+        If box == Null Then Return
+        Local key = LuauObjectKey(box.Value)
+        If Ids.Get(key) == id Then Ids.Remove(key)
     End Method
 
     /// What a script's `object.key` reads: a field, a Method, or an error saying there's none.

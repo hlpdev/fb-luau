@@ -37,7 +37,7 @@ build step for its own scripts.
 
 ## Building
 
-fb-luau needs fb 1.3.2, CMake 3.28, Ninja, Python 3, and a C++23 compiler: GCC or Clang on Linux
+fb-luau needs fb 1.3.3, CMake 3.28, Ninja, Python 3, and a C++23 compiler: GCC or Clang on Linux
 and macOS, and on Windows a GCC built for the UCRT, as MSYS2's UCRT64 has, or winlibs' UCRT
 build. The library is built into `luau/native/<target>/`, where the package finds it, and ctest
 runs the tests:

@@ -34,6 +34,6 @@ Print(Try lua.Evaluate<Int>("return add(2, 3)"))      // 5
 [The guide](https://github.com/hlpdev/fb-luau/blob/master/docs/guide.md) goes through each part
 with a program that runs.
 
-Needs fb 1.3.2 or later, on Windows x64, Linux x64 and arm64, or macOS arm64 and x64. Apache-2.0;
+Needs fb 1.3.3 or later, on Windows x64, Linux x64 and arm64, or macOS arm64 and x64. Apache-2.0;
 in its library, Luau is MIT (notices/luau.txt), and on Windows MinGW-w64's winpthreads is MIT
 and BSD-style (notices/winpthreads.txt).

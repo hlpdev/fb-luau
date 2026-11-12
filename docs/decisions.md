@@ -501,4 +501,8 @@ Written while the PC was kept free for the user: none of it built or run until t
   of stack reserved (CreateThread's reservation on Windows, where winpthreads' stack size is
   only the first commit; pthread's elsewhere) and expects the guard's message, so it can't pass
   on Luau's own C call limit. is_callers_thread went with 123.
+- **Finding 2, on fb 1.3.3:** an object's userdata is found by `Identity<Object>`, the object
+  converted by `As? Object`, which 1.3.3 allows of an Interface-constrained type parameter's
+  value: two objects a Class calls equal each have their own, and one whose Hash changes keeps
+  its one. fb 1.3.3 in project.toml, every workflow, and the READMEs; the plan's gap 14 is fixed.
 

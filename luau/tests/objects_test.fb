@@ -42,6 +42,19 @@ Class Door Implements LuauObject
     @LuauExpose Method Open(): Bool => True
 End Class
 
+/// A Class with an `==` and Hash of its own, by its number, which changes.
+Class Coin Implements LuauObject
+    Field Value: Int
+
+    New(value: Int)
+        Value = value
+    End New
+
+    Operator ==(a: Coin, b: Coin): Bool => a.Value == b.Value
+
+    Method Hash(): UInt64 => Value As UInt64
+End Class
+
 @Test
 Function AnObjectsExposedMembersWorkFromAScript() Throws LuauError
     Local lua = LuauState()
@@ -226,4 +239,22 @@ Function AnAddedMethodReplacesAReflectedOneBothWays() Throws LuauError
     Try lua.Set("door", Door())
     Expect(!(Try lua.Evaluate<Bool>("return door:Open()")))
     Expect(!(Try lua.Evaluate<Bool>("return door.Open(door)")))
+End Function
+
+@Test
+Function EachObjectHasAUserdataOfItsOwnWhateverItsEqualsSays() Throws LuauError
+    // Finding 2: two objects their Class calls equal are two objects to a script, and one whose
+    // Hash changes keeps its userdata.
+    Local lua = LuauState()
+    Try lua.Register<Coin>()
+    Local a = Coin(1)
+    Local b = Coin(1)
+    Try lua.Set("a", a)
+    Try lua.Set("b", b)
+    Expect(!(Try lua.Evaluate<Bool>("return rawequal(a, b)")))
+    Expect(RefEquals(Try lua.Get<Coin>("b"), b))
+    Try lua.Run("kept = a")
+    a.Value = 99
+    Try lua.Set("again", a)
+    Expect(Try lua.Evaluate<Bool>("return rawequal(kept, again)"))
 End Function

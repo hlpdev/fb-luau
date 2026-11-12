@@ -999,7 +999,8 @@ Public Class LuauState
     @PanicsAtCaller
     Package Method PushObject<T: LuauObject>(slots: LuauSlots, value: T) Throws LuauError
         Local type = TypeOf<T>()
-        Local id = type.Ids.Get(value)
+        Local key = LuauObjectKey(value)
+        Local id = type.Ids.Get(key)
         If id != Null && fbl_udata_push(Live(), slots.Frame, id) == FBL_OK Then Return
         nextObject++
         Local object = nextObject
@@ -1007,7 +1008,7 @@ Public Class LuauState
         Try Check(status)
         Objects[object] = LuauBox<T>(value)
         ObjectTypes[object] = type.Number
-        type.Ids[value] = object
+        type.Ids[key] = object
     End Method
 
     /// The object a userdata slot holds, as a T.

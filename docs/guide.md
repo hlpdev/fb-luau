@@ -177,10 +177,8 @@ Expect(value != Null && (Try (Try value.Read<LuauTable>()).Get<Int, String>("cod
 
 ## Registering types, and what to expose
 
-A Class that lists `LuauObject` crosses as itself: a script holds the object, not a copy. One
-exception, until FutureBlitz 1.3.3: the State finds an object's userdata by the Class's `==` and
-Hash, so of a Class with its own `==`, two objects it calls equal cross as one userdata, the
-first of them; a Class with no `==` of its own is found by identity. `Register<T>()` exposes only what's marked: `@LuauExpose` for a Method that gives a value,
+A Class that lists `LuauObject` crosses as itself: a script holds the object, not a copy, and
+each object has a userdata of its own, whatever its Class's `==` says. `Register<T>()` exposes only what's marked: `@LuauExpose` for a Method that gives a value,
 `@LuauAction` for one that gives nothing, `@LuauGet` and `@LuauSet` for a field, each named as
 it is or by the name given. What isn't marked can't be reached; a marked Method of a shape that
 can't be exposed panics where it's registered, saying why.
