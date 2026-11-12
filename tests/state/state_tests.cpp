@@ -323,10 +323,13 @@ bool nested_on(size_t stack, nested_t& result) {
 } // namespace
 
 TEST_CASE("a script nesting C calls on a small stack meets the guard's error, not a crash") {
-    // 512 KB, macOS's secondary threads' default: 190 levels of string.gsub's callbacks run out
-    // of it before Luau's 200 C calls, so what stops them is the guard.
+    // 256 KB, of which the guard leaves its 128 KB to the program: 190 levels of string.gsub's
+    // callbacks need more than the other 128 KB in any build whose level takes over 700 bytes
+    // (a Release build's on Linux takes about 2 KB, a Debug build's several), so what stops them
+    // is the guard, short of Luau's 200 C calls, whatever a build's frames are. 512 KB held 190
+    // of a Release build's levels without it.
     nested_t result;
-    REQUIRE(nested_on(size_t{ 512 } * 1024, result));
+    REQUIRE(nested_on(size_t{ 256 } * 1024, result));
     INFO(result.error);
     CHECK(result.status == FBL_RUNTIME);
     CHECK(result.error.contains("deeper than the program's native stack holds"));
