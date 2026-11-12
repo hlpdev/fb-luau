@@ -399,3 +399,16 @@ Written while the PC was kept free for the user: none of it built or run until t
   are out: the Throws Error lambda, the Dog that couldn't list LuauObject, the drivers' array
   instead of a Map of Weak, and the compile test, now a run that Register's panic names.
   `@LuauAction` stays, as it says what a Method is.
+
+## The fourth review, on dev/review-4 (2026-11-12)
+
+- **A level given as a numeric string is checked as its integer (100),** as Luau takes one.
+- **Any thread's levels go through the environment check, and a thread belongs to its main
+  function's environment (101):** coroutine.resume, close, and a wrapped coroutine's call, and
+  task.spawn, defer, delay, and cancel given a thread, refuse another script's; its status is
+  anyone's to read. The coroutine library's resume, close, and wrap are the shim's, over Luau's.
+  With no scripts of their own, every thread's environment is the shared one, and nothing
+  changes.
+- **The bytecode example's game has its public key compiled in (102),** `Embed("game.pub")`, and
+  the build is given its private key from outside what it writes; keys/build.key is the
+  example's own, which a real game's never is. A key of the wrong length stays a panic.

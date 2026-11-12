@@ -387,8 +387,11 @@ Expect(Try doors.Evaluate<String>(files["mods/doors/init.luau"] ?? "", "@mods/do
 A game's own scripts can be compiled ahead, as its build does, into bytecode a State runs
 without compiling. Luau runs bytecode as it's given, checking nothing, so bytecode crosses a file
 system only in `Save`'s container, signed by the build with an Ed25519 private key that never
-ships, which `Load` checks in the game with the public key before Luau sees a byte. The public
-key is no secret; the private key is the whole of it. A mod is source, always, and scripts
+ships, which `Load` checks in the game with the public key before Luau sees a byte. The key that
+checks is compiled into the game, an `Embed` or a `Const`, never read from where the containers
+are, as a mod that can replace a container could replace a key beside it. The key that signs
+never leaves the build machine: it's never in the repository, nor written beside what ships. The
+public key is no secret; the private key is the whole of it. A mod is source, always, and scripts
 embedded in the executable can as well be compiled from source as it starts.
 
 ```vb
@@ -408,7 +411,8 @@ Local another = Ed25519.PublicKeyOf(Ed25519.NewPrivateKey())
 Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, another)) != Null)
 ```
 
-examples/bytecode is a build step and its game, as two modes of one program.
+examples/bytecode is a build step and its game, as two modes of one program, the game with
+its public key embedded.
 
 ## Native code
 
