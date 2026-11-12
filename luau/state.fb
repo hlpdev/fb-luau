@@ -820,13 +820,7 @@ Public Class LuauState
     /// one, or before `lua.Start()`.
     Package Method Waited(waiting: LuauWaiting) Throws LuauError
         Local id = waiting.Thread.Id
-        If Waits.Contains(id)
-            Throw LuauError(LuauErrorKind.RUNTIME,
-                            "the thread waits already, for one thing at a time")
-        End If
-        If Waits.Count >= MostWaiting
-            Throw LuauError(LuauErrorKind.RUNTIME, "more than {MostWaiting} threads would wait")
-        End If
+        Try CanWait(waiting.Thread)
         Local driver = DriverOf(CurrentDriver) ?? DriverOf(StateDriver)
         If driver == Null
             Throw LuauError(LuauErrorKind.YIELD,
@@ -844,6 +838,21 @@ Public Class LuauState
             waiting.Pending = True
         End If
         Waits[id] = waiting
+    End Method
+
+    /// Nothing when `thread` can wait: it doesn't already, and fewer than MostWaiting do.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of RUNTIME for a thread that waits already, or past MostWaiting.
+    Package Method CanWait(thread: LuauThread) Throws LuauError
+        If Waits.Contains(thread.Id)
+            Throw LuauError(LuauErrorKind.RUNTIME,
+                            "the thread waits already, for one thing at a time")
+        End If
+        If Waits.Count >= MostWaiting
+            Throw LuauError(LuauErrorKind.RUNTIME, "more than {MostWaiting} threads would wait")
+        End If
     End Method
 
     /// Keeps an error that ended a thread nothing waits for, the most recent 64, for Report.

@@ -555,3 +555,21 @@ Function ATickInsideACallIsNoTurn() Throws LuauError
     lua.Close()
     ExpectThrows<LuauError>(waits.Wait())
 End Function
+
+@Test
+Function AnAsyncFunctionIsntCalledPastTheWaitsLimit() Throws LuauError
+    Local options = LuauOptions()
+    options.MostWaiting = 3
+    Local lua = Try LuauState(options)
+    Local waits = lua.Start()
+    Local called = 0
+    Try lua.SetAsync("work", Function(): Task<Int>
+        called++
+        Return Doubled(1)
+    End Function)
+    // Three threads wait on work; the rest are refused before work is called for them.
+    Try lua.Run("for i = 1, 10 do task.spawn(function() pcall(work) end) end")
+    Expect(called <= 3, "{called}")
+    lua.Close()
+    ExpectThrows<LuauError>(waits.Wait())
+End Function
