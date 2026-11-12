@@ -321,7 +321,7 @@ TEST_CASE("a require's parts are counted with backslashes as separators") {
     const require_state_t lua;
     std::string path = "./x";
     for (int part = 0; part < 64; part++) {
-        path += "\a";
+        path += "\\a";
     }
     const int32_t status = lua.run("require('" + path + "')", "@main.luau");
     CHECK(status == FBL_RUNTIME);
