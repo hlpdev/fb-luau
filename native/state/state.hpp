@@ -56,6 +56,8 @@ struct state_t {
     int64_t memory_used = 0;
     // How many functions its code generator has compiled.
     int64_t native_functions = 0;
+    // The bytes the code generator holds, as its allocation callback counts them.
+    int64_t native_memory_used = 0;
     // For the tests: which allocation from now fails, counting from 0, once, or -1 for none; and
     // which of the shim's failure points from now raises, as an allocation's failing would, since
     // Luau's own pages hold small objects without asking the allocator.

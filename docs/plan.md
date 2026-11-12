@@ -564,11 +564,21 @@ Try lua.Run(loaded)
 
 ### Native code generation
 
-- `LuauOptions.NativeCode`: `OFF`, `MARKED` (the default: modules that start with `--!native`,
-  and functions with `@native`), or `ALL`. It's Luau's CodeGen, on x64 with AVX and on arm64;
-  where it isn't supported, code runs in the interpreter, the same, and
-  `LuauNativeCodeSupported()` says so. `lua.NativeFunctions` counts the functions a State has
-  compiled.
+- `LuauOptions.NativeCode`: `OFF` (the default, as a script shouldn't turn native code on for
+  itself unasked), `MARKED` (modules that start with `--!native`, and functions with `@native`),
+  or `ALL`. It's Luau's CodeGen, on x64 with AVX and on arm64; where it isn't supported, or Luau
+  can't get executable memory (a hardened runtime, SELinux), code runs in the interpreter, the
+  same, and `LuauNativeCodeSupported()` says so. `lua.NativeFunctions` counts the functions a
+  State has compiled.
+- Its code's memory isn't the VM's: it's capped by `LuauOptions.NativeMemory`, 16 MB by default,
+  in blocks of 256 KB, counted (`lua.NativeMemoryUsed`), and past the cap what's compiled from
+  there runs in the interpreter. Code loaded again, as hot reload and ForgetModules load it, takes
+  more of it each time, as the generator doesn't reuse freed code until the State closes. (Luau's
+  defaults were 4 MB committed for each State and up to 256 MB, outside the memory limit; review
+  finding 80.)
+- An error, a timeout, the memory limit, a yield, and a traceback each go through native frames
+  in a test on every target (81): where one fails on a target, native code is off there until it
+  doesn't, and LuauNativeCodeSupported says so.
 - It's made per State when the State is, before any code loads, as Luau needs, and compiles each
   chunk as it loads: source, bytecode, a module, and `loadstring`'s. What it can't compile runs in
   the interpreter. Registered types aren't given to the compiler as userdata types yet: every

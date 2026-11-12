@@ -53,6 +53,13 @@ uint64_t handle_of(uint32_t slot, uint32_t generation) {
 
 // The State's allocator, which keeps to its limit: an allocation past it fails, as one the system
 // can't make does, and Luau raises "not enough memory".
+// Counts what the code generator takes and gives back, its blocks of native code.
+void count_native_memory(void* context, void* /*old_pointer*/, size_t old_size,
+                         void* /*new_pointer*/, size_t new_size) {
+    auto* state = static_cast<fbl::state_t*>(context);
+    state->native_memory_used += static_cast<int64_t>(new_size) - static_cast<int64_t>(old_size);
+}
+
 void* allocate(void* data, void* block, size_t old_size, size_t new_size) {
     auto* state = static_cast<fbl::state_t*>(data);
     const auto had = static_cast<int64_t>(block == nullptr ? 0 : old_size);
@@ -696,6 +703,11 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
             fbl::fail(std::format("a memory limit of {} bytes is below 0", options->memory_limit));
             return 0;
         }
+        if (options->native_memory < 0) {
+            fbl::fail(std::format("a native code cap of {} bytes is below 0",
+                                  options->native_memory));
+            return 0;
+        }
         for (const int32_t level : { options->optimization, options->debug, options->coverage }) {
             if (level < 0 || level > 2) {
                 fbl::fail(std::format("a compile option of {} isn't from 0 to 2", level));
@@ -733,10 +745,17 @@ uint64_t fbl_state_new(const fbl_state_options_t* options, int32_t* status) try 
             return 0;
         }
         state->current = state->main;
-        // The code generator is made before any code loads, as Luau needs.
+        // The code generator is made before any code loads, as Luau needs, with a small block and
+        // the State's cap, rather than Luau's 4 MB committed a State and 256 MB in all; its
+        // memory is counted as it's taken. It runs only where Luau could get executable memory,
+        // which a hardened runtime or SELinux can refuse.
         if (state->native_code != FBL_NATIVE_OFF && Luau::CodeGen::isSupported()) {
-            Luau::CodeGen::create(state->main);
-            state->code_generator = true;
+            const auto cap = static_cast<size_t>(options->native_memory > 0
+                                                     ? options->native_memory
+                                                     : int64_t{ 256 } * 1024 * 1024);
+            const size_t block = std::min<size_t>(cap, size_t{ 256 } * 1024);
+            Luau::CodeGen::create(state->main, block, cap, count_native_memory, state.get());
+            state->code_generator = Luau::CodeGen::isNativeExecutionEnabled(state->main);
         }
         // Luau collects toward a heap of twice what's live, and never because an allocation
         // failed, so with a limit, garbage alone would reach it once what's live passed half of
@@ -829,6 +848,14 @@ int32_t fbl_state_native_supported(void) try {
 } catch (...) {
     fbl::escaped();
     return 0;
+}
+
+int64_t fbl_state_native_memory(uint64_t state) try {
+    const fbl::state_t* found = fbl::find_state(state);
+    return found == nullptr ? -1 : found->native_memory_used;
+} catch (...) {
+    fbl::escaped();
+    return -1;
 }
 
 int64_t fbl_state_native_functions(uint64_t state) try {

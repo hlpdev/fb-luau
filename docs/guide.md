@@ -403,10 +403,12 @@ examples/bytecode is a build step and its game, as two modes of one program.
 
 ## Native code
 
-Where Luau's code generator is supported, x64 and arm64, a State compiles code to native code
-as it loads: by default what's marked, a chunk that starts with `--!native` and a function marked
-`@native`; with `LuauNativeCode.ALL`, everything. Where it isn't, the interpreter runs it, with
-the same results.
+Where Luau's code generator is supported, x64 and arm64, a State can compile code to native code
+as it loads. It's off by default, as a script shouldn't turn it on for itself; with
+`LuauNativeCode.MARKED`, a chunk that starts with `--!native` and a function marked `@native`
+are; with `LuauNativeCode.ALL`, everything. Its code takes memory of its own, outside the memory
+limit, up to `LuauOptions.NativeMemory`, 16 MB by default, past which code runs in the
+interpreter. Where the generator isn't supported, the interpreter runs it, with the same results.
 
 ```vb
 Import std.test

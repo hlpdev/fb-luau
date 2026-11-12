@@ -332,3 +332,11 @@ Written while the PC was kept free for the user: none of it built or run until t
   with the public key only.
 - **The container's parser reads nothing before checking it's there (83),** and a name with a NUL
   is refused at Compile and Load (84).
+- **Native code is off by default, and capped (80):** NativeCode's default is OFF; where on, the
+  generator is made with 256 KB blocks and `NativeMemory`'s cap, 16 MB by default, its memory
+  counted by its allocation callback and shown as `NativeMemoryUsed`; past it, code runs
+  interpreted. L10's "about the size of the bytecode it compiles" was wrong: Luau committed 4 MB
+  a State and allowed 256 MB.
+- **Native code is used only where it can run (82):** `isNativeExecutionEnabled` after `create`.
+- **Five tests unwind through native frames (81),** in ALL and with `--!native`: the budget, an
+  error caught and let go, the memory limit, a yield, and a traceback.

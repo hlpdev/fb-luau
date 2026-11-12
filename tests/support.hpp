@@ -24,6 +24,7 @@ inline fbl_state_options_t default_options() {
         .load_string = false,
         .environments = false,
         .unused = {},
+        .native_memory = 0,
     };
 }
 

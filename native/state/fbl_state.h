@@ -63,6 +63,10 @@ typedef struct fbl_state_options_t {
     bool load_string;
     bool environments;
     bool unused[2];
+    // The most bytes its native code may take, when it has any, which isn't the VM's and doesn't
+    // count to its memory limit: past it, what's compiled from there runs in Luau's interpreter.
+    // 0 for Luau's own cap.
+    int64_t native_memory;
 } fbl_state_options_t;
 
 // Makes a State, with Luau's flags set first, as its release's CLI sets them, and its libraries
@@ -101,6 +105,10 @@ FBL_API int32_t fbl_state_native_supported(void);
 // How many of the State's functions it's compiled to native code, or -1 for a handle that isn't
 // a State's.
 FBL_API int64_t fbl_state_native_functions(uint64_t state);
+
+// The bytes the State's native code takes, of its native_memory, or -1 for a handle that isn't a
+// State's.
+FBL_API int64_t fbl_state_native_memory(uint64_t state);
 
 // The bytes the State's VM holds, or -1 for a handle that isn't a State's.
 FBL_API int64_t fbl_state_memory(uint64_t state);

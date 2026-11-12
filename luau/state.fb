@@ -79,8 +79,14 @@ Public Struct LuauOptions
     Public Field Libraries: LuauLibraries = LuauLibraries.ALL
     /// What collectgarbage its scripts have.
     Public Field CollectGarbage: LuauCollectGarbage = LuauCollectGarbage.COUNT
-    /// What it compiles to native code, as its code loads: MARKED by default.
-    Public Field NativeCode: LuauNativeCode = LuauNativeCode.MARKED
+    /// What it compiles to native code, as its code loads: OFF by default, as a script shouldn't
+    /// turn native code on for itself unasked; MARKED for what `--!native` and `@native` mark.
+    Public Field NativeCode: LuauNativeCode = LuauNativeCode.OFF
+    /// The most bytes its native code may take, 16 MB by default, which isn't the VM's memory and
+    /// doesn't count to MemoryLimit: past it, what's compiled from there runs in Luau's
+    /// interpreter, the same but slower. Code loaded again, as hot reload and ForgetModules load
+    /// it, takes more of it each time. A cap below 0 panics, where the State's made.
+    Public Field NativeMemory: Int64 = 16 * 1024 * 1024
     /// Whether its scripts have loadstring, which compiles source, never bytecode: False by
     /// default.
     Public Field LoadString: Bool = False
@@ -235,6 +241,7 @@ Public Class LuauState
         Local given = options.ThreadError
         If given != Null Then ThreadError = given
         If options.MostWaiting < 0 Then Panic("{options.MostWaiting} threads can't wait at most")
+        If options.NativeMemory < 0 Then Panic("a native code cap of {options.NativeMemory} bytes is below 0")
         MostWaiting = options.MostWaiting
         Local made = Made(options)
         If made.1 == FBL_MEMORY Then Throw LuauError(LuauErrorKind.MEMORY, made.2)
@@ -698,6 +705,16 @@ Public Class LuauState
         End Get
     End Property
 
+    /// The bytes its native code takes, of its NativeMemory: 0 when it has none.
+    @PanicsAtCaller
+    Public Property NativeMemoryUsed: Int64
+        Get
+            Local used = fbl_state_native_memory(Live())
+            If used < 0 Then Panic(LastError())
+            Return used
+        End Get
+    End Property
+
     /// Its handle, panicking at the caller once it's closed.
     @PanicsAtCaller
     Package Method Live(): UInt64
@@ -1022,7 +1039,8 @@ Function Made(options: LuauOptions): (UInt64, Int32, String)
                                       collect_garbage: options.CollectGarbage As Int32,
                                       native_code: options.NativeCode As Int32,
                                       load_string: options.LoadString,
-                                      environments: options.Environments, unused: [False, False])
+                                      environments: options.Environments, unused: [False, False],
+                                      native_memory: options.NativeMemory)
     Local status: Int32 = FBL_OK
     Local handle: UInt64
     Unsafe

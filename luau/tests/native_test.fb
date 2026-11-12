@@ -1,5 +1,7 @@
 Import std.core
 Import std.test
+Import std.text
+Import std.time
 Import luau
 
 /// A State with `native` code.
@@ -27,11 +29,81 @@ Function CodeRunsNativelyWhereItsSupportedWithTheSameResults() Throws LuauError
 End Function
 
 @Test
-Function ByDefaultOnlyWhatsMarkedIsNative() Throws LuauError
+Function ByDefaultNothingIsNativeNorTakesItsMemory() Throws LuauError
     Local lua = LuauState()
+    Expect(Try lua.Evaluate<Int>("--!native" + "\n" + "local function f(n) return n * 2 end " +
+                                 "return f(21)") == 42)
+    Expect(lua.NativeFunctions == 0)
+    Expect(lua.NativeMemoryUsed == 0)
+End Function
+
+@Test
+Function MarkedIsOnlyWhatsMarked() Throws LuauError
+    Local lua = Try NativeState(LuauNativeCode.MARKED)
     Expect(Try lua.Evaluate<Int>("local function f(n) return n * 2 end return f(21)") == 42)
     Expect(lua.NativeFunctions == 0)
     Expect(Try lua.Evaluate<Int>("--!native" + "\n" + "local function f(n) return n * 2 end " +
                                  "return f(21)") == 42)
     Expect((lua.NativeFunctions > 0) == LuauNativeCodeSupported())
+End Function
+
+@Test
+Function NativeCodeStopsAtItsCapAndTheCodeGoesOnInterpreted() Throws LuauError
+    If !LuauNativeCodeSupported() Then Return
+    Local options = LuauOptions()
+    options.NativeCode = LuauNativeCode.MARKED
+    options.NativeMemory = 512 * 1024
+    options.LoadString = True
+    options.MemoryLimit = 8 * 1024 * 1024
+    Local lua = Try LuauState(options)
+    Local source = "local total = 0 " +
+                   "for i = 1, 4000 do " +
+                   "  local f = loadstring('--!native\\nlocal s = 0 for j = 1, 10 do s += j end " +
+                   "return s + ' .. i) " +
+                   "  total += f() " +
+                   "end " +
+                   "return total"
+    // Every chunk runs, native or not; the sum of 55 + i for i = 1 to 4000.
+    Expect(Try lua.Evaluate<Int>(source) == 4000 * 55 + 4000 * 4001 / 2)
+    Expect(lua.NativeMemoryUsed > 0 && lua.NativeMemoryUsed <= 512 * 1024,
+           "{lua.NativeMemoryUsed}")
+End Function
+
+/// The five ways out of native code: each run in ALL and with `--!native` in MARKED, wherever the
+/// generator runs, as an error that unwinds through native frames is what could end the process
+/// where the unwinder doesn't know them.
+Function Unwound(native: LuauNativeCode, prefix: String) Throws LuauError
+    Local options = LuauOptions()
+    options.NativeCode = native
+    options.TimeBudget = 50.Milliseconds
+    options.MemoryLimit = 8 * 1024 * 1024
+    Local lua = Try LuauState(options)
+    // A loop ended by the time budget.
+    Local spun = ExpectThrows<LuauError>(lua.Run(prefix + "local function spin() while true do end end spin()"))
+    Expect(spun != Null && spun.Kind == LuauErrorKind.TIMEOUT, prefix)
+    // An error, caught by pcall in native code, then let go to the program.
+    Expect(Try lua.Evaluate<Bool>(prefix + "local function f() error('x') end " +
+                                  "local ok = pcall(f) return not ok"))
+    Local raised = ExpectThrows<LuauError>(lua.Run(prefix + "local function f() error('out') end f()"))
+    Expect(raised != Null && raised.Kind == LuauErrorKind.RUNTIME, prefix)
+    // The memory limit, met in native code.
+    Local full = ExpectThrows<LuauError>(lua.Run(prefix + "local function fill() " +
+                                                 "return string.rep('x', 16 * 1024 * 1024) end fill()"))
+    Expect(full != Null && full.Kind == LuauErrorKind.MEMORY, prefix)
+    // A yield and a resume through native code.
+    Expect(Try lua.Evaluate<Int>(prefix + "local function g(a) local b = coroutine.yield(a) " +
+                                 "return a + b end local co = coroutine.wrap(g) co(1) return co(2)") == 3)
+    // A traceback and debug.info's line from a native function.
+    Local line = Try lua.Evaluate<Int>(prefix + "local function where() return debug.info(1, 'l') end " +
+                                       "return where()")
+    Expect(line == (prefix == "" ? 1 : 2), "line {line}")
+    Local traced = Try lua.Evaluate<String>(prefix + "local function trace() return debug.traceback() end " +
+                                            "return trace()")
+    Expect(traced.Contains("trace"), traced)
+End Function
+
+@Test
+Function ErrorsAndTimeoutsUnwindThroughNativeCode() Throws LuauError
+    Try Unwound(LuauNativeCode.ALL, "")
+    Try Unwound(LuauNativeCode.MARKED, "--!native" + "\n")
 End Function
