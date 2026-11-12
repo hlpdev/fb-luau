@@ -8,9 +8,9 @@
 namespace {
 
 // Freezes `state`'s main globals, under lua_cpcall, which luaL_sandbox needs memory for, and then
-// every table reachable from them through tables' fields, each once, as luaL_sandbox freezes only
-// those in the globals themselves: a program's `Config.Graphics` too. Metatables and functions'
-// upvalues aren't followed.
+// every table reachable from them through tables' fields and metatables, each once, as
+// luaL_sandbox freezes only those in the globals themselves: a program's `Config.Graphics` too.
+// Functions' upvalues aren't followed: what a function reaches by them stays its own to change.
 int freeze(lua_State* stack) {
     luaL_sandbox(stack);
     fbl::freeze_tables(stack, LUA_GLOBALSINDEX);
@@ -46,25 +46,36 @@ void freeze_tables(lua_State* stack, int index) {
     lua_pushvalue(stack, index);
     lua_rawseti(stack, queue, 1);
     int queued = 1;
+    // Freezes the table on top, unless it's been seen, and queues it to go through.
+    const auto follow = [&]() {
+        if (lua_type(stack, -1) != LUA_TTABLE) {
+            return;
+        }
+        lua_pushvalue(stack, -1);
+        lua_rawget(stack, seen);
+        const bool known = lua_type(stack, -1) != LUA_TNIL;
+        lua_pop(stack, 1);
+        if (known) {
+            return;
+        }
+        lua_setreadonly(stack, -1, 1);
+        lua_pushvalue(stack, -1);
+        lua_pushboolean(stack, 1);
+        lua_rawset(stack, seen);
+        lua_pushvalue(stack, -1);
+        lua_rawseti(stack, queue, ++queued);
+    };
     for (int next = 1; next <= queued; next++) {
         lua_rawgeti(stack, queue, next);
         const int table = lua_gettop(stack);
         lua_pushnil(stack);
         while (lua_next(stack, table) != 0) {
-            if (lua_type(stack, -1) == LUA_TTABLE) {
-                lua_pushvalue(stack, -1);
-                lua_rawget(stack, seen);
-                const bool known = lua_type(stack, -1) != LUA_TNIL;
-                lua_pop(stack, 1);
-                if (!known) {
-                    lua_setreadonly(stack, -1, 1);
-                    lua_pushvalue(stack, -1);
-                    lua_pushboolean(stack, 1);
-                    lua_rawset(stack, seen);
-                    lua_pushvalue(stack, -1);
-                    lua_rawseti(stack, queue, ++queued);
-                }
-            }
+            follow();
+            lua_pop(stack, 1);
+        }
+        // Its metatable, as `getmetatable(m).__index = evil` would change it for everyone.
+        if (lua_getmetatable(stack, table) != 0) {
+            follow();
             lua_pop(stack, 1);
         }
         lua_pop(stack, 1);

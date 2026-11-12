@@ -471,8 +471,12 @@ Try doors.Run(source, "@mods/doors/init.luau")
   its own, its `_G`, which read through to the frozen ones by a locked metatable, so one mod can't
   change what another sees, or reach the shared table. What's shared is what the program gives
   every script, the frozen globals, and the State's modules: each runs once, and every script
-  that requires it gets its one table, frozen through its fields, so no mod changes it for
-  another. A State that's never frozen freezes at its first `NewScript`. A script's code is loaded on a thread whose globals are the script's, as Luau
+  that requires it gets its one table, frozen through its fields and their metatables, so no mod
+  changes it for another. What a module's functions reach by their upvalues, a local table say,
+  isn't frozen: it's the module's own state, which its functions change for every script that
+  requires it, so a module shared by mods shouldn't keep a mod's state there. A State that's
+  never frozen freezes at its first `NewScript`. A script's code is loaded on a thread whose
+  globals are the script's, as Luau
   resolves a chunk's globals as it loads from the loading thread's, not from the environment it's
   given.
 - The libraries, `LuauOptions.Libraries`, a `@Flags` Enum, are by default Luau's safe ones:

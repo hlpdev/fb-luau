@@ -132,3 +132,20 @@ Function ALoadstringChunksNameIsntWhereRequireLooks() Throws LuauError
         "local f = loadstring(\"return require('@self/y')\", '@' .. string.rep('a/', 1e6)) f()"))
     Expect(error != Null)
 End Function
+
+@Test
+Function AModulesMetatableIsFrozenWithIt() Throws LuauError
+    Local files: Map<String, String> = {
+        "m.luau": r"local impl = { greet = function() return 'hi' end } return setmetatable({}, { __index = impl })"
+    }
+    Local options = LuauOptions()
+    options.Modules = Function(path: String): String? => files.Get(path)
+    Local lua = Try LuauState(options)
+    Local error = ExpectThrows<LuauError>(lua.Run(
+        r"getmetatable(require('./m')).__index = { greet = function() return 'evil' end }", "@main.luau"))
+    Expect(error != Null)
+    Local through = ExpectThrows<LuauError>(lua.Run(
+        r"getmetatable(require('./m')).__index.greet = function() return 'evil' end", "@main.luau"))
+    Expect(through != Null)
+    Expect(Try lua.Evaluate<String>(r"return require('./m').greet()", "@main.luau") == "hi")
+End Function

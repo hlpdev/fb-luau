@@ -106,9 +106,10 @@ Public Struct LuauOptions
     /// ":", a "\", NUL, or a Windows device's name, or is past 1,024 bytes of 64 parts, so
     /// `root / Path(path)` stays under `root`. Its calls are the program's own file reading, in
     /// the script's call: a require asks for at most four files for its module and a ".luaurc"
-    /// for each folder it walks. A module's table is frozen through its fields, as every script
-    /// that requires it shares it. Null, the default, gives no modules, and `require` is an error
-    /// that says so.
+    /// for each folder it walks. A module's table is frozen through its fields and their
+    /// metatables, as every script that requires it shares it; what its functions reach by their
+    /// upvalues, a local table say, stays the module's own to change, for every script that
+    /// requires it. Null, the default, gives no modules, and `require` is an error that says so.
     Public Field Modules: (Func(String): String? Throws Error)? = Null
     /// Whether its scripts have the `task` library, Roblox's: True by default.
     Public Field Tasks: Bool = True
