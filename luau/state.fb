@@ -13,6 +13,7 @@ Import "./c/fbl_callback"
 Import "./c/fbl_core"
 Import "./c/fbl_frame"
 Import "./c/fbl_load"
+Import "./c/fbl_require"
 Import "./c/fbl_sandbox"
 Import "./c/fbl_state"
 Import "./c/fbl_table"
@@ -80,6 +81,15 @@ Public Struct LuauOptions
     /// Where `print` writes, a line each call, its arguments by tostring with tabs between; or
     /// Null, the default, for std's Print, as Luau's own writes to the C runtime's stdout.
     Public Field Print: (Func(String))? = Null
+    /// What reads its modules' files, for `require`: called with a file's path from the modules'
+    /// root, with "/" between its parts, like "doors.luau", "lib/init.luau", or "lib/.luaurc", it
+    /// gives the file's text, or Null when there's no such file, and an error it throws is the
+    /// require's, in the script. A module "lib/doors" is "lib/doors.luau", "lib/doors.lua",
+    /// "lib/doors/init.luau", or "lib/doors/init.lua", and a chunk named "@path" requires from its
+    /// path, as Luau's rules have it; one of any other name, from the root. Nothing above the root
+    /// is asked for, so a script requires only what this gives. Null, the default, gives no
+    /// modules, and `require` is an error that says so.
+    Public Field Modules: (Func(String): String? Throws Error)? = Null
     /// Whether its scripts have the `task` library, Roblox's: True by default.
     Public Field Tasks: Bool = True
     /// What gets an error that ends a thread nothing waits for, one `task.spawn`, `task.defer`, or
@@ -147,6 +157,7 @@ Public Class LuauState
         Registered(Self)
         Try? Printing(Null)
         Try? TaskLibrary(Self)
+        Try? Requiring(Null)
     End New
 
     /// Makes a State with `options`.
@@ -180,6 +191,7 @@ Public Class LuauState
         Registered(Self)
         Try Printing(options.Print)
         If options.Tasks Then Try TaskLibrary(Self)
+        Try Requiring(options.Modules)
     End New
 
     Method Destroy()
@@ -425,6 +437,17 @@ Public Class LuauState
         Return Try LuauThread.FromLuau(slots, 1)
     End Method
 
+    /// Forgets every module's value, so the next `require` of each runs it again, as when its files
+    /// have changed.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of MEMORY.
+    @PanicsAtCaller
+    Public Method ForgetModules() Throws LuauError
+        Try Check(fbl_require_forget(Live()))
+    End Method
+
     /// A new script, with globals of its own over its State's, which it freezes.
     ///
     /// # Errors
@@ -460,6 +483,30 @@ Public Class LuauState
         Local tostring = Try Get<LuauFunction>("tostring")
         Local select = Try Get<LuauFunction>("select")
         Try Set("print", Try made.Call<LuauFunction>(out, tostring, select))
+    End Method
+
+    /// Gives it `require`, whose modules' files `modules` reads, or none for Null.
+    @PanicsAtCaller
+    Method Requiring(modules: (Func(String): String? Throws Error)?) Throws LuauError
+        Local frame = Opened()
+        Defer Closed(frame)
+        If modules == Null
+            Try Check(fbl_require_open(Handle, frame, -1))
+            Return
+        End If
+        Local read: Func(String): String? Throws Error = modules
+        Local reader = Try NewFunction("modules", Function(slots: LuauSlots): Int32
+            Try
+                Local path = Try slots.Argument<String>(0, "modules")
+                Local text = Try read(path)
+                If text == Null Then Return slots.NoResult()
+                Return Try slots.Result<String>(text)
+            Catch error
+                Return slots.Raise(error)
+            End Try
+        End Function)
+        Try LuauFunction.ToLuau(LuauSlots(Self, frame), reader)
+        Try Check(fbl_require_open(Handle, frame, 0))
     End Method
 
     /// Its handle, panicking at the caller once it's closed.

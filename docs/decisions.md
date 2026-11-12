@@ -111,3 +111,21 @@ with its date; the rest are the lane's, which the user can change.
 - **A thread a call of the program's runs on can't be resumed or closed by anything,** and a
   bare yield on one is `YIELD`; a thread's id is its address, which its references keep alive.
 - **The `task` table is frozen**, as Roblox's library tables are read-only.
+
+## L8 (2026-11-11)
+
+- **`Modules` reads files, not modules:** it's given a file's path with its extension, like
+  `lib/init.luau` or `lib/.luaurc`, so one function gives both modules and their `.luaurc`s, and
+  the shim looks for a module's files as Luau's CLI does. It can throw, and its error is the
+  require's. A folder is taken to be there, as nothing asks the program for folders; a path with
+  no module is Luau's "no module present at resolved path".
+- **A chunk that isn't named `@path` requires from the root,** so `lua.Run(source)` can require
+  without a path of its own; Luau's CLI allows only `@` chunks and stdin.
+- **A module's globals are its own, as a script's environment is,** so its first load freezes the
+  State, as `NewScript` does; its thread runs to its end, as a call's does, so a `task.wait` in
+  it is YIELD at once, and a bare yield ends it with YIELD too.
+- **A module's error is raised as it was,** its value and message, not wrapped as the CLI's
+  "error while running module"; one that gives other than one value is an error saying how many.
+- **`.config.luau` isn't supported:** it runs code to configure, which the sandbox doesn't need.
+- **An error the shim raises for a yield nothing can wait for is YIELD** out of a call, by its
+  message's start, which every such error of the shim's and the package's has.

@@ -74,7 +74,8 @@ int call_back(lua_State* thread) {
     // What the function left in its frame is what the thread yields, when something can wait.
     if (status == FBL_YIELD) {
         if (thread == state->main || lua_isyieldable(thread) == 0) {
-            luaL_error(thread, "attempt to yield where nothing can wait for it");
+            luaL_error(thread, "%.*s", static_cast<int>(fbl::yield_refused.size()),
+                       fbl::yield_refused.data());
         }
         return lua_yield(thread, lua_gettop(thread));
     }

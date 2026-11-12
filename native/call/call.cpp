@@ -9,6 +9,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -52,6 +53,10 @@ bool is_runner(lua_State* thread) noexcept {
     return lua_getthreaddata(thread) == &runner_mark;
 }
 
+void mark_runner(lua_State* thread) noexcept {
+    lua_setthreaddata(thread, &runner_mark);
+}
+
 int resume_from(state_t& state, lua_State* thread, lua_State* co, int arguments,
                 bool raise) noexcept {
     const bool outermost = state.depth == 0;
@@ -93,8 +98,13 @@ int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, boo
     if (!traceback.empty() && traceback.back() == '\n') {
         traceback.pop_back();
     }
-    // An error the interrupt raised, or any the timeout led to, is the timeout.
-    const int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
+    // An error the interrupt raised, or any the timeout led to, is the timeout; and one the shim
+    // raised for a yield nothing could wait for is a yield's.
+    int32_t kind = state.timed_out && status == LUA_ERRRUN ? FBL_TIMEOUT : kind_of(status);
+    if (kind == FBL_RUNTIME && lua_type(co, -1) == LUA_TSTRING &&
+        std::string_view(lua_tostring(co, -1)).contains(yield_refused)) {
+        kind = FBL_YIELD;
+    }
     if (status == LUA_YIELD) {
         record_error(state, FBL_YIELD,
                      "attempt to yield where nothing can wait for it: a call from the program "

@@ -6,9 +6,11 @@
 #include <cstdint>
 #include <lua.h>
 #include <luacode.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -70,6 +72,14 @@ struct state_t {
     std::vector<int64_t> released_objects;
     std::vector<int> type_refs;
     int objects_ref = LUA_NOREF;
+    // require's: whether the State has it, the registry's reference to the program's reader of its
+    // files, or none; and, as a require walks its path, the module path's parts it's at, that
+    // module's first file, and the files it's read, by their paths, nullopt for none.
+    bool require_open = false;
+    int require_reader = LUA_NOREF;
+    std::vector<std::string> module_path;
+    std::string module_file;
+    std::unordered_map<std::string, std::optional<std::string>> module_files;
     // The last error a call met, its value kept by the registry at error_ref.
     int error_ref = LUA_NOREF;
     int32_t error_kind = FBL_OK;
@@ -138,9 +148,16 @@ constexpr int object_tag = 2;
 // Sets a new State up for the program's objects: their destructor, and their weak table.
 void prepare_objects(lua_State* thread, state_t& state);
 
+// What the shim's errors for a yield nothing can wait for say first, by which a call's error is
+// FBL_YIELD.
+constexpr std::string_view yield_refused = "attempt to yield where nothing can wait for it";
+
 // Whether a thread is one the program's calls run on, which nothing else resumes, and which can't
 // yield to anything that waits.
 bool is_runner(lua_State* thread) noexcept;
+
+// Marks a thread as one that runs to its end, as a runner does, like a module's as it loads.
+void mark_runner(lua_State* thread) noexcept;
 
 // Resumes `co` from `thread`, with the `arguments` on top of its stack, or raising the value on top
 // of it, a call one deeper, which has the time budget when it's the outermost: Luau's status.
@@ -151,6 +168,11 @@ int resume_from(state_t& state, lua_State* thread, lua_State* co, int arguments,
 // and resets `co` for its next call, when `reset`: the error's kind. A yield is FBL_YIELD's, as
 // nothing waits for a runner.
 int32_t failed(state_t& state, lua_State* thread, lua_State* co, int status, bool reset) noexcept;
+
+// Pushes a new environment for a script, or a module, onto `stack`: a table of its own, whose _G is
+// itself, and whose metatable, frozen and locked, reads what it hasn't from the main thread's
+// globals, which `main` has room on its stack to give. It raises when there's no memory.
+void push_environment(lua_State* stack, lua_State* main);
 
 // Freezes the State's globals, unless they are: a status.
 int32_t frozen(state_t& state) noexcept;

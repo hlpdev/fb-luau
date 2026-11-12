@@ -153,8 +153,9 @@ TEST_CASE("only a thread something waits for can yield") {
     REQUIRE(lua.resume(frame, 0, finished) == FBL_OK);
     CHECK(yield_said == 1);
     CHECK(fbl_frame_close(lua.handle, frame));
+    // The shim's refusal is a yield's error.
     frame = lua.spawned("inside");
-    CHECK(lua.resume(frame, 0, finished) == FBL_RUNTIME);
+    CHECK(lua.resume(frame, 0, finished) == FBL_YIELD);
     CHECK(yield_said == 0);
     CHECK(lua.error_message().contains("attempt to yield where nothing can wait for it"));
     CHECK(fbl_thread_status(lua.handle, frame, 0) == FBL_THREAD_FAILED);

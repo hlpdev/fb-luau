@@ -485,7 +485,7 @@ Try doors.Run(source, "@mods/doors/init.luau")
 ### require
 
 ```vb
-options.Modules = Function(path: String): String? => Try? modFiles.ReadText(path + ".luau")
+options.Modules = Function(path: String): String? => Try? modFiles.ReadText(path)
 ```
 
 ```lua
@@ -495,12 +495,18 @@ local util = require("@shared/util")
 
 - `require` is Luau's own, `Luau.Require`, with Luau's rules for paths: `./` and `../` from the
   requiring module, `@self`, and aliases from a `.luaurc` beside the modules. The shim walks the
-  paths itself, and asks the program only for a module's source, by its path, through
-  `LuauOptions.Modules`, and for a folder's `.luaurc`, so a mod can require only what the program
-  gives it, from wherever the program keeps it: a pak, a folder, or memory.
-- Each module runs once per State, in a thread of its own with its own globals, as the `luau`
-  CLI does, and gives one value, which `require` caches. A module that errors errors in each
-  `require` of it; one that yields while it loads is a `YIELD` error.
+  paths itself, and asks the program only for files' text, by their paths from the modules'
+  root, through `LuauOptions.Modules`: a module `lib/doors` is `lib/doors.luau`,
+  `lib/doors.lua`, `lib/doors/init.luau`, or `lib/doors/init.lua`, as Luau's CLI has it, two of
+  them an error, and a folder's aliases are its `.luaurc` (a `.config.luau`, which would run
+  code to configure, isn't asked for). Nothing above the root is asked for, so a mod can require
+  only what the program gives it, from wherever the program keeps it: a pak, a folder, or
+  memory. A chunk named `@path` requires from that path, and one of any other name from the root.
+  An error `Modules` throws is the `require`'s.
+- Each module runs once per State, in a thread of its own with its own globals, as a script's
+  are, so the first freezes the State, and gives one value, which `require` caches until
+  `lua.ForgetModules()`. A module that errors errors in each `require` of it, with its own error;
+  one that waits or yields while it loads is a `YIELD` error.
 - With no `Modules`, `require` is an error that says the program gives no modules.
 
 ### Bytecode
@@ -940,7 +946,7 @@ them go.
 ### L8: require
 
 - Luau.Require over the program's `Modules` function: paths, `@self`, `.luaurc` aliases, the
-  cache, errors.
+  cache and `ForgetModules`, errors.
 
 Done means: Luau's require rules hold, by tests of each; a module can't reach a path the program
 doesn't give.

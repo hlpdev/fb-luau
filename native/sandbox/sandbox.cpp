@@ -28,6 +28,24 @@ int32_t frozen(state_t& state) noexcept {
     return FBL_OK;
 }
 
+void push_environment(lua_State* stack, lua_State* main) {
+    // As luaL_sandboxthread makes a thread's: its own table, reading through to the globals.
+    lua_newtable(stack);
+    lua_newtable(stack);
+    lua_pushvalue(main, LUA_GLOBALSINDEX);
+    lua_xmove(main, stack, 1);
+    lua_setfield(stack, -2, "__index");
+    // Locked, so a script neither cuts itself off from the globals nor gets their table.
+    lua_pushstring(stack, "The metatable is locked");
+    lua_setfield(stack, -2, "__metatable");
+    lua_setreadonly(stack, -1, 1);
+    lua_setmetatable(stack, -2);
+    // Its _G is itself, as Luau's own tests make a thread's.
+    lua_pushvalue(stack, -1);
+    lua_setfield(stack, -2, "_G");
+    lua_setsafeenv(stack, -1, 1);
+}
+
 } // namespace fbl
 
 int32_t fbl_sandbox_freeze(uint64_t state) try {
@@ -63,21 +81,7 @@ int32_t fbl_sandbox_environment(uint64_t state, int32_t frame) try {
     }
     lua_State* main = found->main;
     auto work = [main](lua_State* stack) {
-        // As luaL_sandboxthread makes a thread's: its own table, reading through to the globals.
-        lua_newtable(stack);
-        lua_newtable(stack);
-        lua_pushvalue(main, LUA_GLOBALSINDEX);
-        lua_xmove(main, stack, 1);
-        lua_setfield(stack, -2, "__index");
-        // Locked, so a script neither cuts itself off from the globals nor gets their table.
-        lua_pushstring(stack, "The metatable is locked");
-        lua_setfield(stack, -2, "__metatable");
-        lua_setreadonly(stack, -1, 1);
-        lua_setmetatable(stack, -2);
-        // Its _G is itself, as Luau's own tests make a thread's.
-        lua_pushvalue(stack, -1);
-        lua_setfield(stack, -2, "_G");
-        lua_setsafeenv(stack, -1, 1);
+        fbl::push_environment(stack, main);
         return 1;
     };
     // The main thread's globals go to the work over its stack, which needs room for them.

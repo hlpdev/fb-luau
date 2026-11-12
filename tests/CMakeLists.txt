@@ -43,6 +43,7 @@ fbl_add_tests(udata udata/udata_tests.cpp)
 fbl_add_tests(buffer buffer/buffer_tests.cpp)
 fbl_add_tests(sandbox sandbox/sandbox_tests.cpp)
 fbl_add_tests(thread thread/thread_tests.cpp)
+fbl_add_tests(require require/require_tests.cpp)
 
 find_program(FBL_SH sh DOC "A POSIX shell, for the tools' scripts")
 find_program(FBL_PYTHON NAMES python3 python DOC "Python 3, for the tools' checks")

@@ -1,0 +1,111 @@
+Import std.collections
+Import std.core
+Import std.io
+Import std.test
+Import std.text
+Import luau
+
+/// A State whose modules are `files`, by their paths, which it notes in `asked` as it reads them.
+Function WithModules(files: Map<String, String>, asked: String[]): LuauState Throws LuauError
+    Local options = LuauOptions()
+    options.Modules = Function(path: String): String?
+        asked.Add(path)
+        Return files.Get(path)
+    End Function
+    Return Try LuauState(options)
+End Function
+
+@Test
+Function ScriptsRequireTheModulesTheProgramGives() Throws LuauError
+    Local files: Map<String, String> = {
+        "doors.luau": r"return { count = 2 }",
+        "lib/init.luau": r"return { name = 'lib ' .. require('@self/util') }",
+        "lib/util.luau": "return 'util'",
+    }
+    Local lua = Try WithModules(files, [])
+    Expect(Try lua.Evaluate<Int>("return require('./doors').count", "@main.luau") == 2)
+    Expect(Try lua.Evaluate<String>("return require('./lib').name", "@main.luau") == "lib util")
+    // A chunk of another name requires from the root.
+    Expect(Try lua.Evaluate<Int>("return require('./doors').count") == 2)
+End Function
+
+@Test
+Function ALuaurcsAliasesAreFollowed() Throws LuauError
+    Local files: Map<String, String> = {
+        ".luaurc": "{{ \"aliases\": {{ \"shared\": \"./common\" }} }}",
+        "common/util.luau": "return 'shared util'",
+    }
+    Local lua = Try WithModules(files, [])
+    Expect(Try lua.Evaluate<String>("return require('@shared/util')", "@mods/a.luau") ==
+           "shared util")
+End Function
+
+@Test
+Function AScriptRequiresFromItsChunksPath() Throws LuauError
+    Local files: Map<String, String> = {
+        "mods/doors/main.luau": "",
+        "mods/doors/open.luau": "return function() return 'opened' end",
+    }
+    Local lua = Try WithModules(files, [])
+    Local script = Try lua.NewScript()
+    Try script.Run("result = require('./open')()", "@mods/doors/main.luau")
+    Expect(Try script.Get<String>("result") == "opened")
+End Function
+
+@Test
+Function AModuleRunsOnceUntilTheModulesAreForgotten() Throws LuauError
+    Local runs = 0
+    Local files: Map<String, String> = {"counted.luau": r"ran() return {}"}
+    Local lua = Try WithModules(files, [])
+    Try lua.SetFunction("ran", Function()
+        runs++
+    End Function)
+    Try lua.Run("require('./counted') require('./counted')", "@main.luau")
+    Expect(runs == 1)
+    Try lua.ForgetModules()
+    Try lua.Run("require('./counted')", "@main.luau")
+    Expect(runs == 2)
+End Function
+
+@Test
+Function AModuleReachesOnlyWhatTheProgramGives() Throws LuauError
+    Local asked: String[] = []
+    Local files: Map<String, String> = {"doors.luau": "return 1"}
+    Local lua = Try WithModules(files, asked)
+    For path In ["../doors", "../../secret", "./missing"]
+        Local error = ExpectThrows<LuauError>(lua.Run("require('{path}')", "@main.luau"))
+        Expect(error != Null && error.Kind == LuauErrorKind.RUNTIME)
+    End For
+    For path In asked
+        Expect(!path.StartsWith("..") && !path.StartsWith("/") && !path.Contains("/../"))
+    End For
+End Function
+
+@Test
+Function TheReadersErrorsAreTheRequires() Throws LuauError
+    Local options = LuauOptions()
+    options.Modules = Function(path: String): String? Throws Error
+        Throw IOError(IOErrorKind.NOT_FOUND, "the pak is gone")
+    End Function
+    Local lua = Try LuauState(options)
+    Local error = ExpectThrows<LuauError>(lua.Run("require('./doors')", "@main.luau"))
+    Expect(error != Null && error.Message.Contains("the pak is gone"))
+    Expect(error != Null && error.Cause Is IOError)
+End Function
+
+@Test
+Function AModuleThatWaitsAsItLoadsIsAnErrorOfYield() Throws LuauError
+    Local files: Map<String, String> = {"slow.luau": "task.wait(1) return 1"}
+    Local lua = Try WithModules(files, [])
+    Try lua.Run("function main() require('./slow') end", "@main.luau")
+    Local done = (Try lua.Spawn(Try lua.Get<LuauFunction>("main"))).Start()
+    Local error = ExpectThrows<LuauError>(done.Wait())
+    Expect(error != Null && error.Kind == LuauErrorKind.YIELD)
+End Function
+
+@Test
+Function WithoutModulesRequireSaysSo() Throws LuauError
+    Local lua = LuauState()
+    Local error = ExpectThrows<LuauError>(lua.Run("require('./doors')", "@main.luau"))
+    Expect(error != Null && error.Message.Contains("the program gives no modules"))
+End Function
