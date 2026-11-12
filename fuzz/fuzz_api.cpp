@@ -249,6 +249,7 @@ void step(reader_t& in, uint64_t state, uint64_t other) {
 
 // NOLINTNEXTLINE(readability-identifier-naming): libFuzzer names it.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    const no_escape_t watched;
     {
         const fuzz_state_t lua;
         const fuzz_state_t other;

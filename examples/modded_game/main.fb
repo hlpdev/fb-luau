@@ -75,9 +75,9 @@ Function FirstLine(text: String): String
 End Function
 
 Function Play() Throws LuauError
-    Local options = LuauOptions()
+    // What mods want, with a smaller memory limit than its 64 MB, as these mods are small.
+    Local options = LuauOptions.Sandbox()
     options.MemoryLimit = 16 * 1024 * 1024
-    options.TimeBudget = 50.Milliseconds
     options.Modules = Function(path: String): String? => ModFile(path)
     options.Print = Function(line: String)
         Print("[mod] {line}")

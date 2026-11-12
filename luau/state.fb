@@ -47,7 +47,11 @@ Public Struct LuauCompileOptions
     Public Field Coverage: Int = 0
 End Struct
 
-/// What a State is made with.
+/// What a State is made with. Without asking, a State keeps a runaway script from taking the
+/// program with it: its memory is limited, 256 MB, and each call's time, 10 seconds; its scripts
+/// have no loadstring, getfenv, or setfenv, no native code, and nothing of the files or the OS
+/// but what the program gives; each NewScript has globals of its own, and the first freezes the
+/// shared ones. [Sandbox] is what a game's mods want, tighter, in one call.
 ///
 /// # Examples
 ///
@@ -59,15 +63,19 @@ End Struct
 /// Expect(lua.MemoryUsed < options.MemoryLimit)
 /// ```
 Public Struct LuauOptions
-    /// The most bytes the State's VM may hold at once, or 0, the default, for no limit, garbage not
-    /// yet collected counting too: with a limit, the collector runs more often, aiming at a quarter
-    /// more than what's live. Past it, a script gets Luau's "not enough memory", which a call gives
-    /// as a LuauError of MEMORY, and the State goes on, having collected all it could.
-    Public Field MemoryLimit: Int64 = 0
-    /// How long each call of the program's into the State may run, or 0, the default, for no
-    /// limit: every one that can run a script's code, a call, a thread's resume, and a table's or
-    /// the globals' get and set, which can run a metamethod, and a driver's tick, for all the
-    /// threads it resumes then, rounded up to a whole microsecond.
+    /// The most bytes the State's VM may hold at once, 256 MB by default, or 0 for no limit, the
+    /// program's own choice, garbage not yet collected counting too: with a limit, the collector
+    /// runs more often, aiming at a quarter more than what's live. Past it, a script gets Luau's
+    /// "not enough memory", which a call gives as a LuauError of MEMORY, and the State goes on,
+    /// having collected all it could. The limit is the State's: one script that hoards makes the
+    /// others' calls fail too, and a script's own pcall catches the error, so it can go on
+    /// hoarding; a State for each mod gives each its own.
+    Public Field MemoryLimit: Int64 = 256 * 1024 * 1024
+    /// How long each call of the program's into the State may run, 10 seconds by default, or 0
+    /// for no limit, the program's own choice: every one that can run a script's code, a call, a
+    /// thread's resume, and a table's or the globals' get and set, which can run a metamethod,
+    /// and a driver's tick, for all the threads it resumes then, rounded up to a whole
+    /// microsecond.
     /// Past it, the script meets a LuauError of TIMEOUT at each of Luau's safe points, its loops'
     /// and calls', which its own pcall can't keep it from, until the call returns; a C function
     /// that runs long, like a string pattern that backtracks, has it only once it returns. A
@@ -120,6 +128,41 @@ Public Struct LuauOptions
     /// The most threads that may wait at once, past which a script's wait is an error: 10,000 by
     /// default.
     Public Field MostWaiting: Int = 10000
+
+    /// The defaults: see each field.
+    Public New()
+        TimeBudget = 10.Seconds
+    End New
+
+    /// What a game's mods want, in one call: a State whose scripts are strangers' code. Over the
+    /// defaults, it has a memory limit of 64 MB, a time budget of 50 ms a call, which a game's
+    /// frame can afford, and 1,000 waits at most; and it says again what the defaults already
+    /// do, so a mod has them whatever they become: every library, as each is safe for a script
+    /// of its own (os is only the time, debug only info and traceback, each over the script's
+    /// own functions and threads), collectgarbage only to count, no loadstring, getfenv, or
+    /// setfenv, and no native code. Its globals freeze at the first NewScript, as every State's
+    /// do. A game sets what it gives mods, Modules, Print, and ThreadError, on what this gives.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # Import luau
+    /// Local lua = Try LuauState(LuauOptions.Sandbox())
+    /// Local error = ExpectThrows<LuauError>(lua.Run("while true do end"))
+    /// Expect(error?.Kind == LuauErrorKind.TIMEOUT)
+    /// ```
+    Public Static Method Sandbox(): LuauOptions
+        Local options = LuauOptions()
+        options.MemoryLimit = 64 * 1024 * 1024
+        options.TimeBudget = 50.Milliseconds
+        options.MostWaiting = 1000
+        options.Libraries = LuauLibraries.ALL
+        options.CollectGarbage = LuauCollectGarbage.COUNT
+        options.LoadString = False
+        options.Environments = False
+        options.NativeCode = LuauNativeCode.OFF
+        Return options
+    End Method
 End Struct
 
 /// The most bytes of text a State keeps of errors, raised in one call or waiting for ThreadError.

@@ -447,3 +447,24 @@ Written while the PC was kept free for the user: none of it built or run until t
   show it, one for each way a mod failed to load before (a MEMORY error, a loop with its
   checking off, an error after hooking the tick, and two init files), which ctest's regular
   expression expects, beside the good ones playing.
+- **Sandboxed by default, as the approved plan said (112):** LuauOptions' MemoryLimit is 256 MB
+  and TimeBudget 10 seconds unless the program sets them, 0 being none by its own choice, so a
+  runaway script can't take a program with it unasked; the rest of the sandbox was already the
+  default. `LuauOptions.Sandbox()` is the mods' preset: 64 MB, 50 ms, 1,000 waits, and the
+  defaults' libraries, collectgarbage, loadstring, getfenv, and native code said again, so a
+  mod keeps them whatever the defaults become. Every library stays, each being safe for a
+  script of its own. The modded game starts from it; the conformance runner sets no limits, as
+  Luau's has none.
+- **The guide says what a pcall catches and whose memory it is (113):** a script's pcall catches
+  "not enough memory", as Luau's does, but not a timeout; the memory limit is the State's, so a
+  hoarding mod fails the others' calls, and a State for each mod is how to give each its own.
+- **An object of a Class with its own `==` is documented (114),** in the guide and objects.fb,
+  until 1.3.3 lets finding 2 be fixed.
+- **Compiling ahead sets Luau's flags (117),** as every entry that reaches Luau does, so bytes
+  compiled before any State are a State's, and a compile on one thread doesn't race the first
+  State on another. The bytecode tests' first case compares bytes from before a State with
+  bytes from after.
+- **An exception at the shim's edge is counted (118),** `fbl_core_escaped`, the process's: every
+  fuzzer fails when it moves in an input, and every C++ test's State checks it's 0 as it closes,
+  so the shim's first rule is a finding though the export gives a status the API has. The new
+  fuzz targets and the exports not yet fuzzed are 0.1.1's.

@@ -58,6 +58,8 @@ struct test_state_t {
         if (handle != 0) {
             fbl_state_close(handle);
         }
+        // No exception got to the edge of the library, in this test or one before it.
+        CHECK(fbl_core_escaped() == 0);
     }
 
     // Compiles and runs `source` in a frame of its own, as `name`: the status.

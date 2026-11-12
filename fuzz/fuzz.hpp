@@ -17,6 +17,25 @@
     std::abort();
 }
 
+// Watches for an exception that gets to an exported function's catch while it lives, which is
+// a finding though the function gives a status the C API has, FBL_OTHER.
+class no_escape_t {
+public:
+    no_escape_t() noexcept : m_before(fbl_core_escaped()) {}
+    ~no_escape_t() {
+        if (fbl_core_escaped() != m_before) {
+            finding(fbl_core_error());
+        }
+    }
+    no_escape_t(const no_escape_t&) = delete;
+    no_escape_t& operator=(const no_escape_t&) = delete;
+    no_escape_t(no_escape_t&&) = delete;
+    no_escape_t& operator=(no_escape_t&&) = delete;
+
+private:
+    int64_t m_before;
+};
+
 // Whether `status` is one the C API gives.
 inline bool is_status(int32_t status) {
     return status >= FBL_OK && status <= FBL_MISUSE;

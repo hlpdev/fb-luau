@@ -258,3 +258,35 @@ Function AnotherScriptsThreadCantBeDrivenNorRead() Throws LuauError
     lua.Close()
     ExpectThrows<LuauError>(waits.Wait())
 End Function
+
+@Test
+Function ADefaultStateEndsARunawayScript() Throws LuauError
+    // Without asking, a State's memory and each call's time are limited.
+    Local options = LuauOptions()
+    Expect(options.MemoryLimit == 256 * 1024 * 1024 && options.TimeBudget == 10.Seconds)
+    Local lua = LuauState()
+    Local hoard = ExpectThrows<LuauError>(lua.Run("local t = {{}} for i = 1, 1e9 do " +
+                                                  "t[i] = string.rep('x', 4096) .. i end"))
+    Expect(hoard?.Kind == LuauErrorKind.MEMORY)
+    Local spin = ExpectThrows<LuauError>(lua.Run("while true do end"))
+    Expect(spin?.Kind == LuauErrorKind.TIMEOUT)
+    Expect(Try lua.Evaluate<Int>("return 1 + 1") == 2)
+End Function
+
+@Test
+Function TheSandboxPresetHasWhatItSays() Throws LuauError
+    Local options = LuauOptions.Sandbox()
+    Expect(options.MemoryLimit == 64 * 1024 * 1024 && options.TimeBudget == 50.Milliseconds)
+    Expect(options.MostWaiting == 1000 && options.Libraries == LuauLibraries.ALL)
+    Expect(options.CollectGarbage == LuauCollectGarbage.COUNT)
+    Expect(!options.LoadString && !options.Environments)
+    Expect(options.NativeCode == LuauNativeCode.OFF)
+    Local lua = Try LuauState(options)
+    Expect(Try lua.Evaluate<Bool>("return loadstring == nil and getfenv == nil and setfenv == nil"))
+    Expect(ExpectThrows<LuauError>(lua.Run("while true do end"))?.Kind == LuauErrorKind.TIMEOUT)
+    Expect(ExpectThrows<LuauError>(lua.Run("local t = {{}} for i = 1, 1e9 do " +
+                                           "t[i] = string.rep('x', 1048576) .. i end"))?.Kind ==
+           LuauErrorKind.MEMORY)
+    Local _script = Try lua.NewScript()
+    Expect(lua.IsFrozen)
+End Function
