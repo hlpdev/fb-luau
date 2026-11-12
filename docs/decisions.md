@@ -340,3 +340,49 @@ Written while the PC was kept free for the user: none of it built or run until t
 - **Native code is used only where it can run (82):** `isNativeExecutionEnabled` after `create`.
 - **Five tests unwind through native frames (81),** in ALL and with `--!native`: the budget, an
   error caught and let go, the memory limit, a yield, and a traceback.
+- **A task's arguments stay in the State (85):** one table a wait, kept by reference, pushed at the
+  resume, counted to the State's limit; nothing of a script's arguments is copied to the program.
+- **A chunk loadstring makes never names where require looks (86):** a name a script gives that
+  starts with "@" is marked "=", which shows the same; a chunk of any name but a path's requires
+  from the root, as a module "=" there; a path's name goes through the parts and length checks;
+  the .luaurc search keeps to the budget.
+- **The waits' driver reads its scheduler's time (87),** fb 1.3.2's `Scheduler.Current.Time()`: no
+  timer coroutine, no quantum, no 1 s cap. A wait made in the driver's turn counts from the time
+  then; one made outside it, in a call of the program's or a thread's first resume, from the
+  driver's next turn, on its own scheduler. So a wait is never early, and at most a tick late.
+  A thread's Start, ending, gives what it still drives to the State's driver, or, with none,
+  ends each as a YIELD error to ThreadError.
+- **A driver checks its State after every resume and Report (88),** and gives CLOSED once
+  ThreadError closed it, not a panic.
+- **The tick's budget decides only whether another thread starts (89):** each resume has the
+  State's budget of its own, so a hog ends only itself; `fbl_state_turn`'s shared deadline isn't
+  used by the driver now.
+- **A tick inside a call of the program's is no turn (94):** `fbl_state_turn`'s 3 says whether a
+  call runs, and what's due goes the next tick.
+- **A level's function of another environment is refused (90),** by getfenv, setfenv, and
+  debug.info's "f", as a function given one is.
+- **Freezing follows metatables (91);** what a module's functions reach by upvalues stays its own,
+  and the docs say so.
+- **An Async function's wait is checked before the program's function is called (92).**
+- **lua.Start() runs until the State closes (93):** said in its doc, the guide, the READMEs, and the
+  plan; a program closes the State to end it.
+- **A require's placeholder is cleared and frozen on every way out (95),** by a catch that clears
+  and rethrows, and the load fills a cyclic requirer's placeholder itself, where a failure clears
+  it, rather than leave Luau's require to, where one partway would leave it writable.
+- **Kept errors are capped by a megabyte of text too (96).**
+- **A require's path counts backslashes as separators (97).**
+- **A wait entry belongs to its wait (98):** a thread's own wait keeps the function it waits in
+  (fbl_thread_waits_in), and is dropped at its turn when the thread isn't suspended in it, as when
+  a script resumed or closed it; a thread that waits again while its old entry is kept replaces
+  it.
+- **The two tests (99):** the wrong-self test is back, reaching the handler through the script's
+  own levels, which debug.info still gives; escape_test's walker stays at `found >= 1`, as review-2
+  refused another call's thread's levels, which most of its finds were. 54's finalizer test now
+  fails without its fix, a failing call resetting the runner. 61 has no test yet: one wants 200
+  nested C calls ending in a program function that resumes, which I'll write once it can run.
+- **Objects by identity (2),** with std.collections' `Identity<T>` (fb 1.3.1): `LuauObject` is a
+  Class's (`T: LuauObject & Class`), and no longer Hashable.
+- **fb 1.3.2,** in project.toml and every workflow. The workarounds fb 1.3.1's fixes made needless
+  are out: the Throws Error lambda, the Dog that couldn't list LuauObject, the drivers' array
+  instead of a Map of Weak, and the compile test, now a run that Register's panic names.
+  `@LuauAction` stays, as it says what a Method is.
