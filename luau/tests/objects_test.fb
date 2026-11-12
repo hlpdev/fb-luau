@@ -3,6 +3,8 @@ Import std.io
 Import std.test
 Import std.text
 Import luau
+Import "./doors/game" As game
+Import "./doors/mods" As mods
 
 Class Player Implements LuauObject
     Field health: Int = 100
@@ -184,4 +186,40 @@ Function ObjectsMadeAndCollectedInOneCallAreLetGo() Throws LuauError
     lua.Collect()
     Expect(lua.Objects.Count == 0, "{lua.Objects.Count}")
     Expect(lua.ObjectTypes.Count == 0)
+End Function
+
+@Test
+Function TwoTypesOfOneNameInTwoModulesAreEachTheirOwn() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<game.Door>()
+    Try lua.Register<mods.Door>()
+    Try lua.Set("a", game.Door())
+    Try lua.Set("b", mods.Door())
+    Expect(Try lua.Evaluate<String>("return a:Maker() .. ' ' .. b:Maker()") == "game mods")
+    Expect(ExpectThrows<LuauError>(lua.Evaluate<mods.Door>("return a")) != Null)
+End Function
+
+@Test
+Function ClosingLetsGoOfTheObjectsARegistrationHad() Throws LuauError
+    Local lua = LuauState()
+    Local players = Try lua.Register<Player>()
+    Local player = Player()
+    Local weak: Weak<Player> = player
+    Try lua.Set("kept", player)
+    player = Player()
+    Expect(players.Ids.Count == 1)
+    lua.Close()
+    Expect(players.Ids.Count == 0)
+    Local gone: Player? = weak
+    Expect(gone == Null)
+End Function
+
+@Test
+Function AnAddedMethodReplacesAReflectedOneBothWays() Throws LuauError
+    Local lua = LuauState()
+    Local doors = Try lua.Register<Door>()
+    Try doors.AddMethod("Open", Try lua.Wrap(Function(door: Door) => False, "Open"))
+    Try lua.Set("door", Door())
+    Expect(!(Try lua.Evaluate<Bool>("return door:Open()")))
+    Expect(!(Try lua.Evaluate<Bool>("return door.Open(door)")))
 End Function

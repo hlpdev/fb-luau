@@ -27,6 +27,24 @@ Public Attribute LuauGet(Name: String = "")
 /// Method's name or `Name`.
 Public Attribute LuauSet(Name: String = "")
 
+/// The ids types are given, from 1, on any thread.
+Global nextTypeId = Atomic<Int64>(0)
+
+/// Each type's id, which a State keeps its registration by: its name, from TypeName, has no module,
+/// so two types of one name in two modules are told apart by this.
+Package Class LuauTypeId<T>
+    Static Field Id: Atomic<Int64> = Atomic<Int64>(0)
+
+    /// T's id, given the first time it's asked for.
+    Package Static Method Of(): Int64
+        Local id = Id.Load()
+        If id != 0 Then Return id
+        Local made = nextTypeId.Add(1) + 1
+        If Id.CompareExchange(0, made) Then Return made
+        Return Id.Load()
+    End Method
+End Class
+
 /// A metamethod a registered type can have, for [LuauTypeBuilder.AddOperator].
 Public Enum LuauOperator
     /// `a + b`, __add.
@@ -160,6 +178,13 @@ Public Class LuauTypeBuilder<T: LuauObject>
     Package Field Ids: Map<T, Int64>
     /// The metamethods reflection gives it before its metatable is made, which then has them.
     Package Field Pending: (LuauOperator, LuauFunction)[] = []
+    /// The member each Luau name is, of the Methods reflection exposes, by kind, so two of one name
+    /// are refused.
+    Field claimedMethods: Map<String, String>
+    Field claimedGetters: Map<String, String>
+    Field claimedSetters: Map<String, String>
+    /// Whether its State closed, which empties it.
+    Field closed: Bool = False
 
     Package New(owner: LuauState, number: Int32, name: String)
         Self.owner = owner
@@ -172,19 +197,89 @@ Public Class LuauTypeBuilder<T: LuauObject>
         AddedGetters = {}
         AddedSetters = {}
         Ids = {}
+        claimedMethods = {}
+        claimedGetters = {}
+        claimedSetters = {}
     End New
 
-    /// Its State, panicking at the caller once it's gone.
+    /// Its State, panicking at the caller once it's gone, or closed.
     @PanicsAtCaller
     Package Property Owner: LuauState
         Get
             Local held: LuauState? = owner
-            If held == Null Then Panic("the Luau State is closed")
+            If held == Null || closed || !held.IsOpen Then Panic("the Luau State is closed")
             Return held
         End Get
     End Property
 
-    /// Adds a Method a script calls as `object:name(...)`: `function`, given the object first.
+    /// Lets go of everything it holds, the objects Luau had too, as its State closes; using it
+    /// after panics.
+    Package Method Emptied()
+        closed = True
+        Getters.Clear()
+        Setters.Clear()
+        Methods.Clear()
+        Functions.Clear()
+        AddedGetters.Clear()
+        AddedSetters.Clear()
+        Ids.Clear()
+        Pending.Clear()
+    End Method
+
+    /// Says Luau name `name` is `member`'s, a Method, a getter, or a setter by `kind`, 0, 1, or 2,
+    /// panicking at Register when another member has it: a Method's name is only its own, and a
+    /// getter and a setter can share one.
+    @PanicsAtCaller
+    Package Method Claim(kind: Int, name: String, member: String)
+        Local other: String? = claimedMethods.Get(name)
+        If other == Null && kind != 2 Then other = claimedGetters.Get(name)
+        If other == Null && kind != 1 Then other = claimedSetters.Get(name)
+        If other != Null Then Panic("{Name}'s {other} and {member} are both '{name}' in Luau")
+        Select kind
+            Case 0
+                claimedMethods[name] = member
+            Case 1
+                claimedGetters[name] = member
+            Default
+                claimedSetters[name] = member
+        End Select
+    End Method
+
+    /// Panics at Register for a Method marked `attribute` that no shape exposes, saying why it
+    /// can't be.
+    @PanicsAtCaller
+    Package Method Unexposed(member: String, attribute: String, kind: Int, name: String)
+        Local found = False
+        Select kind
+            Case 0
+                found = Methods.Contains(name)
+            Case 1
+                found = Getters.Contains(name)
+            Default
+                found = Setters.Contains(name)
+        End Select
+        If found Then Return
+        Local shape = "a Method of 0 to 7 LuauType arguments that gives a LuauType"
+        Select attribute
+            Case "LuauAction"
+                shape = "a Method of 0 to 7 LuauType arguments that gives nothing"
+            Case "LuauGet"
+                shape = "a Method of no arguments that gives a LuauType"
+            Case "LuauSet"
+                shape = "a Method of one LuauType argument that gives nothing"
+        End Select
+        Panic("{Name}.{member} is marked @{attribute}, but isn't {shape}, throwing one kind of " +
+              "error or none, and not Static")
+    End Method
+
+    /// Panics at the caller for a function of another State than its own.
+    @PanicsAtCaller
+    Method Mine(function: LuauFunction)
+        If !RefEquals(function.Owner, Owner) Then Panic("a LuauFunction of another Luau State")
+    End Method
+
+    /// Adds a Method a script calls as `object:name(...)`, and reads as `object.name`: `function`,
+    /// given the object first. It replaces whatever the type has by that name, of any kind.
     ///
     /// # Errors
     ///
@@ -192,23 +287,38 @@ Public Class LuauTypeBuilder<T: LuauObject>
     @PanicsAtCaller
     Public Method AddMethod(name: String,
                             function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        Mine(function)
+        Methods.Remove(name)
+        Getters.Remove(name)
+        Setters.Remove(name)
+        AddedGetters.Remove(name)
+        AddedSetters.Remove(name)
         Functions[name] = function
         Return Self
     End Method
 
-    /// Adds a field a script reads as `object.name`: what `function` gives, given the object.
+    /// Adds a field a script reads as `object.name`: what `function` gives, given the object. It
+    /// replaces a Method or a field the type reads by that name; a setter of it stays.
     @PanicsAtCaller
     Public Method AddGetter(name: String,
                             function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        Mine(function)
+        Methods.Remove(name)
+        Functions.Remove(name)
+        Getters.Remove(name)
         AddedGetters[name] = function
         Return Self
     End Method
 
     /// Adds a field a script sets as `object.name = value`: `function` is given the object and
-    /// the value.
+    /// the value. It replaces a Method or a setter the type has by that name; a getter of it stays.
     @PanicsAtCaller
     Public Method AddSetter(name: String,
                             function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        Mine(function)
+        Methods.Remove(name)
+        Functions.Remove(name)
+        Setters.Remove(name)
         AddedSetters[name] = function
         Return Self
     End Method
@@ -222,6 +332,7 @@ Public Class LuauTypeBuilder<T: LuauObject>
     @PanicsAtCaller
     Public Method AddOperator(operator: LuauOperator,
                               function: LuauFunction): LuauTypeBuilder<T> Throws LuauError
+        Mine(function)
         Local state = Owner
         Local frame = state.Opened()
         Defer state.Closed(frame)

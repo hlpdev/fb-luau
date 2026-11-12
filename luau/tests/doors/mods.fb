@@ -1,0 +1,9 @@
+//! A mod's Door, which a test registers beside a game's of the same name.
+
+Import luau
+
+/// A mod's door.
+Public Class Door Implements LuauObject
+    /// Who made it.
+    @LuauExpose Public Method Maker(): String => "mods"
+End Class

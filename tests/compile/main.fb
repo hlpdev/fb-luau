@@ -1,0 +1,11 @@
+// A program that mustn't compile: a Method that gives nothing, marked @LuauExpose, which is
+// @LuauAction's, is refused where its type is registered, naming the Method.
+
+Import luau
+
+Class Silent Implements LuauObject
+    @LuauExpose Method Nothing()
+    End Method
+End Class
+
+Try LuauState().Register<Silent>()

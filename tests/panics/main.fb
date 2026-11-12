@@ -8,6 +8,25 @@ Import luau
 Class Door Implements LuauObject
 End Class
 
+// Marked Methods of shapes no script can be given, and two of one name.
+Class Many Implements LuauObject
+    @LuauExpose Method Sum(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int): Int => a
+End Class
+
+Class Asking Implements LuauObject
+    @LuauGet Method Size(scale: Int): Int => scale
+End Class
+
+Class Unset Implements LuauObject
+    @LuauSet Method Reset()
+    End Method
+End Class
+
+Class Twice Implements LuauObject
+    @LuauExpose("hurt") Method Damage(amount: Int): Int => amount
+    @LuauExpose Method hurt(amount: Int): Int => amount
+End Class
+
 Function Run(name: String) Throws LuauError
     Select name
         // A State used once it's closed.
@@ -66,6 +85,26 @@ Function Run(name: String) Throws LuauError
             Local thread = Try lua.Spawn(Try lua.Load("task.wait(1)"))
             Local _first = thread.Start()
             Try thread.Resume()
+        Case "eight-arguments"
+            Try LuauState().Register<Many>()
+        Case "get-argument"
+            Try LuauState().Register<Asking>()
+        Case "set-none"
+            Try LuauState().Register<Unset>()
+        Case "two-names"
+            Try LuauState().Register<Twice>()
+        // A registration used once its State is closed.
+        Case "closed-builder"
+            Local lua = LuauState()
+            Local doors = Try lua.Register<Door>()
+            Local open = Try lua.Wrap(Function() => 1)
+            lua.Close()
+            Try doors.AddMethod("Open", open)
+        // A function of another State added to a registration.
+        Case "builder-other-state"
+            Local lua = LuauState()
+            Local other = LuauState()
+            Try (Try lua.Register<Door>()).AddGetter("open", Try other.Wrap(Function() => 1))
         Default
             Panic("no such case as {name}")
     End Select

@@ -126,8 +126,10 @@ Public Class LuauState
     Package Field Raised: Map<String, Error>
     /// Its registered types, by their names, each a LuauTypeBuilder, and what lets go of an
     /// object of each type, by its number.
-    Package Field Types: Map<String, Object>
+    Package Field Types: Map<Int64, Object>
     Package Field TypesByNumber: Map<Int32, Func(Int64)>
+    /// What empties each registration, as the State closes.
+    Package Field Emptiers: Func()[]
     /// The program's objects Luau has, by the numbers their userdata hold, and each one's type.
     Package Field Objects: Map<Int64, LuauKept>
     Package Field ObjectTypes: Map<Int64, Int32>
@@ -147,6 +149,7 @@ Public Class LuauState
         Raised = {}
         Types = {}
         TypesByNumber = {}
+        Emptiers = []
         Objects = {}
         ObjectTypes = {}
         Waiting = []
@@ -178,6 +181,7 @@ Public Class LuauState
         Raised = {}
         Types = {}
         TypesByNumber = {}
+        Emptiers = []
         Objects = {}
         ObjectTypes = {}
         Waiting = []
@@ -225,6 +229,11 @@ Public Class LuauState
         Handle = 0
         Functions.Clear()
         Raised.Clear()
+        // A registration the program still holds lets go of every object Luau had.
+        For empty In Emptiers
+            empty()
+        End For
+        Emptiers.Clear()
         Types.Clear()
         TypesByNumber.Clear()
         Objects.Clear()
@@ -633,7 +642,7 @@ Public Class LuauState
 
     /// T's registration, if it has one.
     Package Method KeptType<T: LuauObject>(): LuauTypeBuilder<T>?
-        Local kept = Types.Get(TypeName<T>())
+        Local kept = Types.Get(LuauTypeId<T>.Of())
         If kept == Null Then Return Null
         Return kept As LuauTypeBuilder<T>
     End Method
@@ -665,8 +674,9 @@ Public Class LuauState
         Try LuauFunction.ToLuau(slots, newIndex)
         Try LuauFunction.ToLuau(slots, nameCall)
         Try Check(fbl_udata_type(Handle, frame, type.Number, name, 0, 1, 2))
-        Types[name] = type
+        Types[LuauTypeId<T>.Of()] = type
         TypesByNumber[type.Number] = Function(id: Int64) => type.Released(id)
+        Emptiers.Add(Function() => type.Emptied())
         For entry In type.Pending
             Try type.AddOperator(entry.0, entry.1)
         End For
@@ -675,7 +685,7 @@ Public Class LuauState
     /// T's registration, panicking at the caller when it has none.
     @PanicsAtCaller
     Package Method TypeOf<T: LuauObject>(): LuauTypeBuilder<T>
-        Local kept = Types.Get(TypeName<T>())
+        Local kept = Types.Get(LuauTypeId<T>.Of())
         If kept == Null Then Panic("{TypeName<T>()} isn't registered; Register<{TypeName<T>()}>() first")
         Return kept As LuauTypeBuilder<T>
     End Method

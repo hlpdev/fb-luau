@@ -264,6 +264,8 @@ def loop(attribute, func, type_names, throws):
     if throws:
         lines.append("        Where E: Error")
     lines.append(f"        Local name = MemberName(m.Attribute({attribute})?.Name, m.Name)")
+    kind = {"LuauExpose": 0, "LuauAction": 0, "LuauGet": 1, "LuauSet": 2}[attribute]
+    lines.append(f"        type.Claim({kind}, name, m.Name)")
     return lines
 
 
@@ -273,7 +275,10 @@ def expose_members():
     lines = doc("    ", "Registers T, whose objects cross as themselves, and exposes what its reflection says a\n"
                         "script reaches: its Methods marked [LuauExpose], [LuauAction], [LuauGet], and\n"
                         "[LuauSet], each of LuauTypes, and its ToString, for tostring. Registering it again\n"
-                        "gives the same builder.\n\n# Errors\n\nA LuauError of MEMORY.")
+                        "gives the same builder.\n\n# Errors\n\nA LuauError of MEMORY.\n\n# Panics\n\n"
+                        "For a marked Method of a shape none exposes, like one of 8 arguments, or one that\n"
+                        "gives nothing marked [LuauExpose], and for two marked members of one name in Luau,\n"
+                        "saying which.")
     lines += ["    @PanicsAtCaller",
               "    Public Method Register<T: LuauObject>(): LuauTypeBuilder<T> Throws LuauError",
               "        Local kept = KeptType<T>()",
@@ -312,6 +317,20 @@ def expose_members():
     body += made
     body += ["        type.Pending.Add((LuauOperator.TOSTRING, Try NewFunction(\"__tostring\", show)))",
              "    End For"]
+    # A marked Method no loop above took is named in a panic: a loop of each shape, of any types,
+    # finds it, as a For Method loop goes over one shape.
+    for attribute, kind in (("LuauExpose", 0), ("LuauAction", 0), ("LuauGet", 1), ("LuauSet", 2)):
+        for count in range(MOST + 1):
+            names = arguments(count)
+            for gives in (True, False):
+                for throws in (False, True):
+                    func = f"Func({', '.join(names)})" + (": R" if gives else "") + (" Throws E" if throws else "")
+                    body += ["    For Method m: M In T", f"        Where m Has {attribute}", f"        Where M: {func}"]
+                    if throws:
+                        body.append("        Where E: Error")
+                    body += [f"        type.Unexposed(m.Name, \"{attribute}\", {kind}, "
+                             f"MemberName(m.Attribute({attribute})?.Name, m.Name))",
+                             "    End For"]
     lines += ["    " + line for line in body]
     lines += ["        Try Finished(type)", "        Return type", "    End Method"]
     return lines

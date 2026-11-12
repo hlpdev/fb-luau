@@ -108,11 +108,23 @@ if(FBL_FB_TESTS)
       "unregistered=Door isn't registered"
       "buffer-bounds=4 bytes at 1 aren't within a buffer of 4"
       "buffer-read-huge=1099511627776 bytes at 0 aren't within a buffer of 4"
+      "eight-arguments=Many.Sum is marked @LuauExpose, but isn't"
+      "get-argument=Asking.Size is marked @LuauGet, but isn't"
+      "set-none=Unset.Reset is marked @LuauSet, but isn't"
+      "two-names=Twice's Damage and hurt are both 'hurt' in Luau"
+      "closed-builder=the Luau State is closed"
+      "builder-other-state=a LuauFunction of another Luau State"
       "negative-limit=a memory limit of -1 bytes is below 0"
       "negative-budget=a time budget of -1 microseconds is below 0"
       "optimization=a compile option of 3 isn't from 0 to 2"
       "started-twice=the Luau thread runs on the scheduler already"
       "resumed-by-hand=the Luau thread runs on the scheduler")
+  # A marked Method of a shape that doesn't compile when it's registered: @LuauExpose on one that
+  # gives nothing, which the exposing loop's Where line on its result names.
+  add_test(NAME luau.compile.expose-nothing
+           COMMAND "${FBL_FB}" --color never check "${CMAKE_CURRENT_SOURCE_DIR}/compile")
+  set_tests_properties(luau.compile.expose-nothing PROPERTIES
+                       PASS_REGULAR_EXPRESSION "its Method 'Nothing' has nothing for R")
   foreach(case IN LISTS fbl_panics)
     string(FIND "${case}" "=" split)
     string(SUBSTRING "${case}" 0 ${split} name)
