@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <format>
 #include <luacode.h>
@@ -234,9 +235,10 @@ void environment_function(lua_State* stack, bool optional) {
     if (lua_iscfunction(stack, -1) != 0) {
         luaL_error(stack, "a C function's environment can't be reached");
     }
-    // A function given, rather than a level, is one of the caller's own environment, as another's
-    // function, a module's say, would give that environment away.
-    if (lua_type(stack, 1) == LUA_TFUNCTION) {
+    // A function given, or the one at a level, is one of the caller's own environment, as another
+    // script's function, a module's, or one that called a shared module's function that called
+    // the caller, would give that environment away.
+    {
         lua_getfenv(stack, -1);
         if (!push_caller_environment(stack) || lua_rawequal(stack, -1, -2) == 0) {
             luaL_error(stack, "a function of another environment than the caller's can't be "
@@ -315,6 +317,26 @@ int guarded_debug(lua_State* stack) {
     if (own) {
         const int first = threaded ? 2 : 1;
         const int index = traceback ? first + 1 : first;
+        // info's function, at a level of the caller's own, has to be of the caller's environment,
+        // as getfenv's does: a level up from a shared module's function reaches whatever script
+        // called it.
+        if (!traceback && lua_type(stack, index) == LUA_TNUMBER && lua_tointeger(stack, index) > 0) {
+            const char* options = lua_tostring(stack, index + 1);
+            lua_Debug info{};
+            if (options != nullptr && std::strchr(options, 'f') != nullptr &&
+                lua_getinfo(stack, static_cast<int>(lua_tointeger(stack, index)), "f", &info) !=
+                    0) {
+                if (lua_type(stack, -1) == LUA_TFUNCTION && lua_iscfunction(stack, -1) == 0) {
+                    lua_getfenv(stack, -1);
+                    if (!push_caller_environment(stack) || lua_rawequal(stack, -1, -2) == 0) {
+                        luaL_error(stack, "a function of another environment than the caller's "
+                                          "can't be reached");
+                    }
+                    lua_pop(stack, 2);
+                }
+                lua_pop(stack, 1);
+            }
+        }
         // A negative level stays as it is, which Luau refuses, as it does its own.
         if (lua_type(stack, index) == LUA_TNUMBER && lua_tointeger(stack, index) >= 0) {
             lua_pushinteger(stack, lua_tointeger(stack, index) + 1);

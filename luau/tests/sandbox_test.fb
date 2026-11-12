@@ -1,3 +1,4 @@
+Import std.collections
 Import std.core
 Import std.test
 Import std.text
@@ -176,4 +177,26 @@ Function SourceThatIsntUtf8LoadsAsItsBytes() Throws LuauError
     Expect(Try (Try lua.Load(source)).Call<Int>() == 1)
     Local script = Try lua.NewScript("=latin")
     Expect(Try (Try script.Load(source)).Call<Int>() == 1)
+End Function
+
+@Test
+Function ALevelDoesntReachAnotherScriptsFunctionThroughASharedModule() Throws LuauError
+    // A shared bus calls each script's handler; one handler looks up the levels for the script
+    // that fired, which is another's.
+    Local files: Map<String, String> = {
+        "bus.luau": r"local handlers = {} return { on = function(f) table.insert(handlers, f) end, fire = function() for _, f in handlers do f() end end }"
+    }
+    Local options = LuauOptions()
+    options.Environments = True
+    options.Modules = Function(path: String): String? => files.Get(path)
+    Local lua = Try LuauState(options)
+    Local spy = Try lua.NewScript("@spy.luau")
+    Local victim = Try lua.NewScript("@victim.luau")
+    Try spy.Run(r"local bus = require('./bus') bus.on(function() " +
+                r"for level = 2, 4 do local ok = pcall(getfenv, level) if ok then reached = (reached or 0) + 1 end " +
+                r"local okInfo = pcall(debug.info, level, 'f') if okInfo then infos = (infos or 0) + 1 end end end)",
+                "@spy.luau")
+    Try victim.Run(r"secret = 'mine' local bus = require('./bus') bus.fire()", "@victim.luau")
+    // Neither the bus's function nor the victim's is reached from the spy's handler.
+    Expect(Try spy.Evaluate<Bool>("return reached == nil and infos == nil"))
 End Function
