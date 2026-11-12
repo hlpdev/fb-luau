@@ -1,0 +1,38 @@
+// Makes the build's key pair, once: an Ed25519 private key, which signs the game's containers and
+// never leaves the machine that builds the game, and its public key, which the game compiles in.
+// A game makes its own pair once and keeps the private key out of its repository and out of what
+// it ships; examples/bytecode's pair is made the first time it's built, and never committed.
+//
+// `fb run examples/bytecode/keygen -- <private key> <public key>`: a pair that's there is kept.
+
+Import std.core
+Import std.crypto
+Import std.io
+Import std.os
+
+Function Made(privateFile: Path, publicFile: Path) Throws Error
+    If File.Exists(privateFile) && File.Exists(publicFile)
+        Print("the key pair is there")
+        Return
+    End If
+    For file In [privateFile, publicFile]
+        Local folder = file.Parent()
+        If folder.ToString() != "" && !Dir.Exists(folder) Then Try Dir.Create(folder)
+    End For
+    Local privateKey = Ed25519.NewPrivateKey()
+    Try File.WriteBytes(privateFile, privateKey)
+    Try File.WriteBytes(publicFile, Ed25519.PublicKeyOf(privateKey))
+    Print("made a key pair")
+End Function
+
+Local arguments = Process.Arguments()
+If arguments.Count != 2
+    Print("fb run examples/bytecode/keygen -- <private key> <public key>")
+    Process.Exit(2)
+End If
+Try
+    Try Made(Path(arguments[0]), Path(arguments[1]))
+Catch error
+    Print(error.Message)
+    Process.Exit(1)
+End Try

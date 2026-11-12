@@ -687,6 +687,8 @@ Function AScriptNestingCCallsMeetsAStackOverflowErrorNotACrash() Throws LuauErro
     Local error = ExpectThrows<LuauError>(lua.Run(
         "local function deep(n) if n == 0 then return end " +
         "string.gsub('x', 'x', function() deep(n - 1) end) end deep(300)"))
+    // The guard's on Windows's 1 MB main thread, or Luau's C call limit's where a stack is
+    // larger; tests/state has the guard's own on a small stack.
     Expect(error != Null && error.Message.Contains("stack overflow"), error?.Message ?? "")
     Expect(Try lua.Evaluate<Bool>("local function deep(n) if n == 0 then return end " +
                                   "string.gsub('x', 'x', function() deep(n - 1) end) end " +

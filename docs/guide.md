@@ -431,7 +431,8 @@ Expect(ExpectThrows<LuauError>(LuauBytecode.Load(shipped, another)) != Null)
 ```
 
 examples/bytecode is a build step and its game, as two modes of one program, the game with
-its public key embedded.
+its public key embedded, and the program that makes its key pair once, as a game makes its own:
+the pair is never committed.
 
 ## Native code
 

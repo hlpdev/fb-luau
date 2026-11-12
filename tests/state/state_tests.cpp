@@ -10,6 +10,14 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
+
 TEST_CASE("a State is made, used, and closed, and every byte it held comes back") {
     const int64_t before = fbl::memory_of_all_states();
     {
@@ -239,4 +247,87 @@ TEST_CASE("an error at the memory limit keeps every reference its own") {
         fbl_frame_truncate(lua.handle, frame, 0);
     }
     CHECK(fbl_frame_close(lua.handle, frame));
+}
+
+namespace {
+
+// What a script nesting C calls meets on a thread of `stack` bytes of native stack.
+struct nested_t {
+    int32_t status = FBL_OK;
+    std::string error;
+};
+
+void nest(nested_t* result) {
+    const fbl_state_options_t options = default_options();
+    int32_t made = FBL_OTHER;
+    const uint64_t state = fbl_state_new(&options, &made);
+    if (state == 0) {
+        result->status = made;
+        return;
+    }
+    const std::string_view source = "local function deep(n) if n == 0 then return end "
+                                    "string.gsub('x', 'x', function() deep(n - 1) end) end "
+                                    "deep(190)";
+    const int32_t frame = fbl_frame_open(state);
+    result->status = fbl_load_source(state, frame, bytes_of(source),
+                                     static_cast<int64_t>(source.size()), "=nest");
+    if (result->status == FBL_OK) {
+        result->status = fbl_call_function(state, frame, 0, 0);
+    }
+    int64_t length = 0;
+    const uint8_t* message = fbl_state_error_message(state, &length);
+    if (message != nullptr) {
+        result->error = text_of(message, length);
+    }
+    fbl_frame_close(state, frame);
+    fbl_state_close(state);
+}
+
+// Runs nest on a thread of its own with `stack` bytes of native stack, reserved, as a platform's
+// thread made with less than its default has: the reservation on Windows, where winpthreads'
+// stack size is only what's committed first.
+bool nested_on(size_t stack, nested_t& result) {
+#ifdef _WIN32
+    HANDLE thread = CreateThread(
+        nullptr, stack,
+        [](void* out) -> DWORD {
+            nest(static_cast<nested_t*>(out));
+            return 0;
+        },
+        &result, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (thread == nullptr) {
+        return false;
+    }
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    return true;
+#else
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0) {
+        return false;
+    }
+    pthread_t thread{};
+    const bool made = pthread_attr_setstacksize(&attributes, stack) == 0 &&
+                      pthread_create(
+                          &thread, &attributes,
+                          [](void* out) -> void* {
+                              nest(static_cast<nested_t*>(out));
+                              return nullptr;
+                          },
+                          &result) == 0;
+    pthread_attr_destroy(&attributes);
+    return made && pthread_join(thread, nullptr) == 0;
+#endif
+}
+
+} // namespace
+
+TEST_CASE("a script nesting C calls on a small stack meets the guard's error, not a crash") {
+    // 512 KB, macOS's secondary threads' default: 190 levels of string.gsub's callbacks run out
+    // of it before Luau's 200 C calls, so what stops them is the guard.
+    nested_t result;
+    REQUIRE(nested_on(size_t{ 512 } * 1024, result));
+    INFO(result.error);
+    CHECK(result.status == FBL_RUNTIME);
+    CHECK(result.error.contains("deeper than the program's native stack holds"));
 }
