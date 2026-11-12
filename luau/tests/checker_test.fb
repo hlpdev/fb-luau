@@ -3,6 +3,7 @@ Import std.core
 Import std.math
 Import std.test
 Import std.text
+Import std.time
 Import luau
 
 /// A door a game gives its mods.
@@ -46,6 +47,33 @@ Function ATypeErrorIsGivenWithItsPlace() Throws LuauError
     Expect(first.ToString() ==
            "main.luau:2:19: TypeError: Expected this to be 'number', but got 'string'",
            first.ToString())
+End Function
+
+@Test
+Function AnEnforcedCheckerChecksWhateverAModSays() Throws LuauError
+    // A mod that turns its own checking off, by its lines and by its folder's .luaurc.
+    Local files: Map<String, String> = {
+        "mods/a.luau": "--!nocheck\n--!nolint\nlocal n: number = 'x'\nlocal unused = 1\nprint(n)\n",
+        "mods/b.luau": "local n: number = 'x'\nprint(n)\n",
+        "mods/.luaurc": "{{ \"languageMode\": \"nocheck\", \"lint\": {{ \"*\": false }} }}"
+    }
+    Local reader = Function(path: String): String? => files.Get(path)
+    Local own = LuauChecker(reader, LuauCheckMode.STRICT)
+    Expect((Try own.Check("mods/a")).Count == 0)
+    Expect((Try own.Check("mods/b")).Count == 0)
+    Local options = LuauCheckerOptions()
+    options.Mode = LuauCheckMode.STRICT
+    options.Enforced = True
+    Local checker = LuauChecker(reader, options)
+    Expect(Names(Try checker.Check("mods/a")) == ["TypeError", "LocalUnused"])
+    Expect(Names(Try checker.Check("mods/b")) == ["TypeError"])
+End Function
+
+@Test
+Function TheOptionsDefaultsAreLuauAnalyzes()
+    Local options = LuauCheckerOptions()
+    Expect(options.Mode == LuauCheckMode.NONSTRICT && options.TimeLimit == 10.Seconds)
+    Expect(options.TypeFunctionMemory == 64 * 1024 * 1024 && !options.Enforced)
 End Function
 
 @Test

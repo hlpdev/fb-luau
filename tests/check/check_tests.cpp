@@ -2,6 +2,7 @@
 #include "support.hpp"
 
 #include <array>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -251,6 +253,44 @@ TEST_CASE("a module past its time limit says so") {
     CHECK(count_named(found, "TimeLimit") == 1);
 }
 
+TEST_CASE("checkers made and run on many threads at once, first in a process, each work") {
+    // Each test case runs in a process of its own, so this is the heap lock's first use: under
+    // MinGW, a std::shared_mutex's first use on threads at once failed for some of them.
+    std::vector<std::thread> threads;
+    std::atomic<bool> go = false;
+    std::atomic<int> worked = 0;
+    threads.reserve(16);
+    for (int each = 0; each < 16; each++) {
+        threads.emplace_back([&go, &worked] {
+            while (!go.load()) {
+                std::this_thread::yield();
+            }
+            // Without Catch2's macros, which aren't for other threads.
+            const uint64_t checker = fbl_check_new(FBL_CHECK_STRICT, 60, heap_limit);
+            const std::string_view text = "local n: number = 'x'\nprint(n)\n";
+            int32_t wanted = checker == 0 ? -1 : fbl_check_run(checker, "main");
+            for (int round = 0; round < 10 && wanted > 0; round++) {
+                for (int32_t index = 0; index < wanted; index++) {
+                    const std::string path = fbl_check_wanted(checker, index);
+                    const bool here = path == "main.luau";
+                    fbl_check_give(checker, path.c_str(), here ? bytes_of(text) : nullptr,
+                                   here ? static_cast<int64_t>(text.size()) : 0, here ? 1 : 0);
+                }
+                wanted = fbl_check_run(checker, "main");
+            }
+            if (wanted == 0 && fbl_check_count(checker) == 1) {
+                worked++;
+            }
+            fbl_check_free(checker);
+        });
+    }
+    go = true;
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+    CHECK(worked == 16);
+}
+
 TEST_CASE("a check's modules share its time limit") {
     // A module whose time is the solver's, its operators' type functions, timed whole on this
     // machine, then eight of them under half that: given the limit each, as Luau gives it, the
@@ -323,6 +363,45 @@ TEST_CASE("a check that reaches a type function is refused, and none is run") {
             CHECK(after - before < int64_t{ 64 } * 1024 * 1024);
         }
     }
+}
+
+TEST_CASE("an enforced checker's mode and lint stand whatever a module's files say") {
+    const std::map<std::string, std::string> files = {
+        {
+            "mods/a.luau",
+            "--!nocheck\n--!nolint\nlocal n: number = 'x'\nlocal unused = 1\nprint(n)\n",
+        },
+        {
+            "mods/b.luau",
+            "local s = require('@shared/s')\nlocal n: number = 'x'\nlocal unused = 1\n"
+            "print(n, s, y)\n",
+        },
+        { "mods/shared/s.luau", "return 1\n" },
+        {
+            "mods/.luaurc",
+            R"({ "languageMode": "nocheck", "lint": { "*": false }, "lintErrors": false, )"
+            R"("globals": ["y"], "aliases": { "shared": "./shared" } })",
+        },
+    };
+    for (const std::string& module : { std::string("mods/a"), std::string("mods/b") }) {
+        INFO(module);
+        const checker_t own(FBL_CHECK_STRICT);
+        CHECK(checked(own, module, files).empty());
+
+        const checker_t enforced(FBL_CHECK_STRICT);
+        REQUIRE(fbl_check_enforce(enforced.handle(), 1) == FBL_OK);
+        const std::vector<diagnostic_t> found = checked(enforced, module, files);
+        CHECK(count_named(found, "TypeError") == (module == "mods/a" ? 1 : 2));
+        CHECK(count_named(found, "LocalUnused") == 1);
+        for (const diagnostic_t& each : found) {
+            CHECK(!each.message.contains("require"));
+        }
+
+        // And off again, as luau-analyze has it.
+        REQUIRE(fbl_check_enforce(enforced.handle(), 0) == FBL_OK);
+        CHECK(checked(enforced, module, files).empty());
+    }
+    CHECK(fbl_check_enforce(0, 1) == FBL_MISUSE);
 }
 
 TEST_CASE("a .luaurc that doesn't parse is a ConfigError") {

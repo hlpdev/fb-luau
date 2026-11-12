@@ -563,3 +563,17 @@ Written while the PC was kept free for the user: none of it built or run until t
   as Luau gives no results for a cancelled check.
 - **No Discord post:** by the user's word, luau isn't an official library, so publish.yml's
   `discord` job (136) is taken out, and nothing presents the package as official.
+- **LuauCheckerOptions.Enforced (116):** a struct of the checker's options, Mode, TimeLimit,
+  TypeFunctionMemory, and Enforced, for a LuauChecker made from it, beside the New of 0.1.0,
+  which stays. With Enforced, the checker's mode and Luau's default lint hold for every module:
+  its `--!strict`, `--!nonstrict`, `--!nocheck`, and `--!nolint` lines are taken out after the
+  parse, its mode set, and a `.luaurc` gives only its aliases. It's off by default, as
+  luau-analyze has it, for editor support and tooling; the modded game turns it on, and the guide
+  says the checker is a help to a mod's author and the sandbox is what holds a mod. In the C API
+  it's fbl_check_enforce, a new export, so fbl_check_new is as it was.
+- **The type functions' heap lock is warmed before its first use:** MinGW's winpthreads sets a
+  std::shared_mutex's lock up on its first use, and threads that first use it at once can fail
+  (a lock_shared that gives EINVAL: a debug build asserts, a release build goes on unlocked and
+  later unlocks what it never held). It showed as an assertion in `fb test luau` when the checker's
+  tests first ran together. The lock is now made by a function's static, which locks and unlocks
+  it once, alone; it's the only shared_mutex in the shim and Luau, and std::mutex has no such race.

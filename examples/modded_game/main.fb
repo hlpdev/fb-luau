@@ -126,8 +126,11 @@ Function Play() Throws LuauError
     // Each mod checked against the game's API before it's loaded: the API's definitions, from a
     // State given it, as each mod's is.
     Local api = Try Opened("api", front, world)
-    Local checker = LuauChecker(Function(path: String): String? => ModFile(path),
-                                LuauCheckMode.STRICT)
+    // Strict, whatever a mod's own lines and .luaurc say.
+    Local checking = LuauCheckerOptions()
+    checking.Mode = LuauCheckMode.STRICT
+    checking.Enforced = True
+    Local checker = LuauChecker(Function(path: String): String? => ModFile(path), checking)
     Try checker.AddDefinitions(api.Lua.Definitions(), "game")
     api.Lua.Close()
 

@@ -46,6 +46,12 @@ FBL_API void fbl_check_free(uint64_t checker);
 FBL_API int32_t fbl_check_definitions(uint64_t checker, const uint8_t* text, int64_t length,
                                       const char* name);
 
+// Whether the checker's mode and Luau's default lint stand whatever a module's files say, when
+// `enforced` isn't 0: a module's "--!strict", "--!nonstrict", "--!nocheck", and "--!nolint" lines
+// are passed over, and a .luaurc gives only its aliases, not its languageMode, lint, lintErrors,
+// typeErrors, or globals. Off by default, as luau-analyze has it. A status.
+FBL_API int32_t fbl_check_enforce(uint64_t checker, int32_t enforced);
+
 // Gives the file at `path`, from the files' root, `length` bytes of text, or, when `present` is
 // 0, says there's no such file. A file given before is given again, as it's changed. A status.
 FBL_API int32_t fbl_check_give(uint64_t checker, const char* path, const uint8_t* text,

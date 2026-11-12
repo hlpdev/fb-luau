@@ -480,9 +480,40 @@ Expect(found.Count == 2 && found[0].Name == "TypeError" && found[0].Line == 2)
 Each `LuauDiagnostic` has its module, line and column, its severity, Luau's code and name for
 it, and its message, as luau-analyze gives them.
 
+A mod sets its own checking, as luau-analyze lets any module: `--!nocheck` and `--!nolint`
+lines, and a `.luaurc` in its folder that turns its mode down, its lint off, or its unknown
+globals into `any`. A game's mod checker wants its own rules to stand, so `LuauCheckerOptions`
+has `Enforced`: with it, the checker's mode and Luau's default lint hold for every module, and
+a `.luaurc` gives only its aliases.
+
+```vb
+Import std.collections
+Import std.test
+Import luau
+
+Local files: Map<String, String> = {
+    "mods/sly/init.luau": "--!nocheck\nlocal n: number = 'x'\nprint(n)\n"
+}
+Local options = LuauCheckerOptions()
+options.Mode = LuauCheckMode.STRICT
+options.Enforced = True
+Local checker = LuauChecker(Function(path: String): String? => files.Get(path), options)
+Expect((Try checker.Check("mods/sly"))[0].Name == "TypeError")
+```
+
+A check has one time limit, `TimeLimit`, 10 seconds by default, for all its modules: past it,
+the check gives one diagnostic named "TimeLimit". It's Luau's solver that's stopped there; a
+module's constraint generation, which comes before, and its lint can't be, so a check can run
+past the limit by those of the modules under way.
+
 Luau's solver would run a mod's code as it checks it: a `type function`'s body, with the
 program's memory and native stack, which no limit holds. So a check that reaches a module with
 a `type function` is refused, with a diagnostic named "TypeFunction" at each, and none is run.
+
+The checker is a help: to a mod's author, who sees what they got wrong before the game does,
+and to a game that wants mods it can read. It isn't what keeps a game safe from a mod. A mod
+that passes its check runs in its State's sandbox as one that wasn't checked does, and the
+sandbox, its limits, and the API the game gives are what hold it.
 
 ## A game's modding
 
@@ -495,15 +526,15 @@ take, which any game can follow:
    may use, its functions set, events a mod hooks by giving a function, then `Freeze()`.
 3. **Its scheduler started first:** `world.Run(lua.Start())` on the game's own Scheduler, so a
    mod's waits run on the game's time, stop when it pauses, and a mod can wait as it loads.
-4. **Each mod checked, then loaded:** `LuauChecker` with `lua.Definitions()` finds what a mod
-   gets wrong before it runs; then it runs in its State's `NewScript`.
+4. **Each mod checked, then loaded:** `LuauChecker`, Enforced, with `lua.Definitions()` finds
+   what a mod gets wrong before it runs; then it runs in its State's `NewScript`.
 5. **Each mod's failure its own:** each mod's check, its load, and every call of the game's
    into it are caught for that mod alone, as a LuauError of the mod's: one that fails is dropped,
    its State closed, which ends its waits and threads, and the game goes on. `ThreadError` hears
    of a thread that failed on the scheduler.
 
 examples/modded_game is that game, small, with eight mods: one refused by the checker, one that
-runs out of memory as it loads, one that loops as it loads with its checking turned off, one
-that fails as it loads after hooking the tick, one of two files where it can have one, one
-stopped at its budget in a tick, one that waits and requires a shared module, and one that
+runs out of memory as it loads, one that loops as it loads, which tried to turn its checking
+off, one that fails as it loads after hooking the tick, one of two files where it can have one,
+one stopped at its budget in a tick, one that waits and requires a shared module, and one that
 hooks the game's tick; the last two play to the end.

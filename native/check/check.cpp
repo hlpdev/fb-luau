@@ -261,6 +261,13 @@ public:
         m_errors.clear();
     }
 
+    // Whether the checker's mode and lint stand whatever a .luaurc says, which then gives only
+    // its aliases.
+    void enforce(bool enforced) {
+        m_enforced = enforced;
+        forget();
+    }
+
     [[nodiscard]] const std::vector<std::pair<std::string, std::string>>& errors() const {
         return m_errors;
     }
@@ -288,12 +295,21 @@ private:
             if (std::optional<std::string> error = Luau::parseConfig(*text, config, options)) {
                 m_errors.emplace_back(file, std::move(*error));
             }
+            if (m_enforced) {
+                config.mode = m_defaults.mode;
+                config.enabledLint = m_defaults.enabledLint;
+                config.fatalLint = m_defaults.fatalLint;
+                config.lintErrors = m_defaults.lintErrors;
+                config.typeErrors = m_defaults.typeErrors;
+                config.globals = m_defaults.globals;
+            }
         }
         return m_cache.insert_or_assign(key, std::move(config)).first->second;
     }
 
     files_t& m_files;
     Luau::Config m_defaults;
+    bool m_enforced = false;
     mutable std::unordered_map<std::string, Luau::Config> m_cache;
     mutable std::vector<std::pair<std::string, std::string>> m_errors;
 };
@@ -319,7 +335,7 @@ using steady_t = std::chrono::steady_clock;
 struct checker_t {
     checker_t(Luau::Mode mode, double limit)
         : resolver(files), configs(files, mode),
-          frontend(Luau::SolverMode::New, &resolver, &configs, frontend_options(limit)),
+          frontend(Luau::SolverMode::New, &resolver, &configs, frontend_options(limit)), mode(mode),
           seconds(limit) {
         Luau::registerBuiltinGlobals(frontend, frontend.globals);
         Luau::freeze(frontend.globals.globalTypes);
@@ -330,6 +346,9 @@ struct checker_t {
     file_resolver_t resolver;
     config_resolver_t configs;
     Luau::Frontend frontend;
+    Luau::Mode mode;
+    // Whether the checker's mode and lint stand whatever a module's files say.
+    bool enforced = false;
     double seconds;
     std::vector<diagnostic_t> diagnostics;
     // The check that wanted files, which the next run of it goes on with, and the time its
@@ -378,19 +397,32 @@ private:
 
 // The heap's limit of every type function's VM, Luau's and the process's. A check's type functions
 // read it as they run, so each check holds this shared, and a checker that lowers it waits for
-// them.
-std::shared_mutex type_function_heap;
+// them. MinGW's winpthreads sets up a std::shared_mutex's lock on its first use, which fails for
+// some of the threads that first use it at once (a lock_shared that gives EINVAL, which a release
+// build passes over and then unlocks what it never held); so it's first used once, alone, under
+// the guard of the static that makes it.
+std::shared_mutex& type_function_heap() {
+    struct warmed_t {
+        std::shared_mutex mutex;
+        warmed_t() {
+            mutex.lock();
+            mutex.unlock();
+        }
+    };
+    static warmed_t made;
+    return made.mutex;
+}
 
 // Lowers the type functions' heap limit to `bytes`, where it's higher, or none.
 void limit_type_functions(int bytes) {
     {
-        const std::shared_lock reading(type_function_heap);
+        const std::shared_lock reading(type_function_heap());
         const int now = FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value;
         if (now > 0 && now <= bytes) {
             return;
         }
     }
-    const std::unique_lock writing(type_function_heap);
+    const std::unique_lock writing(type_function_heap());
     const int now = FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value;
     if (now <= 0 || now > bytes) {
         FInt::DebugLuauTypeFunctionRuntimeHeapLimit.value = bytes;
@@ -561,6 +593,22 @@ bool refused_type_functions(checker_t& checker) {
     return !found.empty();
 }
 
+// Gives each parsed module the checker's mode, and takes out its `--!` lines that would change
+// its mode or its lint, which the module's own .luaurc can't either.
+void enforce(checker_t& checker) {
+    for (const auto& [name, source] : checker.frontend.sourceModules) {
+        if (source == nullptr) {
+            continue;
+        }
+        source->mode = checker.mode;
+        std::erase_if(source->hotcomments, [](const Luau::HotComment& comment) {
+            return comment.header &&
+                   (comment.content == "strict" || comment.content == "nonstrict" ||
+                    comment.content == "nocheck" || comment.content.starts_with("nolint"));
+        });
+    }
+}
+
 // Runs the solver over what's queued, cancelled at what's left of the check's time limit, which
 // it takes from. Whether it finished in time, and the modules it checked.
 std::pair<bool, std::vector<Luau::ModuleName>> solved(checker_t& checker) {
@@ -598,6 +646,9 @@ int32_t check(checker_t& checker, const std::string& file) {
     }
     if (refused_type_functions(checker)) {
         return 0;
+    }
+    if (checker.enforced) {
+        enforce(checker);
     }
     checker.frontend.queueModuleCheck(file);
     std::pair<bool, std::vector<Luau::ModuleName>> result;
@@ -726,6 +777,21 @@ int32_t fbl_check_definitions(uint64_t checker, const uint8_t* text, int64_t len
     return fbl::escaped();
 }
 
+int32_t fbl_check_enforce(uint64_t checker, int32_t enforced) try {
+    const using_t used(checker);
+    checker_t* found = used.get();
+    if (found == nullptr) {
+        return FBL_MISUSE;
+    }
+    found->enforced = enforced != 0;
+    found->configs.enforce(found->enforced);
+    // What was checked before was checked by other rules.
+    found->frontend.clear();
+    return FBL_OK;
+} catch (...) {
+    return fbl::escaped();
+}
+
 int32_t fbl_check_give(uint64_t checker, const char* path, const uint8_t* text, int64_t length,
                        int32_t present) try {
     const using_t used(checker);
@@ -787,7 +853,7 @@ int32_t fbl_check_run(uint64_t checker, const char* module) try {
         fbl::fail(fbl::formatted("'{}' isn't a module's path from the root", *path));
         return -1;
     }
-    const std::shared_lock running(type_function_heap);
+    const std::shared_lock running(type_function_heap());
     found->files.clear_wanted();
     found->diagnostics.clear();
     // A run of another module, or of one whose check finished, starts its own time limit.
