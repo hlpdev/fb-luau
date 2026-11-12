@@ -573,3 +573,20 @@ Function AnAsyncFunctionIsntCalledPastTheWaitsLimit() Throws LuauError
     lua.Close()
     ExpectThrows<LuauError>(waits.Wait())
 End Function
+
+@Test
+Function ACallsKeptErrorsAreCappedByBytesToo() Throws LuauError
+    // 64 errors of the State's size would be 64 times its limit: a megabyte of them is kept.
+    Local options = LuauOptions()
+    options.MemoryLimit = 8 * 1024 * 1024
+    Local lua = Try LuauState(options)
+    Local count = 0
+    Try lua.SetFunction("forEach", Function(f: LuauFunction) Throws Error
+        Try f.Invoke()
+    End Function)
+    Local before = LuauProcessMemory()
+    Try lua.Run("local big = string.rep('x', 2^20) " +
+                "for i = 1, 64 do pcall(forEach, function() error(big .. i, 0) end) end")
+    Expect(LuauProcessMemory() - before < 32 * 1024 * 1024, "the kept errors grew")
+    Expect(count == 0)
+End Function

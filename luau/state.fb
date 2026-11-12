@@ -122,6 +122,9 @@ Public Struct LuauOptions
     Public Field MostWaiting: Int = 10000
 End Struct
 
+/// The most bytes of text a State keeps of errors, raised in one call or waiting for ThreadError.
+Const MostErrorBytes: Int64 = 1024 * 1024
+
 /// A Luau VM of the program's own, which runs scripts. It stays on the thread that made it, as
 /// every Class's objects do, and two States share nothing. It closes when nothing refers to it,
 /// or at [Close]. Its handles, like a [LuauFunction], hold it weakly, so they don't keep it open,
@@ -857,8 +860,17 @@ Public Class LuauState
 
     /// Keeps an error that ended a thread nothing waits for, the most recent 64, for Report.
     Package Method Failed(error: LuauError)
-        If Failures.Count >= 64 Then Failures.RemoveAt(0)
         Failures.Add(error)
+        // The most recent 64, and 1 MB of their text, the oldest dropped.
+        Local bytes: Int64 = 0
+        For kept In Failures
+            bytes += (kept.Message.Bytes.Count + kept.Traceback.Bytes.Count) As Int64
+        End For
+        While Failures.Count > 64 || (bytes > MostErrorBytes && Failures.Count > 1)
+            Local oldest = Failures[0]
+            bytes -= (oldest.Message.Bytes.Count + oldest.Traceback.Bytes.Count) As Int64
+            Failures.RemoveAt(0)
+        End While
     End Method
 
     /// Gives ThreadError the errors kept, once no call runs, nor a driver's turn.
@@ -877,10 +889,17 @@ Public Class LuauState
     Package Method Kept(message: String, error: Error)
         If !Raised.Contains(message) Then RaisedOrder.Add(message)
         Raised[message] = error
-        If RaisedOrder.Count > 64
+        // The most recent 64, and 1 MB of their messages, the oldest dropped, which loses only
+        // its Cause.
+        Local bytes: Int64 = 0
+        For kept In RaisedOrder
+            bytes += kept.Bytes.Count As Int64
+        End For
+        While RaisedOrder.Count > 64 || (bytes > MostErrorBytes && RaisedOrder.Count > 1)
+            bytes -= RaisedOrder[0].Bytes.Count As Int64
             Raised.Remove(RaisedOrder[0])
             RaisedOrder.RemoveAt(0)
-        End If
+        End While
     End Method
 
     /// T's registration, if it has one.
