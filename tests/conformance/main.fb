@@ -11,6 +11,7 @@ Import std.collections
 Import std.core
 Import std.os
 Import std.text
+Import std.time
 Import luau
 
 // The scripts, as they are in Luau's repository.
