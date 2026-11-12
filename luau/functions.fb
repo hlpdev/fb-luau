@@ -6,7 +6,8 @@ Import "./errors"
 Import "./state"
 Import "./values"
 
-/// A Luau function the program holds, which keeps it, and its State, alive until it goes.
+/// A Luau function the program holds, which keeps it alive in its State until it goes. It holds
+/// the State weakly: the State closes when nothing else refers to it, and the handle then panics.
 ///
 /// # Examples
 ///

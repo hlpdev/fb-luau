@@ -10,7 +10,8 @@ Import "./library"
 Import "./state"
 Import "./values"
 
-/// A Luau table the program holds, which keeps it, and its State, alive until it goes. Its keys
+/// A Luau table the program holds, which keeps it alive in its State until it goes; it holds the
+/// State weakly, as every handle does, so the State closes when nothing else refers to it. Its keys
 /// and values are any [LuauType]: Get and Set read and write it as a script does, through its
 /// metatable, and RawGet and RawSet without it, as rawget and rawset do.
 ///

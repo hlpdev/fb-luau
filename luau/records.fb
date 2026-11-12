@@ -3,6 +3,8 @@
 
 Import std.core
 Import std.text
+Import "./buffers"
+Import "./c/fbl_buffer"
 Import "./c/fbl_frame"
 Import "./c/fbl_table"
 Import "./errors"
@@ -14,7 +16,9 @@ Import "./values"
 /// Save: listing it is all a Struct or Class needs, and what Load and Save take, a T?, a T[], a
 /// Map, an Enum by its name, another record, and std's attributes, like `@Rename`, `@Skip`, and
 /// `@Strict`, its Fields can have. A Field the table hasn't is its default, or its zero, as Load
-/// has it. A record is data: a Field of a handle, like a LuauTable, isn't one Load takes.
+/// has it. A record is data: a Field of a handle, like a LuauTable, isn't one Load takes. A
+/// `UInt8[]` Field is a Luau buffer, both ways; a string where one is wanted is read as std's
+/// base64, as Load reads text for bytes.
 ///
 /// A Luau table is an array when its keys are 1 to its length, an Object when they're strings,
 /// and an empty one is whichever its Field is.
@@ -84,6 +88,8 @@ Package Function ValueAt(slots: LuauSlots, index: Int32): Value Throws LuauError
             Return Value(slots.IntegerAt(index))
         Case FBL_TYPE_STRING
             Return Value(Try String.FromLuau(slots, index))
+        Case FBL_TYPE_BUFFER
+            Return Value((Try LuauBuffer.FromLuau(slots, index)).ToArray())
         Case FBL_TYPE_TABLE
             Return Try TableAt(Try slots.Deeper(), index)
         Default
@@ -166,7 +172,10 @@ Package Function PushValue(slots: LuauSlots, data: Value) Throws LuauError
         Case ValueKind.STRING
             Try String.ToLuau(slots, data.AsString() ?? "")
         Case ValueKind.BYTES
-            Try slots.PushBytes(data.AsBytes() ?? [])
+            // A record's bytes are a buffer in Luau, as a string would come back as std's base64.
+            Local bytes = data.AsBytes() ?? []
+            Try slots.Owner.Check(fbl_buffer_new(handle, slots.Frame, bytes.Count))
+            (Try LuauBuffer.FromLuau(slots, slots.Count() - 1)).Write(0, bytes)
         Case ValueKind.ARRAY
             Local deeper = Try slots.Deeper()
             Local items = data.AsArray() ?? []

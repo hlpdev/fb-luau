@@ -162,3 +162,24 @@ Function ATableOfItemsAndKeysIsntData() Throws LuauError
         r"return { Name = 'rat', Kind = 'RAT', Tags = { 'a', nil, 'c' } }"))
     Expect(holes != Null && holes.Kind == LuauErrorKind.CONVERSION)
 End Function
+
+Struct Blob Implements LuauRecord
+    Field Data: UInt8[]
+End Struct
+
+@Test
+Function ARecordsBytesAreABufferBothWays() Throws LuauError
+    Local lua = LuauState()
+    Local every: UInt8[] = []
+    For byte = 0 To 255
+        every.Add(byte As UInt8)
+    End For
+    Try lua.Set("blob", Blob(every))
+    Expect(Try lua.Evaluate<String>("return typeof(blob.Data)") == "buffer")
+    Expect(Try lua.Evaluate<Int>("return buffer.readu8(blob.Data, 255)") == 255)
+    Local back = Try lua.Evaluate<Blob>("return blob")
+    Expect(back.Data == every)
+    // A string where bytes are wanted is base64, as Load reads it.
+    Local text = Try lua.Evaluate<Blob>(r"return { Data = 'YWJj' }")
+    Expect(text.Data == [97 As UInt8, 98, 99])
+End Function

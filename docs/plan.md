@@ -353,13 +353,16 @@ while the script holds it, however many times it crosses, and goes when neither 
 - When Luau's collector frees the userdata, its destructor queues the id; it can't release the
   object there, since the object's `Destroy` could call into Luau, which a destructor mustn't.
   The queue is drained, and its objects let go of, as each call into the State returns to
-  FutureBlitz, and at `Collect()`.
+  FutureBlitz, and at `Collect()` and `Step()` when no call is running. There's room in it for
+  every id not yet taken and every one live, kept as each userdata is made.
 - A handle to a Luau value, like a `LuauTable`, is a reference in Luau's registry, released in
   its Destroy.
 - A cycle across the edge, an object that holds a `LuauTable` that holds the object's userdata,
   isn't seen by either collector, so it lives until the State closes, when the State lets go of
   everything. That's the one leak this design can have, and the guide says how to avoid it:
-  hold a `Weak<T>` in the table's place, or a key, not the handle.
+  hold a `Weak<T>` in the table's place, or a key, not the handle. An object that holds its
+  State strongly keeps a State the program dropped without closing open while a script has the
+  object, for the same reason.
 - A function given to Luau that captures the State strongly keeps it alive the same way, through
   the State's own map of the program's functions; one that captures `[Weak lua]` doesn't. A
   handle holds its State weakly, so a function that holds a handle doesn't.

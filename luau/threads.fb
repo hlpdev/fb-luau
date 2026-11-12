@@ -31,8 +31,8 @@ Public Enum LuauThreadStatus
     FAILED
 End Enum
 
-/// A Luau thread, a coroutine, that the program holds, which keeps it, and its State, alive until
-/// it goes. [Start] runs it on the scheduler, as an Async Function runs, so its `task.wait(2)`
+/// A Luau thread, a coroutine, that the program holds, which keeps it alive in its State until it
+/// goes; it holds the State weakly, as every handle does. [Start] runs it on the scheduler, as an Async Function runs, so its `task.wait(2)`
 /// waits as an `Await Wait(2.Seconds)` does; `Resume` drives it by hand, as `coroutine.resume`
 /// does.
 ///

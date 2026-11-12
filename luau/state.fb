@@ -102,7 +102,8 @@ End Struct
 
 /// A Luau VM of the program's own, which runs scripts. It stays on the thread that made it, as
 /// every Class's objects do, and two States share nothing. It closes when nothing refers to it,
-/// or at [Close], and its handles, like a [LuauFunction], keep it until they go.
+/// or at [Close]. Its handles, like a [LuauFunction], hold it weakly, so they don't keep it open,
+/// and panic once it's closed.
 ///
 /// # Examples
 ///
