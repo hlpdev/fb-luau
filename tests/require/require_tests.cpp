@@ -315,3 +315,15 @@ TEST_CASE("a memory error at any point after a placeholder's made clears it, fro
     }
     CHECK(lua.run("assert(require('./a').x == 1)", "@main.luau") == FBL_OK);
 }
+
+TEST_CASE("a require's parts are counted with backslashes as separators") {
+    files_of() = { { "x.luau", "return 1" } };
+    const require_state_t lua;
+    std::string path = "./x";
+    for (int part = 0; part < 64; part++) {
+        path += "\a";
+    }
+    const int32_t status = lua.run("require('" + path + "')", "@main.luau");
+    CHECK(status == FBL_RUNTIME);
+    CHECK(lua.error_message().contains("64 parts"));
+}

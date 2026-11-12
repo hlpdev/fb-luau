@@ -142,7 +142,10 @@ bool is_require_allowed(lua_State* stack, void* context, const char* /*requirer*
     const char* path = lua_tolstring(stack, 1, &length);
     if (path != nullptr) {
         const std::string_view given(path, length);
-        const size_t parts = static_cast<size_t>(std::ranges::count(given, '/')) + 1;
+        // A backslash is a separator to the walk too, so it's counted as one.
+        const size_t parts = static_cast<size_t>(std::ranges::count_if(
+                                 given, [](char each) { return each == '/' || each == '\\'; })) +
+                             1;
         if (length > fbl::most_path_bytes || parts > fbl::most_path_parts) {
             luaL_error(stack, "a require's path is at most %d parts and %d bytes",
                        static_cast<int>(fbl::most_path_parts),
