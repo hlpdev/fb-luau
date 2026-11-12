@@ -231,6 +231,11 @@ private:
 // yield to anything that waits.
 bool is_runner(lua_State* thread) noexcept;
 
+// Whether the thread `co` is of the caller's environment: its main function's environment, as a
+// coroutine's is its function's, is the nearest Luau function's calling on `stack`; true when no
+// script's code calls, or the thread's main function is C, as the program's are.
+bool is_callers_thread(lua_State* stack, lua_State* co);
+
 // Marks a thread as one that runs to its end, as a runner does, like a module's as it loads.
 void mark_runner(lua_State* thread) noexcept;
 
