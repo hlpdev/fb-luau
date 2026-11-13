@@ -129,6 +129,62 @@ TEST_CASE("bit32's shifts by the ends of an int give numbers") {
     CHECK(status == FBL_OK);
 }
 
+TEST_CASE("os.time and os.date at the ends of an int give the same answer each time") {
+    // Luau's os_time takes 1 from a script's month and 1900 from its year, its os_timegm adds
+    // and multiplies them as ints, and os_date adds 1900 to gmtime's year, which overflow at the
+    // ends of an int; loslib.cpp is built with -fwrapv, so each is defined (cmake/luau.cmake).
+    const test_state_t lua;
+    const int32_t status =
+        lua.run("local function same(f, ...)\n"
+                "    local a, b = f(...), f(...)\n"
+                "    assert(a == nil or type(a) == 'number' or type(a) == 'table')\n"
+                "    assert(type(a) == type(b))\n"
+                "    if type(a) == 'table' then assert(a.year == b.year and a.day == b.day)\n"
+                "    else assert(a == b) end\n"
+                "end\n"
+                "for _, field in { 'year', 'month', 'day', 'hour', 'min', 'sec' } do\n"
+                "    for _, value in { -2147483648, 2147483647 } do\n"
+                "        local date = { year = 2000, month = 1, day = 1 }\n"
+                "        date[field] = value\n"
+                "        same(os.time, date)\n"
+                "    end\n"
+                "end\n"
+                "-- A time whose year is past an int's largest less 1900.\n"
+                "same(os.date, '!*t', 67767987341548800)\n");
+    INFO(lua.error_message());
+    CHECK(status == FBL_OK);
+}
+
+TEST_CASE("Luau's libraries given the ends of an int give the same answer each time") {
+    // Each call has Luau add to or take from a script's int, past an int's ends: table.concat's
+    // index less 1, table.find's next index, buffer.copy's and buffer.fill's sizes, utf8.codes'
+    // and ipairs' iterators' next, and bit32's negated counts and fields. Their files are built
+    // with -fwrapv, so each is defined (cmake/luau.cmake).
+    const test_state_t lua;
+    const int32_t status =
+        lua.run("local function same(f, ...)\n"
+                "    local a = table.pack(pcall(f, ...))\n"
+                "    local b = table.pack(pcall(f, ...))\n"
+                "    assert(a.n == b.n)\n"
+                "    for i = 1, a.n do assert(a[i] == b[i], tostring(a[i])) end\n"
+                "end\n"
+                "local low, high = -2147483648, 2147483647\n"
+                "same(table.concat, {}, '', low, low)\n"
+                "local t = {}\n"
+                "t[high] = 1\n"
+                "same(table.find, t, 0, high)\n"
+                "local b = buffer.create(4)\n"
+                "same(buffer.copy, b, 0, b, low)\n"
+                "same(buffer.copy, b, 0, b, low, 1)\n"
+                "same(buffer.fill, b, low, 0)\n"
+                "same(utf8.codes('x'), 'x', low)\n"
+                "same(ipairs({}), {}, high)\n"
+                "same(bit32.rrotate, 1, low)\n"
+                "same(bit32.arshift, 0x80000000, low)\n");
+    INFO(lua.error_message());
+    CHECK(status == FBL_OK);
+}
+
 TEST_CASE("a yield where nothing can wait for it is an error") {
     const test_state_t lua;
     CHECK(lua.run("coroutine.yield(1)") == FBL_YIELD);

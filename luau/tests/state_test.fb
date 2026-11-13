@@ -202,6 +202,42 @@ Function Bit32sShiftsByTheEndsOfAnIntGiveNumbers() Throws LuauError
 End Function
 
 @Test
+Function OsTimeAndDateAtTheEndsOfAnIntGiveTheSameAnswerEachTime() Throws LuauError
+    // Luau's os_time and os_date add and take from a script's ints, which overflow at the ends
+    // of one; loslib.cpp is built with -fwrapv, so each is defined.
+    Try LuauState().Run(r"local function same(f, ...) " +
+                        r"local a, b = f(...), f(...) " +
+                        r"assert(a == nil or type(a) == 'number' or type(a) == 'table') " +
+                        r"assert(type(a) == type(b)) " +
+                        r"if type(a) == 'table' then assert(a.year == b.year and a.day == b.day) " +
+                        r"else assert(a == b) end end " +
+                        r"for _, field in { 'year', 'month', 'day', 'hour', 'min', 'sec' } do " +
+                        r"for _, value in { -2147483648, 2147483647 } do " +
+                        r"local date = { year = 2000, month = 1, day = 1 } " +
+                        r"date[field] = value same(os.time, date) end end " +
+                        r"same(os.date, '!*t', 67767987341548800)")
+End Function
+
+@Test
+Function LuausLibrariesGivenTheEndsOfAnIntGiveTheSameAnswerEachTime() Throws LuauError
+    // Each has Luau add to or take from a script's int past an int's ends; their files are built
+    // with -fwrapv, so each is defined.
+    Try LuauState().Run(r"local function same(f, ...) " +
+                        r"local a = table.pack(pcall(f, ...)) " +
+                        r"local b = table.pack(pcall(f, ...)) " +
+                        r"assert(a.n == b.n) " +
+                        r"for i = 1, a.n do assert(a[i] == b[i], tostring(a[i])) end end " +
+                        r"local low, high = -2147483648, 2147483647 " +
+                        r"same(table.concat, {}, '', low, low) " +
+                        r"local t = {} t[high] = 1 same(table.find, t, 0, high) " +
+                        r"local b = buffer.create(4) " +
+                        r"same(buffer.copy, b, 0, b, low) same(buffer.copy, b, 0, b, low, 1) " +
+                        r"same(buffer.fill, b, low, 0) " +
+                        r"same(utf8.codes('x'), 'x', low) same(ipairs({}), {}, high) " +
+                        r"same(bit32.rrotate, 1, low) same(bit32.arshift, 0x80000000, low)")
+End Function
+
+@Test
 Function StepHasAndAScriptsName() Throws LuauError
     Local lua = LuauState()
     Try lua.Run(r"made = {}")

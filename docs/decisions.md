@@ -664,3 +664,28 @@ Written while the PC was kept free for the user: none of it built or run until t
   Method meets, not a line that picks, so Register fails for any type with one; nothing says "not
   a `T?`". And arguments would need a loop for each mix of T and `T?`, 2^n a shape. So it isn't
   done; the program went to the fb lane (fbengine-notes/luau/loop_nullable_result.fb).
+
+## 0.1.2, finding 141 from the nightly stability run (2026-11-13)
+
+- **Luau's libraries that overflow a script's ints are built with -fwrapv (141):** the load
+  fuzzer found Luau 0.746's os_time taking 1 from a script's month of -2147483648
+  (VM/src/loslib.cpp:193). The coordinator decided what a script gets is to be defined in what
+  ships, not only quiet under the sanitizer, so loslib.cpp is built with `-fwrapv` in every
+  build, and 139's lbitlib.cpp too, in place of its `-fno-sanitize=signed-integer-overflow`; its
+  `-fno-sanitize=shift` stays, as a shift by a count still out of range isn't defined by
+  `-fwrapv`. Both GCC 15 and Clang 19, CI's, report no signed overflow under `-fwrapv`, checked
+  with a small program in WSL, so no `-fno-sanitize` is wanted for it. A read of the libraries
+  a sandboxed script calls found the same kind in ltablib.cpp (table.concat's first index less 1,
+  :307; table.find's next index, :645), lbuflib.cpp (buffer.copy's and fill's default sizes,
+  computed even when a size is given, :257, :278), lutf8lib.cpp (utf8.codes' iterator, :244),
+  lbaselib.cpp (ipairs' iterator, :241), more of lbitlib.cpp (:73, :107, :137, :152), and more of
+  loslib.cpp (os_timegm, :37 to :40; os_date's year, :142); each file is built the same way. The
+  same in ltable.cpp's luaH_rawfind (:419), which table.find calls in place of its own loop with
+  Luau's LuauTableFindImprovement, one of the flags the shim turns on, so ltable.cpp, the VM's
+  tables, is built with `-fwrapv` too; it costs the compiler only the int loops it could widen
+  assuming no overflow.
+  Read and found sound: lintlib, lstrlib, the rest of ltablib, lutf8lib, and lbuflib, lmathlib,
+  the rest of lbaselib, lcorolib, lveclib, and os.difftime. A C++ test and a package test call
+  os.time with each field at both ends of an int and os.date at a year past an int's, and
+  another pair calls each of the others, each twice for the same answer; the crash input is in
+  the load fuzzer's corpus. Telling Luau's maintainers is the user's to decide, as with 139.

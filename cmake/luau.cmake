@@ -43,15 +43,34 @@ foreach(library IN LISTS fbl_luau_libraries)
     target_compile_options(${library} PRIVATE -fno-sanitize=float-cast-overflow)
   endif()
 endforeach()
-# Luau's b_rshift (VM/src/lbitlib.cpp:99, Luau 0.746) negates its count, and a script's
-# bit32.rshift(x, -2147483648), lshift's, or arshift's has it negate INT_MIN, which compilers
-# wrap; b_shift then negates it again (:73) and, unoptimized, shifts by what's still negative
-# (:78), which the processor takes modulo 32. The script gets a number either way; UBSan's
-# signed-integer-overflow and shift-exponent call it undefined. Luau's source isn't patched, so
-# those checks are off for that file alone, shift's whole, as GCC 15 keeps checking an exponent
-# with shift-exponent alone off; they stay on for the rest of Luau and for the shim.
+# Luau's source isn't patched where a script's ints overflow in it (Luau 0.746, findings 139 and
+# 141); these files are built with -fwrapv, in every build, so what the script gets is defined, a
+# wrapped int, and UBSan's signed-integer-overflow, GCC's and Clang's, has nothing there to report:
+# - loslib.cpp: os_time takes 1 from a script's month and 1900 from its year (:193, :194),
+#   os_timegm adds and multiplies them (:37 to :40), and os_date adds 1900 to gmtime's year
+#   (:142): os.time({ month = -2147483648, ... }).
+# - lbitlib.cpp: b_rshift and b_rrot negate a count (:99, :137), b_arshift and b_shift negate it
+#   again (:107, :73), so bit32.rshift(x, -2147483648) negates INT_MIN, and fieldargs adds a
+#   field and its width (:152).
+# - ltablib.cpp: table.concat takes 1 from its first index (:307), and table.find's loop goes past
+#   an index of 2147483647 (:645), as ltable.cpp's luaH_rawfind does (:419), which table.find
+#   calls instead with LuauTableFindImprovement, one of the flags the shim turns on.
+# - lbuflib.cpp: buffer.copy's and buffer.fill's sizes take an offset from a length (:257, :278),
+#   given a size or not.
+# - lutf8lib.cpp: utf8.codes' iterator takes 1 from what it's given (:244).
+# - lbaselib.cpp: ipairs' iterator adds 1 to what it's given (:241).
+# What follows a wrapped count in lbitlib.cpp, a shift by a negative or by more than 31 (:78, and
+# b_extract's and b_replace's by a wrapped field, :163, :176), -fwrapv doesn't define; the
+# processor takes it modulo 32. So UBSan's shift checks are off for that file alone in the
+# sanitizers' builds, the whole group, as GCC 15 keeps checking an exponent with shift-exponent
+# alone off. The checks stay on for the rest of Luau and for the shim.
+set(fbl_luau_wrapped loslib lbitlib ltablib ltable lbuflib lutf8lib lbaselib)
+list(TRANSFORM fbl_luau_wrapped PREPEND "${luau_SOURCE_DIR}/VM/src/")
+list(TRANSFORM fbl_luau_wrapped APPEND ".cpp")
+set_source_files_properties(${fbl_luau_wrapped} TARGET_DIRECTORY Luau.VM
+                            PROPERTIES COMPILE_OPTIONS "-fwrapv")
 if(FBL_SANITIZE MATCHES "undefined")
-  set_source_files_properties(
-    "${luau_SOURCE_DIR}/VM/src/lbitlib.cpp" TARGET_DIRECTORY Luau.VM
-    PROPERTIES COMPILE_OPTIONS "-fno-sanitize=signed-integer-overflow,shift")
+  set_property(
+    SOURCE "${luau_SOURCE_DIR}/VM/src/lbitlib.cpp" TARGET_DIRECTORY Luau.VM APPEND
+    PROPERTY COMPILE_OPTIONS "-fno-sanitize=shift")
 endif()

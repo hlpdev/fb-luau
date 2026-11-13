@@ -512,6 +512,14 @@ Try doors.Run(source, "@mods/doors/init.luau")
 - Deep recursion: Luau stops its own at 200 C calls; the package stops a call that goes from
   FutureBlitz into Luau and back more than 64 times deep, with `RUNTIME`, before the native
   stack runs out.
+- Luau's own bugs, known: Luau 0.746's libraries do arithmetic on a script's ints that can go
+  past an int's ends, in `os.time` and `os.date`, `bit32`'s counts and fields, `table.concat`
+  and `table.find`, `buffer.copy` and `buffer.fill`, and the iterators of `utf8.codes` and
+  `ipairs` (findings 139 and 141). Luau's source isn't patched; those seven files are built with
+  `-fwrapv`, so the int wraps and the script gets a number, nil, or an error, the same each
+  time. A shift by a count that's still out of range after it, in `bit32`'s, isn't defined by
+  that either; the processor takes it modulo 32. Double to int conversions of a script's
+  numbers out of range are Luau's design, and keep what the processor gives.
 
 ### require
 
