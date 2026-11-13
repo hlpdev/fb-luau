@@ -4,7 +4,7 @@ Import luau
 
 @Test
 Function TheLibraryIsThePackagesVersion()
-    Expect(LuauLibraryVersion() == "0.1.1")
+    Expect(LuauLibraryVersion() == "0.1.2")
 End Function
 
 @Test
