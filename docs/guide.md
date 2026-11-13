@@ -67,6 +67,27 @@ Local any = Try lua.Evaluate<LuauValue>("return 'hi'")
 Expect(any.Kind == LuauValueKind.STRING && any.AsString() == "hi")
 ```
 
+A `T?` doesn't cross yet, as FutureBlitz can't give it `LuauType`. A function of the program's
+that gives something or nil gives a `LuauValue`, made by `LuauValue.Of(lua, value)` or
+`LuauValue.Nil(lua)`, which need the State, so the function captures it `[Weak lua]`, as an
+object the State keeps holds it weakly.
+
+```vb
+Import std.test
+Import luau
+
+Local lua = LuauState()
+Local names = ["hall", "vault"]
+Try lua.SetFunction("door", Function[Weak lua](number: Int): LuauValue Throws LuauError
+    Local held = lua
+    If held == Null Then Throw LuauError(LuauErrorKind.CLOSED, "the Luau State is closed")
+    If number < 1 || number > names.Count Then Return LuauValue.Nil(held)
+    Return Try LuauValue.Of(held, names[number - 1])
+End Function)
+Expect(Try lua.Evaluate<String>("return door(2)") == "vault")
+Expect(Try lua.Evaluate<Bool>("return door(3) == nil"))
+```
+
 A Struct or Class that lists `LuauRecord` crosses as a table of its Fields, by name, both ways:
 
 ```vb

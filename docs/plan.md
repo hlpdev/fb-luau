@@ -167,10 +167,13 @@ which keeps it alive in the VM until the handle goes.
   takes.
 - `LuauValue` is any value, its `Kind` known as the program runs: a nil, boolean, number,
   integer, or string copied, and anything else kept as a handle is, with `AsBool()`,
-  `AsNumber()`, `AsString()`, and the rest, and `Read<T>()`.
+  `AsNumber()`, `AsString()`, and the rest, and `Read<T>()`. `LuauValue.Nil(lua)` and
+  `LuauValue.Of(lua, value)` make one of the program's, for a function that gives one type or
+  another, or nil.
 - Nullables and tuples: `GetOrNull<T>` gives a `T?`, Null for nil, and `Call2<A, B>` and its
-  kin give results as tuples, since a `T?` and a tuple can't implement `LuauType` yet; a record's
-  Field can be a `T?`.
+  kin give results as tuples, since a `T?` and a tuple can't implement `LuauType` yet (fb
+  refuses an Extend of a `T?`, finding 140); a record's Field can be a `T?`, and a function that
+  gives something or nil gives a `LuauValue`.
 
 ### Globals and tables
 

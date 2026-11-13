@@ -57,3 +57,26 @@ Function AValueOfAnyTypeIsReadAndGivenBack() Throws LuauError
     Expect(Try values[3].Read<LuauTable>().Length() == 0)
     Expect((Try lua.Evaluate<LuauValue>("return nil")).IsNil)
 End Function
+
+@Test
+Function AValueOfTheProgramsIsMadeALuauValue() Throws LuauError
+    Local lua = LuauState()
+    Local none = LuauValue.Nil(lua)
+    Expect(none.IsNil && "{none}" == "nil")
+    Expect(Try none.Read<LuauNil>() == LuauNil())
+    Local count = Try LuauValue.Of(lua, 3)
+    Expect(count.Kind == LuauValueKind.NUMBER && Try count.Read<Int>() == 3)
+    Expect(Try LuauValue.Of(lua, "door").AsString() == "door")
+    Expect(Try LuauValue.Of(lua, False).AsBool() == False)
+    Expect(Try LuauValue.Of(lua, LuauInteger(9007199254740993)).AsInteger() == 9007199254740993)
+    Local kept = Try LuauValue.Of(lua, Try lua.NewTable([1, 2, 3]))
+    Expect(kept.Kind == LuauValueKind.TABLE && Try kept.Read<LuauTable>().Length() == 3)
+    // Each goes back to Luau as it was made.
+    Try lua.Set("none", none)
+    Try lua.Set("count", count)
+    Try lua.Set("kept", kept)
+    Expect(Try lua.Evaluate<Bool>("return none == nil and count == 3 and #kept == 3"))
+    // What Set refuses, Of does.
+    Expect(ExpectThrows<LuauError>(LuauValue.Of(lua, 9007199254740993 As Int64))?.Kind ==
+           LuauErrorKind.CONVERSION)
+End Function

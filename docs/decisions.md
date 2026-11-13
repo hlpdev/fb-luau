@@ -642,3 +642,25 @@ Written while the PC was kept free for the user: none of it built or run until t
   decided, for the same input on the same path. A C++ test and a package test shift by
   -2147483648 and 2147483647 with rshift, lshift, and arshift, and the crash input is in the
   bytecode fuzzer's corpus. Telling Luau's maintainers is the user's to decide.
+
+## 0.1.2, finding 140 from the game (2026-11-13)
+
+- **A `T?` isn't a LuauType yet (140):** the game wanted a marked Method to give an item or nil.
+  The coordinator decided `T?` is a LuauType wherever T is one, but FutureBlitz 1.3.3 and 1.3.4
+  refuse an Extend of a `T?`, generic or of one type, so it can't implement LuauType's Statics,
+  and nothing in the package works around it; the program that shows it went to the fb lane
+  (fbengine-notes/luau/extend_nullable.fb). Definitions already writes a type name ending in `?`
+  as Luau's `T?`, so it says so once one can cross.
+- **`LuauValue.Nil(lua)` and `LuauValue.Of(lua, value)` (140):** meanwhile a program makes a
+  LuauValue of its own: Nil a nil of the State's, and Of any LuauType's value as Luau would have
+  it, through a frame of its own, so a value Luau keeps, a table or an object, is kept in that
+  State. A function of the program's that gives an item or nil gives a LuauValue, which
+  Definitions declares `any`. Of needs the State, so an object the State keeps that makes one
+  holds its State weakly, as the package's handles do, or the two keep each other.
+- **Register doesn't take the `?` off a marked Method's `T?` either (140):** the coordinator asked
+  whether the bindings could, with no Interface on `T?`. A typed For Method loop over
+  `Func(): R?` does bind R to the T, but the loop beside it over `Func(): R`, which each shape
+  has, takes the same Method with R a `T?`, and its `Where R: LuauType` is a constraint each
+  Method meets, not a line that picks, so Register fails for any type with one; nothing says "not
+  a `T?`". And arguments would need a loop for each mix of T and `T?`, 2^n a shape. So it isn't
+  done; the program went to the fb lane (fbengine-notes/luau/loop_nullable_result.fb).

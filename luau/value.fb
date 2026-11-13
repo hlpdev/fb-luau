@@ -142,6 +142,52 @@ Public Class LuauValue Implements LuauType, Printable
         End Select
     End Method
 
+    /// A nil of `lua`'s, as a script's nil would be: what a function of the program's gives for
+    /// "nothing" where its result is a LuauValue.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # Import luau
+    /// Local lua = LuauState()
+    /// Expect(LuauValue.Nil(lua).IsNil)
+    /// Try lua.Set("item", LuauValue.Nil(lua))
+    /// Expect(Try lua.Evaluate<Bool>("return item == nil"))
+    /// ```
+    Public Static Method Nil(lua: LuauState): LuauValue
+        Return LuauValue(LuauValueKind.NIL, lua, False, 0, 0, [], 0)
+    End Method
+
+    /// `value` as a LuauValue of `lua`'s, as Luau would have it once it's given: what a function
+    /// of the program's gives where its result is a LuauValue, one type or another.
+    ///
+    /// # Errors
+    ///
+    /// A LuauError of CONVERSION when `value` can't be given, as `lua.Set` would say, or of
+    /// MEMORY when `lua` has no room for it.
+    ///
+    /// # Panics
+    ///
+    /// Once `lua` is closed, or for a handle of another State's.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # Import luau
+    /// Local lua = LuauState()
+    /// Local count = Try LuauValue.Of(lua, 3)
+    /// Expect(count.Kind == LuauValueKind.NUMBER && Try count.Read<Int>() == 3)
+    /// Expect(Try LuauValue.Of(lua, "door").AsString() == "door")
+    /// ```
+    @PanicsAtCaller
+    Public Static Method Of<T: LuauType>(lua: LuauState, value: T): LuauValue Throws LuauError
+        Local frame = lua.Opened()
+        Defer lua.Closed(frame)
+        Local slots = LuauSlots(lua, frame)
+        Try T.ToLuau(slots, value)
+        Return Try FromLuau(slots, 0)
+    End Method
+
     /// Whether it's nil.
     Public Property IsNil: Bool
         Get => Kind == LuauValueKind.NIL

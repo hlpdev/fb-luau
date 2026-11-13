@@ -192,3 +192,13 @@ Function AnInfiniteKeyIsntAnItemsIndex() Throws LuauError
         r"return { Name = 'rat', Kind = 'RAT', Tags = { [math.huge] = 'x' } }"))
     Expect(error != Null && error.Kind == LuauErrorKind.CONVERSION)
 End Function
+
+@Test
+Function ARecordIsMadeALuauValue() Throws LuauError
+    Local lua = LuauState()
+    Local value = Try LuauValue.Of(lua, Drop("tail", 0.5))
+    Expect(value.Kind == LuauValueKind.TABLE)
+    Expect(Try value.Read<Drop>() == Drop("tail", 0.5))
+    Try lua.Set("drop", value)
+    Expect(Try lua.Evaluate<String>("return drop.Item") == "tail")
+End Function

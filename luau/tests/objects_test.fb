@@ -267,3 +267,38 @@ Function EachObjectHasAUserdataOfItsOwnWhateverItsEqualsSays() Throws LuauError
     Try lua.Set("again", a)
     Expect(Try lua.Evaluate<Bool>("return rawequal(kept, again)"))
 End Function
+
+/// An event that has an item, or none, which it gives a script as the item or nil. It holds its
+/// State weakly, as the State holds it.
+Class Pickup Implements LuauObject
+    Field Lua: Weak<LuauState>
+    Field Held: Player? = Null
+
+    New(lua: LuauState)
+        Lua = lua
+    End New
+
+    @LuauGet Method Item(): LuauValue Throws LuauError
+        Local lua: LuauState? = Lua
+        If lua == Null Then Throw LuauError(LuauErrorKind.CLOSED, "the Luau State is closed")
+        Local held = Held
+        If held == Null Then Return LuauValue.Nil(lua)
+        Return Try LuauValue.Of(lua, held)
+    End Method
+End Class
+
+@Test
+Function AnExposedMethodGivesSomethingOrNilAsALuauValue() Throws LuauError
+    Local lua = LuauState()
+    Try lua.Register<Player>()
+    Try lua.Register<Pickup>()
+    Local pickup = Pickup(lua)
+    Try lua.Set("pickup", pickup)
+    Expect(Try lua.Evaluate<Bool>("return pickup.Item == nil"))
+    Local player = Player()
+    pickup.Held = player
+    Expect(Try lua.Evaluate<String>("return pickup.Item.name") == "ada")
+    Expect(RefEquals(Try lua.Evaluate<Player>("return pickup.Item"), player))
+    // A LuauValue is any type, so the checker takes the item or nil.
+    Expect(lua.Definitions().Contains("    read Item: any\n"))
+End Function
